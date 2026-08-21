@@ -1,0 +1,18 @@
+bin/
+obj/
+/packages/
+riderModule.iml
+/_ReSharper.Caches/
+
+# JetBrains Rider / ReSharper
+.idea/
+*.DotSettings.user
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Misc
+*.zip
+*.log

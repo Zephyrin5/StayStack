@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Mediator.Abstractions"/>
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="UnitTests"/>
+    </ItemGroup>
+
+</Project>

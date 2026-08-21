@@ -1,0 +1,34 @@
+﻿using Identity.Entities;
+using Identity.Features.Auth.Common;
+using Mediator;
+using Microsoft.AspNetCore.Identity;
+namespace Identity.Features.Auth.RefreshToken;
+
+public class RefreshTokenHandler(
+    UserManager<ApplicationUser> userManager,
+    IAuthTokenProvider authTokenProvider) : IRequestHandler<RefreshTokenRequest, RefreshTokenResponse>
+{
+    public async ValueTask<RefreshTokenResponse> Handle(RefreshTokenRequest request, CancellationToken cancellationToken)
+    {
+        // 1. Validate the refresh token
+        Guid userId = await authTokenProvider.ValidateRefreshToken(request.RefreshToken, cancellationToken);
+
+        // 2. Get user roles
+        ApplicationUser user = await userManager.FindByIdAsync(userId.ToString())
+                               ?? throw new UnauthorizedAccessException("Invalid refresh token.");
+        var roles = await userManager.GetRolesAsync(user);
+
+
+        // 3. Generate a brand-new Access Token and Refresh Token pair
+        string newAccessToken = authTokenProvider.GenerateJwtToken(user, roles);
+        string newRefreshToken = await authTokenProvider.GenerateRefreshToken(userId, cancellationToken);
+
+
+        // 4. Return the new token pair
+        return new RefreshTokenResponse
+        {
+            AccessToken = newAccessToken,
+            RefreshToken = newRefreshToken
+        };
+    }
+}

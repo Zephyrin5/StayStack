@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+
+      - name: Restore
+        run: dotnet restore StayStack.slnx
+
+      - name: Build
+        run: dotnet build StayStack.slnx --no-restore -c Release
+
+      # Neither test project uses "dotnet test" - the .NET 10 SDK's testing
+      # platform (Microsoft.Testing.Platform, what xunit v3 builds on here)
+      # replaces the old VSTest-based runner "dotnet test" still expects by
+      # default, and running the self-executing test host directly is the
+      # documented way to opt in rather than fighting that mismatch.
+      - name: Run unit tests
+        run: dotnet tests/artifacts/bin/UnitTests/Release/net10.0/UnitTests.dll
+
+      # Runs against an ephemeral Postgres container (Testcontainers) that
+      # each test class starts itself - ubuntu-latest ships Docker
+      # pre-installed and running, so no extra service setup is needed here.
+      - name: Run integration tests
+        run: dotnet tests/artifacts/bin/IntegrationTests/Release/net10.0/IntegrationTests.dll

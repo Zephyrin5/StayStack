@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="FluentValidation"/>
+        <PackageReference Include="Microsoft.Bcl.TimeProvider"/>
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite"/>
+        <PackageReference Include="Microsoft.NET.Test.Sdk"/>
+        <PackageReference Include="Moq"/>
+        <PackageReference Include="xunit.v3.assert"/>
+        <PackageReference Include="xunit.v3.core"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Using Include="Xunit"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\Core\SeedWork\SeedWork.csproj"/>
+        <ProjectReference Include="..\..\src\Infrastructure\Identity\Identity.csproj"/>
+        <ProjectReference Include="..\..\src\Infrastructure\Persistence\Persistence.csproj"/>
+        <ProjectReference Include="..\..\src\Modules\Catalog\Catalog.csproj"/>
+        <ProjectReference Include="..\..\src\Modules\Hosts\Hosts.csproj"/>
+    </ItemGroup>
+
+</Project>

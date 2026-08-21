@@ -1,0 +1,24 @@
+using BuildingBlocks.Localization;
+using Hosts.Entities;
+using Mediator;
+using Microsoft.Extensions.Options;
+using SeedWork.ValueObjects;
+namespace Hosts.Features.CreateHost;
+
+public class CreateHostHandler(AppHostsDbContext dbContext, IOptions<LocalizationSettings> localizationSettings)
+    : IRequestHandler<CreateHostRequest, CreateHostResponse>
+{
+    public async ValueTask<CreateHostResponse> Handle(CreateHostRequest request, CancellationToken cancellationToken)
+    {
+        LocalizedText? displayName = request.DisplayName is { Count: > 0 }
+            ? LocalizedText.Create(request.DisplayName, localizationSettings.Value.DefaultCulture)
+            : null;
+
+        Host host = Host.Create(request.BusinessName, request.ContactEmail, request.ContactPhone, displayName);
+
+        dbContext.Hosts.Add(host);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new CreateHostResponse { HostId = host.Id };
+    }
+}
