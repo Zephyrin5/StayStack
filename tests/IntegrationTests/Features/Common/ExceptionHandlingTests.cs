@@ -1,10 +1,19 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Testing;
 using System.Net;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Common;
 
-public class ExceptionHandlingTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+// Was IClassFixture<WebApplicationFactory<Program>> - a bare, unconfigured
+// factory that never calls UseEnvironment("Testing"), so it fell back to
+// WebApplicationFactory's own default environment. That happened to satisfy
+// IsDevelopment(), which picks up AddUserSecrets (see Program.cs) - so this
+// only ever passed locally because of real user-secrets already configured
+// on this machine from unrelated work earlier, never on a clean CI runner
+// with none. Using the shared IntegrationTestWebApplicationFactory instead
+// gives it the same "Testing" environment (and appsettings.Testing.json JWT
+// key) every other integration test already relies on.
+[Collection("Integration Tests")]
+public class ExceptionHandlingTests(IntegrationTestWebApplicationFactory factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
 
