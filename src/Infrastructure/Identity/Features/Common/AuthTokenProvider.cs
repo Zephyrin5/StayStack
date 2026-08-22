@@ -105,6 +105,22 @@ public class AuthTokenProvider(AppIdentityDbContext dbContext, IOptions<AuthToke
         return storedToken.UserId;
     }
 
+    public async Task RevokeRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken)
+    {
+        string tokenHash = HashToken(refreshToken);
+
+        Entities.RefreshToken? storedToken = await dbContext.RefreshTokens
+            .SingleOrDefaultAsync(rt => rt.TokenHash == tokenHash, cancellationToken);
+
+        if (storedToken is null || storedToken.IsRevoked)
+        {
+            return;
+        }
+
+        storedToken.IsRevoked = true;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     private static string HashToken(string token)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(token);

@@ -1,4 +1,5 @@
-﻿using Identity.Entities;
+﻿using BuildingBlocks.Exceptions;
+using Identity.Entities;
 using Identity.Features.Auth.Common;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
@@ -10,8 +11,15 @@ public class RefreshTokenHandler(
 {
     public async ValueTask<RefreshTokenResponse> Handle(RefreshTokenRequest request, CancellationToken cancellationToken)
     {
+        // RefreshTokenEndpoint resolves body-or-cookie before calling
+        // here, but RefreshToken is still nullable at this layer (a
+        // cookie-mode caller with no cookie and no body reaches here with
+        // neither) - same "invalid refresh token" 401 either way, rather
+        // than a separate manual check in the endpoint.
+        string refreshToken = request.RefreshToken ?? throw new InvalidRefreshTokenException();
+
         // 1. Validate the refresh token
-        Guid userId = await authTokenProvider.ValidateRefreshToken(request.RefreshToken, cancellationToken);
+        Guid userId = await authTokenProvider.ValidateRefreshToken(refreshToken, cancellationToken);
 
         // 2. Get user roles
         ApplicationUser user = await userManager.FindByIdAsync(userId.ToString())

@@ -59,15 +59,22 @@ public class RefreshTokenTests(IntegrationTestWebApplicationFactory factory)
         RefreshTokenResponse? refreshResult = await response.Content.ReadFromJsonAsync<RefreshTokenResponse>(TestContext.Current.CancellationToken);
         Assert.NotNull(refreshResult);
         Assert.NotEmpty(refreshResult.AccessToken);
-        Assert.NotEmpty(refreshResult.RefreshToken);
+        Assert.False(string.IsNullOrEmpty(refreshResult.RefreshToken));
 
         // Verify token rotation yielded a new refresh token
         Assert.NotEqual(signInResult.RefreshToken, refreshResult.RefreshToken);
     }
 
     [Fact]
-    public async Task RefreshToken_ShouldReturn400_WhenTokenIsEmpty()
+    public async Task RefreshToken_ShouldReturn401_WhenTokenIsEmptyAndNoCookiePresent()
     {
+        // RefreshToken is optional now (cookie-mode callers send no body -
+        // see RefreshTokenRequest's own comment), so an empty/missing
+        // token with nothing in the cookie jar either is a 401 "invalid
+        // refresh token," not a 400 validation failure - there's no
+        // longer a structural rule that rejects this before it reaches
+        // the handler.
+
         // Arrange
         RefreshTokenRequest refreshRequest = new RefreshTokenRequest { RefreshToken = string.Empty };
 
@@ -76,7 +83,7 @@ public class RefreshTokenTests(IntegrationTestWebApplicationFactory factory)
             await _client.PostAsJsonAsync("/api/auth/refresh-token", refreshRequest, TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]

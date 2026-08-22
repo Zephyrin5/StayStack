@@ -22,11 +22,12 @@ public static class ApiServicesRegistration
     {
         services.AddScoped<ICurrentLanguageProvider, CultureInfoLanguageProvider>();
 
-        // Bearer-token auth (Authorization header), not cookies, so no
-        // AllowCredentials() needed - the browser client just needs the
-        // dev origin allowed to read responses at all. Origins come from
-        // config rather than being hardcoded so prod can set a different
-        // list without a code change.
+        // AllowCredentials() is required for the browser to send/receive
+        // the httpOnly refresh-token cookie (see Api.Security.AuthCookies,
+        // cookie-mode auth) - incompatible with AllowAnyOrigin(), which is
+        // fine since origins are already an explicit config list, never a
+        // wildcard. Origins come from config rather than being hardcoded
+        // so prod can set a different list without a code change.
         string[] allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
         services.AddCors(options =>
         {
@@ -34,7 +35,8 @@ public static class ApiServicesRegistration
             {
                 policy.WithOrigins(allowedOrigins)
                     .AllowAnyHeader()
-                    .WithMethods("GET", "POST", "PUT", "DELETE");
+                    .WithMethods("GET", "POST", "PUT", "DELETE")
+                    .AllowCredentials();
             });
         });
 
