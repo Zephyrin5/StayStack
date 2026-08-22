@@ -1,6 +1,5 @@
 using FastEndpoints;
 using FluentValidation;
-
 namespace Catalog.Features.CreateProperty;
 
 public sealed class CreatePropertyRequestValidator : Validator<CreatePropertyRequest>

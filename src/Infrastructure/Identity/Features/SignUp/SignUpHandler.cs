@@ -1,7 +1,6 @@
 using BuildingBlocks.Exceptions;
 using Identity.Entities;
 using Identity.Features.Auth.Common;
-using Identity.Features.SignUp;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
 namespace Identity.Features.Auth.SignUp;

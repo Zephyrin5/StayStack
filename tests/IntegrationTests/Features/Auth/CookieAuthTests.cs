@@ -39,7 +39,7 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
 
     private static string? GetSetCookieValue(HttpResponseMessage response, string cookieName)
     {
-        if (!response.Headers.TryGetValues("Set-Cookie", out IEnumerable<string>? values))
+        if (!response.Headers.TryGetValues("Set-Cookie", out var values))
         {
             return null;
         }
@@ -74,8 +74,8 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.True(response.Headers.TryGetValues("Set-Cookie", out IEnumerable<string>? setCookieHeaders));
-        string cookieHeader = Assert.Single(setCookieHeaders!);
+        Assert.True(response.Headers.TryGetValues("Set-Cookie", out var setCookieHeaders));
+        string cookieHeader = Assert.Single(setCookieHeaders);
         Assert.Contains(CookieName, cookieHeader);
         Assert.Contains("httponly", cookieHeader, StringComparison.OrdinalIgnoreCase);
 
@@ -125,10 +125,8 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(originalCookieValue);
 
         // Act: empty body, cookie carries the token (same HttpClient, cookie jar applied automatically)
-        using HttpRequestMessage refreshRequest = new HttpRequestMessage(HttpMethod.Post, "/api/auth/refresh-token?useCookies=true")
-        {
-            Content = JsonContent.Create(new RefreshTokenRequest())
-        };
+        using HttpRequestMessage refreshRequest = new HttpRequestMessage(HttpMethod.Post, "/api/auth/refresh-token?useCookies=true");
+        refreshRequest.Content = JsonContent.Create(new RefreshTokenRequest());
         HttpResponseMessage refreshResponse = await client.SendAsync(refreshRequest);
 
         // Assert: succeeded and rotated to a new cookie value
@@ -143,10 +141,8 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
 
         // Act: replay the ORIGINAL (now-rotated-away) cookie value explicitly on a fresh client
         using HttpClient replayClient = factory.CreateClient();
-        using HttpRequestMessage replayRequest = new HttpRequestMessage(HttpMethod.Post, "/api/auth/refresh-token?useCookies=true")
-        {
-            Content = JsonContent.Create(new RefreshTokenRequest())
-        };
+        using HttpRequestMessage replayRequest = new HttpRequestMessage(HttpMethod.Post, "/api/auth/refresh-token?useCookies=true");
+        replayRequest.Content = JsonContent.Create(new RefreshTokenRequest());
         replayRequest.Headers.Add("Cookie", $"{CookieName}={originalCookieValue}");
         HttpResponseMessage replayResponse = await replayClient.SendAsync(replayRequest);
 
@@ -186,8 +182,8 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert: cookie cleared in the response
         Assert.Equal(HttpStatusCode.OK, signOutResponse.StatusCode);
-        Assert.True(signOutResponse.Headers.TryGetValues("Set-Cookie", out IEnumerable<string>? setCookieHeaders));
-        string cookieHeader = Assert.Single(setCookieHeaders!);
+        Assert.True(signOutResponse.Headers.TryGetValues("Set-Cookie", out var setCookieHeaders));
+        string cookieHeader = Assert.Single(setCookieHeaders);
         Assert.Contains(CookieName, cookieHeader);
 
         // Act: the revoked token can no longer refresh (same client - cookie jar already cleared,

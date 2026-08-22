@@ -1,5 +1,6 @@
 using Bogus;
 using Catalog;
+using Catalog.Entities;
 using Catalog.Features.AdminCreateProperty;
 using Catalog.Features.CreateProperty;
 using Catalog.Features.CreateUnit;
@@ -48,17 +49,16 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestContext.Current.CancellationToken);
         Assert.NotNull(signInResult?.AccessToken);
 
-        using HttpRequestMessage becomeHostRequest = new HttpRequestMessage(HttpMethod.Post, "/api/hosts/become")
+        using HttpRequestMessage becomeHostRequest = new HttpRequestMessage(HttpMethod.Post, "/api/hosts/become");
+        becomeHostRequest.Content = JsonContent.Create(new BecomeHostRequest
         {
-            Content = JsonContent.Create(new BecomeHostRequest
-            {
-                BusinessName = _faker.Company.CompanyName(),
-                ContactEmail = _faker.Internet.Email()
-            })
-        };
+            BusinessName = _faker.Company.CompanyName(),
+            ContactEmail = _faker.Internet.Email()
+        });
         becomeHostRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", signInResult.AccessToken);
         HttpResponseMessage becomeHostResponse = await _client.SendAsync(becomeHostRequest, TestContext.Current.CancellationToken);
-        BecomeHostResponse? becomeHostResult = await becomeHostResponse.Content.ReadFromJsonAsync<BecomeHostResponse>(TestContext.Current.CancellationToken);
+        BecomeHostResponse? becomeHostResult =
+            await becomeHostResponse.Content.ReadFromJsonAsync<BecomeHostResponse>(TestContext.Current.CancellationToken);
         Assert.NotNull(becomeHostResult?.AccessToken);
 
         // Reissued token from BecomeHost, not the original sign-in one -
@@ -112,7 +112,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         // Read the HostId back from the database rather than decoding the
         // JWT - simpler, and this test only needs the id, not the claim.
         using IServiceScope seedScope = factory.Services.CreateScope();
-        var identityDb = seedScope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+        AppIdentityDbContext identityDb = seedScope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
         Guid hostId = await identityDb.Users
             .Where(u => u.HostId != null)
             .OrderByDescending(u => u.Id)
@@ -147,7 +147,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
 
         using IServiceScope assertScope = factory.Services.CreateScope();
         AppCatalogDbContext db = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
-        var property = await db.Properties.SingleAsync(p => p.Id == result.PropertyId, TestContext.Current.CancellationToken);
+        Property property = await db.Properties.SingleAsync(p => p.Id == result.PropertyId, TestContext.Current.CancellationToken);
         Assert.Equal(hostId, property.HostId);
     }
 
@@ -163,7 +163,8 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
                 Name = new Dictionary<string, string> { { "en", "Marina Hotel" } }
             }, hostAccessToken),
             TestContext.Current.CancellationToken);
-        CreatePropertyResponse? property = await propertyResponse.Content.ReadFromJsonAsync<CreatePropertyResponse>(TestContext.Current.CancellationToken);
+        CreatePropertyResponse? property =
+            await propertyResponse.Content.ReadFromJsonAsync<CreatePropertyResponse>(TestContext.Current.CancellationToken);
         Assert.NotNull(property);
 
         CreateUnitRequest request = new CreateUnitRequest
@@ -188,7 +189,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
 
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
-        var unit = await db.Units.SingleAsync(u => u.Id == result.UnitId, TestContext.Current.CancellationToken);
+        Unit unit = await db.Units.SingleAsync(u => u.Id == result.UnitId, TestContext.Current.CancellationToken);
         Assert.Equal(property.PropertyId, unit.PropertyId);
     }
 }

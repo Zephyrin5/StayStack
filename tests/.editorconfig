@@ -1,0 +1,6 @@
+# Apply this rule to all C# files inside this folder/project
+[*.cs]
+
+# Disable the "Identifiers should not contain underscores" rule
+dotnet_diagnostic.CA1707.severity = none
+resharper_nullable_warning_suppression_is_used_highlighting = none

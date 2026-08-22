@@ -22,7 +22,7 @@ public class CreatePropertyRequestValidatorTests
     {
         CreatePropertyRequest request = CreateValidRequest();
 
-        TestValidationResult<CreatePropertyRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -32,7 +32,7 @@ public class CreatePropertyRequestValidatorTests
     {
         CreatePropertyRequest request = CreateValidRequest() with { City = null };
 
-        TestValidationResult<CreatePropertyRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveValidationErrorFor(x => x.City);
     }
@@ -42,7 +42,7 @@ public class CreatePropertyRequestValidatorTests
     {
         CreatePropertyRequest request = CreateValidRequest() with { PropertyType = (PropertyType)99 };
 
-        TestValidationResult<CreatePropertyRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.PropertyType);
     }
@@ -52,7 +52,7 @@ public class CreatePropertyRequestValidatorTests
     {
         CreatePropertyRequest request = CreateValidRequest() with { Name = new Dictionary<string, string>() };
 
-        TestValidationResult<CreatePropertyRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.Name);
     }
@@ -62,7 +62,7 @@ public class CreatePropertyRequestValidatorTests
     {
         CreatePropertyRequest request = CreateValidRequest() with { City = new string('a', 101) };
 
-        TestValidationResult<CreatePropertyRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.City);
     }

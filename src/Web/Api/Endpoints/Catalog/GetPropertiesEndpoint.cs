@@ -1,7 +1,6 @@
 using Catalog.Features.GetProperties;
 using FastEndpoints;
 using Mediator;
-
 namespace Api.Endpoints.Catalog;
 
 public class GetPropertiesEndpoint(IMediator mediator) : Endpoint<GetPropertiesRequest, GetPropertiesResponse>

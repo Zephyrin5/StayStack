@@ -29,9 +29,9 @@ public class RefreshTokenEndpoint(
         {
             s.Summary = "Rotate refresh token";
             s.Description = "Rotates the refresh token and returns a new access and refresh token pair. A " +
-                             "cookie-mode caller (see SignInEndpoint) can omit the body entirely and pass " +
-                             "?useCookies=true - the token is read from the httpOnly cookie and the response " +
-                             "rotates that cookie instead of returning the new refresh token in the body.";
+                            "cookie-mode caller (see SignInEndpoint) can omit the body entirely and pass " +
+                            "?useCookies=true - the token is read from the httpOnly cookie and the response " +
+                            "rotates that cookie instead of returning the new refresh token in the body.";
             s.ExampleRequest = new RefreshTokenRequest
                 { RefreshToken = "rt_live_9f8d7c6b5a43210fedcba9876543210f19a28b7e" }; // Pre-populates UI examples
             s.Response<RefreshTokenResponse>(200, "Tokens successfully rotated.");
@@ -53,7 +53,7 @@ public class RefreshTokenEndpoint(
         // Execute the business logic via your handler - a null token here
         // reaches RefreshTokenHandler's own guard, which throws the same
         // InvalidRefreshTokenException (401) a bad token would.
-        RefreshTokenResponse result = await mediator.Send(req with { RefreshToken = refreshToken }, ct);
+        RefreshTokenResponse result = await mediator.Send(new RefreshTokenRequest { RefreshToken = refreshToken }, ct);
 
         if (cookieAuth)
         {

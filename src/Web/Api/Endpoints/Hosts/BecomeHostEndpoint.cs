@@ -22,9 +22,9 @@ public class BecomeHostEndpoint(
         {
             s.Summary = "Add hosting capability to the caller's existing account";
             s.Description = "Creates a Host record and links it to the caller's account, adding the Host role. " +
-                             "Returns reissued tokens carrying the new host_id claim. Pass ?useCookies=true if " +
-                             "the caller's session is cookie-mode (see SignInEndpoint) to rotate that cookie " +
-                             "instead of returning the new refresh token in the body.";
+                            "Returns reissued tokens carrying the new host_id claim. Pass ?useCookies=true if " +
+                            "the caller's session is cookie-mode (see SignInEndpoint) to rotate that cookie " +
+                            "instead of returning the new refresh token in the body.";
             s.Response<BecomeHostResponse>(200, "Hosting enabled.");
             s.Response<ValidationProblemDetails>(400, "Validation failed.");
             s.Response<ProblemDetails>(401, "Not authenticated.");
@@ -38,7 +38,7 @@ public class BecomeHostEndpoint(
 
         if (HttpContext.Request.WantsCookieAuth())
         {
-            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken!, tokenSettings.Value);
+            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken ?? string.Empty, tokenSettings.Value);
             result = result with { RefreshToken = null };
         }
 

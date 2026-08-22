@@ -4,7 +4,6 @@ using Hosts.Contracts;
 using Mediator;
 using Microsoft.Extensions.Options;
 using SeedWork.ValueObjects;
-
 namespace Catalog.Features.CreateProperty;
 
 public class CreatePropertyHandler(

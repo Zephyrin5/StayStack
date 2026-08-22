@@ -19,7 +19,7 @@ public class CreateUnitEndpoint(IMediator mediator) : Endpoint<CreateUnitRequest
         {
             s.Summary = "Create a new unit under a property";
             s.Description = "A Host may only create units under their own property; an Administrator may " +
-                             "target any property.";
+                            "target any property.";
             s.Response<CreateUnitResponse>(200, "Unit created.");
             s.Response<ValidationProblemDetails>(400, "Validation failed.");
             s.Response<ProblemDetails>(404, "Property not found (or belongs to a different host).");

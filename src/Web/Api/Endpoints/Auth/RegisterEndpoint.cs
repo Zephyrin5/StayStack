@@ -2,7 +2,6 @@ using Api.Security;
 using FastEndpoints;
 using Identity.Configurations;
 using Identity.Features.Auth.SignUp;
-using Identity.Features.SignUp;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;

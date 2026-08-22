@@ -1,6 +1,5 @@
 using Mediator;
 using SeedWork.Enums;
-
 namespace Catalog.Features.CreateProperty;
 
 // No HostId here, deliberately - this endpoint is Host-only, and HostId
@@ -11,6 +10,6 @@ namespace Catalog.Features.CreateProperty;
 public record CreatePropertyRequest : IRequest<CreatePropertyResponse>
 {
     public PropertyType PropertyType { get; init; }
-    public Dictionary<string, string> Name { get; init; } = new();
+    public Dictionary<string, string> Name { get; init; } = new Dictionary<string, string>();
     public string? City { get; init; }
 }

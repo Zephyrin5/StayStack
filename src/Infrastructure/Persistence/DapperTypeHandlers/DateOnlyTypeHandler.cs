@@ -1,5 +1,6 @@
 ﻿using Dapper;
 using System.Data;
+using System.Globalization;
 namespace Persistence.DapperTypeHandlers;
 
 public class DateOnlyTypeHandler : SqlMapper.TypeHandler<DateOnly>
@@ -16,8 +17,8 @@ public class DateOnlyTypeHandler : SqlMapper.TypeHandler<DateOnly>
         {
             DateOnly d => d, // <-- Handles native Npgsql DateOnly objects
             DateTime dt => DateOnly.FromDateTime(dt),
-            string s => DateOnly.Parse(s),
-            _ => throw new InvalidCastException($"Cannot convert {value?.GetType()} to DateOnly.")
+            string s => DateOnly.Parse(s, CultureInfo.InvariantCulture),
+            _ => throw new InvalidCastException($"Cannot convert {value.GetType()} to DateOnly.")
         };
     }
 }

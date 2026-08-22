@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Persistence;
+using Persistence.Interceptors;
 namespace Catalog;
 
 public static class CatalogServicesRegistration

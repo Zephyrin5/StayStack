@@ -20,8 +20,8 @@ public class SignOutEndpoint(IMediator mediator) : Endpoint<SignOutRequest, Sign
         {
             s.Summary = "Sign out";
             s.Description = "Revokes the caller's refresh token (body or, for a cookie-mode session, the " +
-                             "httpOnly cookie - see SignInEndpoint) and clears that cookie if present. Always " +
-                             "succeeds - an already-invalid or missing token has nothing left to revoke.";
+                            "httpOnly cookie - see SignInEndpoint) and clears that cookie if present. Always " +
+                            "succeeds - an already-invalid or missing token has nothing left to revoke.";
             s.Response<SignOutResponse>(200, "Signed out.");
         });
     }
@@ -30,7 +30,7 @@ public class SignOutEndpoint(IMediator mediator) : Endpoint<SignOutRequest, Sign
     {
         string? refreshToken = req.RefreshToken ?? HttpContext.Request.GetRefreshTokenFromCookie();
 
-        SignOutResponse result = await mediator.Send(req with { RefreshToken = refreshToken }, ct);
+        SignOutResponse result = await mediator.Send(new SignOutRequest { RefreshToken = refreshToken }, ct);
 
         // Unconditional, not just when a cookie was found - a token-mode
         // caller that happens to pass ?useCookies=true here (or just has

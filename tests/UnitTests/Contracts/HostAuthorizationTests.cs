@@ -56,8 +56,7 @@ public class HostAuthorizationTests
         Guid resourceHostId = Guid.NewGuid();
         Guid resourceKey = Guid.NewGuid();
 
-        NotFoundException exception = Assert.Throws<NotFoundException>(
-            () => _sut.RequireOwnership(resourceHostId, "Property", resourceKey));
+        NotFoundException exception = Assert.Throws<NotFoundException>(() => _sut.RequireOwnership(resourceHostId, "Property", resourceKey));
         Assert.Equal((int)HttpStatusCode.NotFound, exception.StatusCode);
     }
 
@@ -69,7 +68,6 @@ public class HostAuthorizationTests
         // NotAHostException, not get as far as the ownership comparison.
         _currentUserProviderMock.Setup(p => p.HostId).Returns((Guid?)null);
 
-        Assert.Throws<NotAHostException>(
-            () => _sut.RequireOwnership(Guid.NewGuid(), "Property", Guid.NewGuid()));
+        Assert.Throws<NotAHostException>(() => _sut.RequireOwnership(Guid.NewGuid(), "Property", Guid.NewGuid()));
     }
 }

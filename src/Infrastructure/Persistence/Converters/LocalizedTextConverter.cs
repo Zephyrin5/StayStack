@@ -1,9 +1,11 @@
-﻿using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+﻿using JetBrains.Annotations;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Persistence.Serialization;
 using SeedWork.ValueObjects;
 using System.Text.Json;
 namespace Persistence.Converters;
 
+[UsedImplicitly]
 public class LocalizedTextConverter() : ValueConverter<
     LocalizedText,
     string>(v => JsonSerializer.Serialize(v.Values, PersistenceJsonSerializerContext.Default.IReadOnlyDictionaryStringString),

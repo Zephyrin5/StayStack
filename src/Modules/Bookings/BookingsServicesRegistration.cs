@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Persistence;
+using Persistence.Interceptors;
 namespace Bookings;
 
 public static class BookingsServicesRegistration

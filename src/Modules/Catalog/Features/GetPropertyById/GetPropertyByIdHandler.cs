@@ -2,7 +2,6 @@ using BuildingBlocks.Exceptions;
 using Catalog.Entities;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
-using Unit = Catalog.Entities.Unit;
 namespace Catalog.Features.GetPropertyById;
 
 public class GetPropertyByIdHandler(AppCatalogDbContext dbContext) : IRequestHandler<GetPropertyByIdRequest, GetPropertyByIdResponse>
@@ -10,10 +9,10 @@ public class GetPropertyByIdHandler(AppCatalogDbContext dbContext) : IRequestHan
     public async ValueTask<GetPropertyByIdResponse> Handle(GetPropertyByIdRequest request, CancellationToken cancellationToken)
     {
         Property property = await dbContext.Properties.AsNoTracking()
-                                 .SingleOrDefaultAsync(p => p.Id == request.PropertyId, cancellationToken)
-                             ?? throw new NotFoundException(nameof(Property), request.PropertyId);
+                                .SingleOrDefaultAsync(p => p.Id == request.PropertyId, cancellationToken)
+                            ?? throw new NotFoundException(nameof(Property), request.PropertyId);
 
-        List<Unit> units = await dbContext.Units.AsNoTracking()
+        var units = await dbContext.Units.AsNoTracking()
             .Where(u => u.PropertyId == request.PropertyId)
             .ToListAsync(cancellationToken);
 

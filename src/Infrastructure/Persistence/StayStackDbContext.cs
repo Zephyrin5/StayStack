@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Persistence.Comparers;
 using Persistence.Converters;
 using SeedWork.ValueObjects;
+using System.Diagnostics.CodeAnalysis;
 namespace Persistence;
 
 /// <summary>
@@ -11,6 +12,14 @@ namespace Persistence;
 ///     forgetting to call ApplySoftDeleteQueryFilter() isn't possible,
 ///     because there's nowhere else to put the entity configuration calls.
 /// </summary>
+[UnconditionalSuppressMessage(
+    "Trimming",
+    "IL2026:Using member 'Microsoft.EntityFrameworkCore.DbContext.DbContext(DbContextOptions)' which has 'RequiresUnreferencedCodeAttribute'",
+    Justification = "EF Core is initialized safely for standard runtime.")]
+[UnconditionalSuppressMessage(
+    "AOT",
+    "IL3050:Using member 'Microsoft.EntityFrameworkCore.DbContext.DbContext(DbContextOptions)' which has 'RequiresDynamicCodeAttribute'",
+    Justification = "Not utilizing Native AOT execution.")]
 public abstract class StayStackDbContext(DbContextOptions options) : DbContext(options)
 {
     protected sealed override void OnModelCreating(ModelBuilder modelBuilder)

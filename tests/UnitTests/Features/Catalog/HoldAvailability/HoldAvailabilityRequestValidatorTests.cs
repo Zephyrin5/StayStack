@@ -4,9 +4,9 @@ namespace UnitTests.Features.Catalog.HoldAvailability;
 
 public class HoldAvailabilityRequestValidatorTests
 {
-    private readonly HoldAvailabilityRequestValidator _sut = new HoldAvailabilityRequestValidator();
 
     private static readonly DateOnly Today = DateOnly.FromDateTime(DateTime.UtcNow);
+    private readonly HoldAvailabilityRequestValidator _sut = new HoldAvailabilityRequestValidator();
 
     private static HoldAvailabilityRequest CreateValidRequest()
     {
@@ -24,7 +24,7 @@ public class HoldAvailabilityRequestValidatorTests
     {
         HoldAvailabilityRequest request = CreateValidRequest();
 
-        TestValidationResult<HoldAvailabilityRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -34,7 +34,7 @@ public class HoldAvailabilityRequestValidatorTests
     {
         HoldAvailabilityRequest request = CreateValidRequest() with { UnitId = Guid.Empty };
 
-        TestValidationResult<HoldAvailabilityRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.UnitId);
     }
@@ -44,7 +44,7 @@ public class HoldAvailabilityRequestValidatorTests
     {
         HoldAvailabilityRequest request = CreateValidRequest() with { CheckOut = Today };
 
-        TestValidationResult<HoldAvailabilityRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.CheckOut);
     }
@@ -56,7 +56,7 @@ public class HoldAvailabilityRequestValidatorTests
     {
         HoldAvailabilityRequest request = CreateValidRequest() with { GuestCount = guestCount };
 
-        TestValidationResult<HoldAvailabilityRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.GuestCount);
     }

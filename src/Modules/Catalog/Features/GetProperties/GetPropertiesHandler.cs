@@ -1,4 +1,3 @@
-using Catalog.Entities;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 namespace Catalog.Features.GetProperties;
@@ -7,7 +6,7 @@ public class GetPropertiesHandler(AppCatalogDbContext dbContext) : IRequestHandl
 {
     public async ValueTask<GetPropertiesResponse> Handle(GetPropertiesRequest request, CancellationToken cancellationToken)
     {
-        IQueryable<Property> query = dbContext.Properties.AsNoTracking();
+        var query = dbContext.Properties.AsNoTracking();
 
         if (request.City is not null)
         {
@@ -23,7 +22,7 @@ public class GetPropertiesHandler(AppCatalogDbContext dbContext) : IRequestHandl
         // value-converted jsonb column via StayStackDbContext's global
         // convention), and EF Core can't translate .Values access on a
         // converted CLR type into SQL inside a server-side .Select().
-        List<Property> properties = await query.ToListAsync(cancellationToken);
+        var properties = await query.ToListAsync(cancellationToken);
 
         return new GetPropertiesResponse
         {

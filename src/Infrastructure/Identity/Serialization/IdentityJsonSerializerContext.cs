@@ -3,7 +3,6 @@ using Identity.Features.Auth.SignIn;
 using Identity.Features.Auth.SignOut;
 using Identity.Features.Auth.SignUp;
 using Identity.Features.BecomeHost;
-using Identity.Features.SignUp;
 using System.Text.Json.Serialization;
 namespace Identity.Serialization;
 

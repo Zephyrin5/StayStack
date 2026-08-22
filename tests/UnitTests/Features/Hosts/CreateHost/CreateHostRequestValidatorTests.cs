@@ -22,7 +22,7 @@ public class CreateHostRequestValidatorTests
     {
         CreateHostRequest request = CreateValidRequest();
 
-        TestValidationResult<CreateHostRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -35,7 +35,7 @@ public class CreateHostRequestValidatorTests
         // constructor comment.
         CreateHostRequest request = CreateValidRequest() with { DisplayName = null };
 
-        TestValidationResult<CreateHostRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -45,7 +45,7 @@ public class CreateHostRequestValidatorTests
     {
         CreateHostRequest request = CreateValidRequest() with { BusinessName = "" };
 
-        TestValidationResult<CreateHostRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.BusinessName);
     }
@@ -57,7 +57,7 @@ public class CreateHostRequestValidatorTests
     {
         CreateHostRequest request = CreateValidRequest() with { ContactEmail = email };
 
-        TestValidationResult<CreateHostRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.ContactEmail);
     }
@@ -67,7 +67,7 @@ public class CreateHostRequestValidatorTests
     {
         CreateHostRequest request = CreateValidRequest() with { ContactPhone = new string('1', 51) };
 
-        TestValidationResult<CreateHostRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.ContactPhone);
     }

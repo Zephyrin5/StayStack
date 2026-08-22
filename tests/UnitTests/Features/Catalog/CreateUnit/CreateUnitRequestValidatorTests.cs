@@ -25,7 +25,7 @@ public class CreateUnitRequestValidatorTests
     {
         CreateUnitRequest request = CreateValidRequest();
 
-        TestValidationResult<CreateUnitRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -35,7 +35,7 @@ public class CreateUnitRequestValidatorTests
     {
         CreateUnitRequest request = CreateValidRequest() with { PropertyId = Guid.Empty };
 
-        TestValidationResult<CreateUnitRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.PropertyId);
     }
@@ -45,7 +45,7 @@ public class CreateUnitRequestValidatorTests
     {
         CreateUnitRequest request = CreateValidRequest() with { UnitType = (UnitType)99 };
 
-        TestValidationResult<CreateUnitRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.UnitType);
     }
@@ -55,7 +55,7 @@ public class CreateUnitRequestValidatorTests
     {
         CreateUnitRequest request = CreateValidRequest() with { Name = new Dictionary<string, string>() };
 
-        TestValidationResult<CreateUnitRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.Name);
     }
@@ -67,7 +67,7 @@ public class CreateUnitRequestValidatorTests
     {
         CreateUnitRequest request = CreateValidRequest() with { MaxOccupancy = maxOccupancy };
 
-        TestValidationResult<CreateUnitRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.MaxOccupancy);
     }
@@ -79,7 +79,7 @@ public class CreateUnitRequestValidatorTests
     {
         CreateUnitRequest request = CreateValidRequest() with { BasePrice = basePrice };
 
-        TestValidationResult<CreateUnitRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.BasePrice);
     }
@@ -91,7 +91,7 @@ public class CreateUnitRequestValidatorTests
     {
         CreateUnitRequest request = CreateValidRequest() with { Currency = currency };
 
-        TestValidationResult<CreateUnitRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.Currency);
     }

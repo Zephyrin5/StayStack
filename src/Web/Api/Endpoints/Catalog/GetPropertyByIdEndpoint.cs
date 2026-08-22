@@ -1,7 +1,6 @@
 using Catalog.Features.GetPropertyById;
 using FastEndpoints;
 using Mediator;
-using Microsoft.AspNetCore.Mvc;
 using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
 namespace Api.Endpoints.Catalog;

@@ -1,5 +1,4 @@
 using BuildingBlocks.Observability;
-using Identity.Features.SignUp;
 using Mediator;
 namespace Identity.Features.Auth.SignUp;
 

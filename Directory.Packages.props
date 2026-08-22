@@ -8,6 +8,7 @@
     <PackageVersion Include="Dapper.AOT" Version="1.0.52" />
     <PackageVersion Include="FastEndpoints.Generator" Version="8.3.0" />
     <PackageVersion Include="FluentValidation" Version="12.1.1" />
+    <PackageVersion Include="JetBrains.Annotations" Version="2026.2.0" />
     <PackageVersion Include="Mediator.Abstractions" Version="3.0.2" />
     <PackageVersion Include="Mediator.SourceGenerator" Version="3.0.2" />
     <PackageVersion Include="Microsoft.Bcl.TimeProvider" Version="10.0.11" />

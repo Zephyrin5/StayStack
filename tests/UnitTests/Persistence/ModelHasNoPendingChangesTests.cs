@@ -20,8 +20,8 @@ public class ModelHasNoPendingChangesTests
     [Fact]
     public void AppIdentityDbContext_HasNoPendingModelChanges()
     {
-        DbContextOptionsBuilder<AppIdentityDbContext> builder = new DbContextOptionsBuilder<AppIdentityDbContext>();
-        builder.ConfigureStayStackDefaults<AppIdentityDbContext>(UnusedConnectionString, "identity", isDevelopment: false);
+        var builder = new DbContextOptionsBuilder<AppIdentityDbContext>();
+        builder.ConfigureStayStackDefaults<AppIdentityDbContext>(UnusedConnectionString, "identity", false);
         using AppIdentityDbContext context = new AppIdentityDbContext(builder.Options);
 
         Assert.False(context.Database.HasPendingModelChanges());
@@ -30,8 +30,8 @@ public class ModelHasNoPendingChangesTests
     [Fact]
     public void AppCatalogDbContext_HasNoPendingModelChanges()
     {
-        DbContextOptionsBuilder<AppCatalogDbContext> builder = new DbContextOptionsBuilder<AppCatalogDbContext>();
-        builder.ConfigureStayStackDefaults<AppCatalogDbContext>(UnusedConnectionString, "catalog", isDevelopment: false);
+        var builder = new DbContextOptionsBuilder<AppCatalogDbContext>();
+        builder.ConfigureStayStackDefaults<AppCatalogDbContext>(UnusedConnectionString, "catalog", false);
         using AppCatalogDbContext context = new AppCatalogDbContext(builder.Options);
 
         Assert.False(context.Database.HasPendingModelChanges());
@@ -40,8 +40,8 @@ public class ModelHasNoPendingChangesTests
     [Fact]
     public void AppHostsDbContext_HasNoPendingModelChanges()
     {
-        DbContextOptionsBuilder<AppHostsDbContext> builder = new DbContextOptionsBuilder<AppHostsDbContext>();
-        builder.ConfigureStayStackDefaults<AppHostsDbContext>(UnusedConnectionString, "hosts", isDevelopment: false);
+        var builder = new DbContextOptionsBuilder<AppHostsDbContext>();
+        builder.ConfigureStayStackDefaults<AppHostsDbContext>(UnusedConnectionString, "hosts", false);
         using AppHostsDbContext context = new AppHostsDbContext(builder.Options);
 
         Assert.False(context.Database.HasPendingModelChanges());
@@ -50,8 +50,8 @@ public class ModelHasNoPendingChangesTests
     [Fact]
     public void AppBookingsDbContext_HasNoPendingModelChanges()
     {
-        DbContextOptionsBuilder<AppBookingsDbContext> builder = new DbContextOptionsBuilder<AppBookingsDbContext>();
-        builder.ConfigureStayStackDefaults<AppBookingsDbContext>(UnusedConnectionString, "bookings", isDevelopment: false);
+        var builder = new DbContextOptionsBuilder<AppBookingsDbContext>();
+        builder.ConfigureStayStackDefaults<AppBookingsDbContext>(UnusedConnectionString, "bookings", false);
         using AppBookingsDbContext context = new AppBookingsDbContext(builder.Options);
 
         Assert.False(context.Database.HasPendingModelChanges());

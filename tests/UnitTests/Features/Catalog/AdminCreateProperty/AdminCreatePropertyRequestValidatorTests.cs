@@ -23,7 +23,7 @@ public class AdminCreatePropertyRequestValidatorTests
     {
         AdminCreatePropertyRequest request = CreateValidRequest();
 
-        TestValidationResult<AdminCreatePropertyRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -33,7 +33,7 @@ public class AdminCreatePropertyRequestValidatorTests
     {
         AdminCreatePropertyRequest request = CreateValidRequest() with { HostId = Guid.Empty };
 
-        TestValidationResult<AdminCreatePropertyRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.HostId);
     }
@@ -43,7 +43,7 @@ public class AdminCreatePropertyRequestValidatorTests
     {
         AdminCreatePropertyRequest request = CreateValidRequest() with { PropertyType = (PropertyType)99 };
 
-        TestValidationResult<AdminCreatePropertyRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.PropertyType);
     }
@@ -53,7 +53,7 @@ public class AdminCreatePropertyRequestValidatorTests
     {
         AdminCreatePropertyRequest request = CreateValidRequest() with { Name = new Dictionary<string, string>() };
 
-        TestValidationResult<AdminCreatePropertyRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.Name);
     }
@@ -63,7 +63,7 @@ public class AdminCreatePropertyRequestValidatorTests
     {
         AdminCreatePropertyRequest request = CreateValidRequest() with { City = new string('a', 101) };
 
-        TestValidationResult<AdminCreatePropertyRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.City);
     }

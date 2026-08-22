@@ -1,5 +1,4 @@
 using Bogus;
-using Catalog;
 using Catalog.Features.CreateProperty;
 using Catalog.Features.CreateUnit;
 using Catalog.Features.GetProperties;
@@ -45,17 +44,16 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestContext.Current.CancellationToken);
         Assert.NotNull(signInResult?.AccessToken);
 
-        using HttpRequestMessage becomeHostRequest = new HttpRequestMessage(HttpMethod.Post, "/api/hosts/become")
+        using HttpRequestMessage becomeHostRequest = new HttpRequestMessage(HttpMethod.Post, "/api/hosts/become");
+        becomeHostRequest.Content = JsonContent.Create(new BecomeHostRequest
         {
-            Content = JsonContent.Create(new BecomeHostRequest
-            {
-                BusinessName = _faker.Company.CompanyName(),
-                ContactEmail = _faker.Internet.Email()
-            })
-        };
+            BusinessName = _faker.Company.CompanyName(),
+            ContactEmail = _faker.Internet.Email()
+        });
         becomeHostRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", signInResult.AccessToken);
         HttpResponseMessage becomeHostResponse = await _client.SendAsync(becomeHostRequest, TestContext.Current.CancellationToken);
-        BecomeHostResponse? becomeHostResult = await becomeHostResponse.Content.ReadFromJsonAsync<BecomeHostResponse>(TestContext.Current.CancellationToken);
+        BecomeHostResponse? becomeHostResult =
+            await becomeHostResponse.Content.ReadFromJsonAsync<BecomeHostResponse>(TestContext.Current.CancellationToken);
         Assert.NotNull(becomeHostResult?.AccessToken);
 
         return (becomeHostResult.AccessToken, becomeHostResult.HostId);
@@ -63,15 +61,13 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
     private async Task<Guid> CreatePropertyAsync(string accessToken, string city, PropertyType propertyType = PropertyType.Hotel)
     {
-        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/catalog/properties")
+        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/catalog/properties");
+        request.Content = JsonContent.Create(new CreatePropertyRequest
         {
-            Content = JsonContent.Create(new CreatePropertyRequest
-            {
-                PropertyType = propertyType,
-                Name = new Dictionary<string, string> { { "en", "Test Property" } },
-                City = city
-            })
-        };
+            PropertyType = propertyType,
+            Name = new Dictionary<string, string> { { "en", "Test Property" } },
+            City = city
+        });
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         HttpResponseMessage response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
         CreatePropertyResponse? result = await response.Content.ReadFromJsonAsync<CreatePropertyResponse>(TestContext.Current.CancellationToken);
@@ -81,18 +77,16 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
     private async Task<Guid> CreateUnitAsync(string accessToken, Guid propertyId)
     {
-        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/catalog/units")
+        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/catalog/units");
+        request.Content = JsonContent.Create(new CreateUnitRequest
         {
-            Content = JsonContent.Create(new CreateUnitRequest
-            {
-                PropertyId = propertyId,
-                UnitType = UnitType.Room,
-                Name = new Dictionary<string, string> { { "en", "Deluxe Room" } },
-                MaxOccupancy = 2,
-                BasePrice = 45.5m,
-                Currency = "KWD"
-            })
-        };
+            PropertyId = propertyId,
+            UnitType = UnitType.Room,
+            Name = new Dictionary<string, string> { { "en", "Deluxe Room" } },
+            MaxOccupancy = 2,
+            BasePrice = 45.5m,
+            Currency = "KWD"
+        });
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         HttpResponseMessage response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
         CreateUnitResponse? result = await response.Content.ReadFromJsonAsync<CreateUnitResponse>(TestContext.Current.CancellationToken);

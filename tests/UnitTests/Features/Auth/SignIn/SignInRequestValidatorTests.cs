@@ -16,7 +16,7 @@ public class SignInRequestValidatorTests
     {
         SignInRequest request = CreateValidRequest();
 
-        TestValidationResult<SignInRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -28,7 +28,7 @@ public class SignInRequestValidatorTests
     {
         SignInRequest request = CreateValidRequest() with { Email = email };
 
-        TestValidationResult<SignInRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.Email);
     }
@@ -41,7 +41,7 @@ public class SignInRequestValidatorTests
         // "was something submitted", not "is it a policy-compliant password".
         SignInRequest request = CreateValidRequest() with { Password = "" };
 
-        TestValidationResult<SignInRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.Password);
     }

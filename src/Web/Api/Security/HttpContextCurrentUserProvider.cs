@@ -1,6 +1,5 @@
-﻿using System.Security.Claims;
-using BuildingBlocks.Identity;
-
+﻿using BuildingBlocks.Identity;
+using System.Security.Claims;
 namespace Api.Security;
 
 public class HttpContextCurrentUserProvider(IHttpContextAccessor httpContextAccessor) : ICurrentUserProvider

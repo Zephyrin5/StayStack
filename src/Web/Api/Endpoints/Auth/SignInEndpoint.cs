@@ -29,9 +29,9 @@ public class SignInEndpoint(
         {
             s.Summary = "Authenticate user";
             s.Description = "Verifies username and password credentials. On success, returns a JWT access token " +
-                             "along with a refresh token. Pass ?useCookies=true to have the refresh token set as " +
-                             "an httpOnly cookie instead of returned in the body - the default (no flag) is " +
-                             "unchanged token-mode behavior for non-browser clients.";
+                            "along with a refresh token. Pass ?useCookies=true to have the refresh token set as " +
+                            "an httpOnly cookie instead of returned in the body - the default (no flag) is " +
+                            "unchanged token-mode behavior for non-browser clients.";
             s.ExampleRequest = new SignInRequest { Email = "user@example.com", Password = "1234" }; // Pre-populates UI examples
             s.Response<SignInResponse>(200, "Authentication successful");
             s.Response<ValidationProblemDetails>(400, "Validation failure detected");

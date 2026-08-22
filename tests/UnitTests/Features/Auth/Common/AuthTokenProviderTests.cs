@@ -50,6 +50,7 @@ public class AuthTokenProviderTests : IDisposable
     {
         _dbContext.Dispose();
         _connection.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     [Fact]

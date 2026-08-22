@@ -144,7 +144,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
         using (IServiceScope seedScope = factory.Services.CreateScope())
         {
             AppIdentityDbContext identityDb = seedScope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
-            IdentityRole<Guid> hostRole = await identityDb.Roles.SingleAsync(
+            var hostRole = await identityDb.Roles.SingleAsync(
                 r => r.Name == "Host", TestContext.Current.CancellationToken);
             identityDb.Roles.Remove(hostRole);
             await identityDb.SaveChangesAsync(TestContext.Current.CancellationToken);

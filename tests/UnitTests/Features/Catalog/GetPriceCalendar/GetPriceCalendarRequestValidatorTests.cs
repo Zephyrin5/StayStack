@@ -4,9 +4,9 @@ namespace UnitTests.Features.Catalog.GetPriceCalendar;
 
 public class GetPriceCalendarRequestValidatorTests
 {
-    private readonly GetPriceCalendarRequestValidator _sut = new GetPriceCalendarRequestValidator();
 
     private static readonly DateOnly Today = DateOnly.FromDateTime(DateTime.UtcNow);
+    private readonly GetPriceCalendarRequestValidator _sut = new GetPriceCalendarRequestValidator();
 
     private static GetPriceCalendarRequest CreateValidRequest()
     {
@@ -23,7 +23,7 @@ public class GetPriceCalendarRequestValidatorTests
     {
         GetPriceCalendarRequest request = CreateValidRequest();
 
-        TestValidationResult<GetPriceCalendarRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -33,7 +33,7 @@ public class GetPriceCalendarRequestValidatorTests
     {
         GetPriceCalendarRequest request = CreateValidRequest() with { UnitId = Guid.Empty };
 
-        TestValidationResult<GetPriceCalendarRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.UnitId);
     }
@@ -43,7 +43,7 @@ public class GetPriceCalendarRequestValidatorTests
     {
         GetPriceCalendarRequest request = CreateValidRequest() with { To = Today };
 
-        TestValidationResult<GetPriceCalendarRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.To);
     }
@@ -53,7 +53,7 @@ public class GetPriceCalendarRequestValidatorTests
     {
         GetPriceCalendarRequest request = CreateValidRequest() with { To = Today.AddDays(-1) };
 
-        TestValidationResult<GetPriceCalendarRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.To);
     }
@@ -63,7 +63,7 @@ public class GetPriceCalendarRequestValidatorTests
     {
         GetPriceCalendarRequest request = CreateValidRequest() with { From = Today, To = Today.AddDays(367) };
 
-        TestValidationResult<GetPriceCalendarRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor("range");
     }
@@ -73,7 +73,7 @@ public class GetPriceCalendarRequestValidatorTests
     {
         GetPriceCalendarRequest request = CreateValidRequest() with { From = Today, To = Today.AddDays(366) };
 
-        TestValidationResult<GetPriceCalendarRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveValidationErrorFor("range");
     }

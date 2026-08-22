@@ -1,6 +1,5 @@
 using Identity.Configurations;
 using Microsoft.Extensions.Primitives;
-
 namespace Api.Security;
 
 /// <summary>
@@ -16,55 +15,64 @@ public static class AuthCookies
 {
     public const string RefreshTokenCookieName = "staystack_refresh_token";
 
-    public static void SetRefreshTokenCookie(
-        this HttpResponse response,
-        string refreshToken,
-        AuthTokenConfiguration tokenSettings)
+    extension(HttpResponse response)
     {
-        response.Cookies.Append(RefreshTokenCookieName, refreshToken, new CookieOptions
+        public void SetRefreshTokenCookie(string refreshToken,
+            AuthTokenConfiguration tokenSettings)
         {
-            HttpOnly = true,
-            // Tied to the actual request scheme, not an environment name
-            // check (e.g. IsDevelopment()) - dev runs over plain HTTP (see
-            // the rest of this session's notes on why - avoiding ASP.NET
-            // Core dev-cert trust issues with Node's fetch), and the
-            // integration test suite's TestServer transport is HTTP too
-            // regardless of environment name ("Testing", not
-            // "Development"). A Secure cookie set on a non-HTTPS response
-            // is correctly refused by any real cookie jar (browser or
-            // HttpClient), so this has to track the actual scheme, not
-            // guess at it from the environment - confirmed by
-            // CookieAuthTests.cs failing against a naive
-            // !environment.IsDevelopment() check.
-            Secure = response.HttpContext.Request.IsHttps,
-            // Lax, not None: this cookie is only ever attached to same-site
-            // JS-initiated fetch calls, never a cross-site top-level
-            // navigation - and SameSite compares registrable domain, not
-            // port, so localhost:3000 (frontend) and localhost:5277 (API)
-            // already count as same-site in dev. Lax also closes the
-            // classic CSRF vector (an attacker page auto-submitting a form
-            // POST here) that a cookie-based credential would otherwise
-            // reopen.
-            SameSite = SameSiteMode.Lax,
-            Expires = DateTimeOffset.UtcNow.AddDays(tokenSettings.RefreshTokenLifespanInDays),
-            Path = "/"
-        });
+            response.Cookies.Append(RefreshTokenCookieName, refreshToken, new CookieOptions
+            {
+                HttpOnly = true,
+                // Tied to the actual request scheme, not an environment name
+                // check (e.g. IsDevelopment()) - dev runs over plain HTTP (see
+                // the rest of this session's notes on why - avoiding ASP.NET
+                // Core dev-cert trust issues with Node's fetch), and the
+                // integration test suite's TestServer transport is HTTP too
+                // regardless of environment name ("Testing", not
+                // "Development"). A Secure cookie set on a non-HTTPS response
+                // is correctly refused by any real cookie jar (browser or
+                // HttpClient), so this has to track the actual scheme, not
+                // guess at it from the environment - confirmed by
+                // CookieAuthTests.cs failing against a naive
+                // !environment.IsDevelopment() check.
+                Secure = response.HttpContext.Request.IsHttps,
+                // Lax, not None: this cookie is only ever attached to same-site
+                // JS-initiated fetch calls, never a cross-site top-level
+                // navigation - and SameSite compares registrable domain, not
+                // port, so localhost:3000 (frontend) and localhost:5277 (API)
+                // already count as same-site in dev. Lax also closes the
+                // classic CSRF vector (an attacker page auto-submitting a form
+                // POST here) that a cookie-based credential would otherwise
+                // reopen.
+                SameSite = SameSiteMode.Lax,
+                Expires = DateTimeOffset.UtcNow.AddDays(tokenSettings.RefreshTokenLifespanInDays),
+                Path = "/"
+            });
+        }
+        public void DeleteRefreshTokenCookie()
+        {
+            response.Cookies.Delete(RefreshTokenCookieName, new CookieOptions { Path = "/" });
+        }
     }
 
-    public static void DeleteRefreshTokenCookie(this HttpResponse response)
+    extension(HttpRequest request)
     {
-        response.Cookies.Delete(RefreshTokenCookieName, new CookieOptions { Path = "/" });
+        public string? GetRefreshTokenFromCookie()
+        {
+            return request.Cookies.TryGetValue(RefreshTokenCookieName, out string? value) ? value : null;
+        }
+        /// <summary>
+        ///     ?useCookies=true opts a caller into cookie mode - matches
+        ///     ASP.NET Core Identity's own MapIdentityApi precedent for this exact
+        ///     web-vs-mobile split. Absent/false keeps today's token-mode behavior
+        ///     unchanged, which mobile/non-browser clients depend on.
+        /// </summary>
+        public bool WantsCookieAuth()
+        {
+            return request.Query.TryGetValue("useCookies", out StringValues value)
+                   && bool.TryParse(value, out bool useCookies)
+                   && useCookies;
+        }
     }
 
-    public static string? GetRefreshTokenFromCookie(this HttpRequest request) =>
-        request.Cookies.TryGetValue(RefreshTokenCookieName, out string? value) ? value : null;
-
-    /// <summary>?useCookies=true opts a caller into cookie mode - matches
-    /// ASP.NET Core Identity's own MapIdentityApi precedent for this exact
-    /// web-vs-mobile split. Absent/false keeps today's token-mode behavior
-    /// unchanged, which mobile/non-browser clients depend on.</summary>
-    public static bool WantsCookieAuth(this HttpRequest request) =>
-        request.Query.TryGetValue("useCookies", out StringValues value)
-        && bool.TryParse(value, out bool useCookies)
-        && useCookies;
 }

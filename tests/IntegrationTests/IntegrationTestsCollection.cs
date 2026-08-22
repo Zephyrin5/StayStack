@@ -1,7 +1,7 @@
 ﻿namespace IntegrationTests;
 
 [CollectionDefinition("Integration Tests")]
-public class IntegrationTestCollection : ICollectionFixture<IntegrationTestWebApplicationFactory>
+public class IntegrationTestsFixture : ICollectionFixture<IntegrationTestWebApplicationFactory>
 {
     // Anchor class for [CollectionDefinition]
 }

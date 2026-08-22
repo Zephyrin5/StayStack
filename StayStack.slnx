@@ -1,24 +1,26 @@
 <Solution>
-    <Folder Name="/src/" />
+    <Folder Name="/src/"/>
     <Folder Name="/src/Core/">
-        <Project Path="src/Core/BuildingBlocks/BuildingBlocks.csproj" />
-        <Project Path="src/Core/SeedWork/SeedWork.csproj" />
+        <Project Path="src/Core/BuildingBlocks/BuildingBlocks.csproj"/>
+        <Project Path="src/Core/SeedWork/SeedWork.csproj"/>
     </Folder>
     <Folder Name="/src/Infrastructure/">
-        <Project Path="src/Infrastructure/Observability/Observability.csproj" />
-        <Project Path="src/Infrastructure/Persistence/Persistence.csproj" />
+        <Project Path="src/Infrastructure/Observability/Observability.csproj"/>
+        <Project Path="src/Infrastructure/Persistence/Persistence.csproj"/>
     </Folder>
     <Folder Name="/src/Modules/">
-        <Project Path="src/Infrastructure/Identity/Identity.csproj" />
-        <Project Path="src/Modules/Catalog/Catalog.csproj" />
-        <Project Path="src/Modules/Hosts/Hosts.csproj" />
-        <Project Path="src/Modules/Hosts/Hosts.Contracts/Hosts.Contracts.csproj" />
+        <Project Path="src/Infrastructure/Identity/Identity.csproj"/>
+        <Project Path="src/Modules/Bookings/Bookings.csproj"/>
+        <Project Path="src/Modules/Catalog/Catalog.Contracts/Catalog.Contracts.csproj"/>
+        <Project Path="src/Modules/Catalog/Catalog.csproj"/>
+        <Project Path="src/Modules/Hosts/Hosts.csproj"/>
+        <Project Path="src/Modules/Hosts/Hosts.Contracts/Hosts.Contracts.csproj"/>
     </Folder>
     <Folder Name="/src/Web/">
-        <Project Path="src/Web/Api/Api.csproj" />
+        <Project Path="src/Web/Api/Api.csproj"/>
     </Folder>
     <Folder Name="/tests/">
-        <Project Path="tests/IntegrationTests/IntegrationTests.csproj" />
-        <Project Path="tests/UnitTests/UnitTests.csproj" />
+        <Project Path="tests/IntegrationTests/IntegrationTests.csproj"/>
+        <Project Path="tests/UnitTests/UnitTests.csproj"/>
     </Folder>
 </Solution>

@@ -11,7 +11,7 @@ public class RefreshTokenRequestValidatorTests
     {
         RefreshTokenRequest request = new RefreshTokenRequest { RefreshToken = "some-opaque-token-value" };
 
-        TestValidationResult<RefreshTokenRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -28,7 +28,7 @@ public class RefreshTokenRequestValidatorTests
     {
         RefreshTokenRequest request = new RefreshTokenRequest { RefreshToken = null };
 
-        TestValidationResult<RefreshTokenRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveAnyValidationErrors();
     }

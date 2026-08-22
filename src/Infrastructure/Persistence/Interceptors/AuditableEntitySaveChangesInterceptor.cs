@@ -2,7 +2,7 @@ using BuildingBlocks.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using SeedWork.Abstractions;
-namespace Persistence;
+namespace Persistence.Interceptors;
 
 /// <summary>
 ///     Registered once per module's DbContext (see
@@ -55,6 +55,12 @@ public class AuditableEntitySaveChangesInterceptor(ICurrentUserProvider currentU
                     break;
                 case EntityState.Modified:
                     entry.Entity.SetModified(now.Value, userId);
+                    break;
+                case EntityState.Detached:
+                case EntityState.Unchanged:
+                case EntityState.Deleted:
+                default:
+                    // Intentionally ignored (no-op)
                     break;
             }
         }

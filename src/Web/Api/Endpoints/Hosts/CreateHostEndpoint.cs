@@ -3,8 +3,6 @@ using FastEndpoints;
 using Hosts.Features.CreateHost;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
-using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
-
 namespace Api.Endpoints.Hosts;
 
 // Distinct from BecomeHost: that one lets an existing authenticated account
@@ -26,7 +24,7 @@ public class CreateHostEndpoint(IMediator mediator) : Endpoint<CreateHostRequest
         {
             s.Summary = "Create a new Host record directly (admin only)";
             s.Description = "Creates a Host with no linked user account - see BecomeHost for the self-service " +
-                             "flow that links a Host to the caller's own account instead.";
+                            "flow that links a Host to the caller's own account instead.";
             s.Response<CreateHostResponse>(200, "Host created.");
             s.Response<ValidationProblemDetails>(400, "Validation failed.");
         });

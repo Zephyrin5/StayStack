@@ -6,8 +6,10 @@ namespace Hosts.Contracts;
 // ever reach this through IHostAuthorization, resolved via DI.
 internal class HostAuthorization(ICurrentUserProvider currentUserProvider) : IHostAuthorization
 {
-    public Guid RequireHostId() =>
-        currentUserProvider.HostId ?? throw new NotAHostException();
+    public Guid RequireHostId()
+    {
+        return currentUserProvider.HostId ?? throw new NotAHostException();
+    }
 
     public void RequireOwnership(Guid resourceHostId, string resourceName, object resourceKey)
     {

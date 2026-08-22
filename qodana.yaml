@@ -21,10 +21,12 @@ profile:
 #  - name: <SomeEnabledInspectionId>
 
 #Disable inspections
-#exclude:
-#  - name: <SomeDisabledInspectionId>
-#    paths:
-#      - <path/where/not/run/inspection>
+exclude:
+  # xUnit's Method_Should_When convention deliberately uses underscores for
+  # readability - not a naming-convention violation worth flagging test-wide.
+  - name: InconsistentNaming
+    paths:
+      - tests
 
 #Execute shell command before Qodana execution (Applied in CI/CD pipeline)
 #bootstrap: sh ./prepare-qodana.sh

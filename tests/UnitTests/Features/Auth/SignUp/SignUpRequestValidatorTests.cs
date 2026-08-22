@@ -21,7 +21,7 @@ public class SignUpRequestValidatorTests
     {
         SignUpRequest request = CreateValidRequest();
 
-        TestValidationResult<SignUpRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -33,7 +33,7 @@ public class SignUpRequestValidatorTests
     {
         SignUpRequest request = CreateValidRequest() with { Email = email };
 
-        TestValidationResult<SignUpRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.Email);
     }
@@ -46,7 +46,7 @@ public class SignUpRequestValidatorTests
     {
         SignUpRequest request = CreateValidRequest() with { Password = password, ConfirmPassword = password };
 
-        TestValidationResult<SignUpRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.Password);
     }
@@ -56,7 +56,7 @@ public class SignUpRequestValidatorTests
     {
         SignUpRequest request = CreateValidRequest() with { ConfirmPassword = "a-different-password-entirely" };
 
-        TestValidationResult<SignUpRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.ConfirmPassword);
     }

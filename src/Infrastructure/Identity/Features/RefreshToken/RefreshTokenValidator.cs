@@ -1,5 +1,4 @@
 using FastEndpoints;
-using FluentValidation;
 namespace Identity.Features.Auth.RefreshToken;
 
 public sealed class RefreshTokenRequestValidator : Validator<RefreshTokenRequest>

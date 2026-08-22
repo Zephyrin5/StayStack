@@ -1,7 +1,6 @@
 using Catalog.Features.GetPriceCalendar;
 using FastEndpoints;
 using Mediator;
-
 namespace Api.Endpoints.Catalog;
 
 public class GetPriceCalendarEndpoint(IMediator mediator) : Endpoint<GetPriceCalendarRequest, GetPriceCalendarResponse>
@@ -16,7 +15,7 @@ public class GetPriceCalendarEndpoint(IMediator mediator) : Endpoint<GetPriceCal
         {
             s.Summary = "Get a unit's price calendar for a date range";
             s.Description = "UnitId comes from the route, From/To from the query string. Public - no " +
-                             "authentication required, this is a browsing endpoint.";
+                            "authentication required, this is a browsing endpoint.";
             s.Response<GetPriceCalendarResponse>(200, "Price calendar returned.");
             s.Response(400, "Validation failed.");
         });

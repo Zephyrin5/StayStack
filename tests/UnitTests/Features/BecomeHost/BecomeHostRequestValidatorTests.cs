@@ -21,7 +21,7 @@ public class BecomeHostRequestValidatorTests
     {
         BecomeHostRequest request = CreateValidRequest();
 
-        TestValidationResult<BecomeHostRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -33,7 +33,7 @@ public class BecomeHostRequestValidatorTests
         // there's no NotEmpty rule on it.
         BecomeHostRequest request = CreateValidRequest() with { ContactPhone = null };
 
-        TestValidationResult<BecomeHostRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveValidationErrorFor(x => x.ContactPhone);
     }
@@ -43,7 +43,7 @@ public class BecomeHostRequestValidatorTests
     {
         BecomeHostRequest request = CreateValidRequest() with { BusinessName = "" };
 
-        TestValidationResult<BecomeHostRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.BusinessName);
     }
@@ -53,7 +53,7 @@ public class BecomeHostRequestValidatorTests
     {
         BecomeHostRequest request = CreateValidRequest() with { BusinessName = new string('a', 201) };
 
-        TestValidationResult<BecomeHostRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.BusinessName);
     }
@@ -65,7 +65,7 @@ public class BecomeHostRequestValidatorTests
     {
         BecomeHostRequest request = CreateValidRequest() with { ContactEmail = email };
 
-        TestValidationResult<BecomeHostRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.ContactEmail);
     }
@@ -75,7 +75,7 @@ public class BecomeHostRequestValidatorTests
     {
         BecomeHostRequest request = CreateValidRequest() with { ContactPhone = new string('1', 51) };
 
-        TestValidationResult<BecomeHostRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.ContactPhone);
     }
