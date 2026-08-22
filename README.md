@@ -82,7 +82,7 @@ dotnet tests/artifacts/bin/IntegrationTests/Debug/net10.0/IntegrationTests.dll
 
 ## CI
 
-`.github/workflows/ci.yml` builds the solution and runs both test suites on every push/PR to `main`.
+`.github/workflows/ci.yml` builds the solution, runs both test suites, and (advisory only, doesn't fail the build) rebuilds the API with Native AOT/trim analysis enabled on every push/PR to `main` - see [`docs/aot-migration.md`](docs/aot-migration.md) for the tracked list of what that currently flags and why.
 
 ## Status
 
