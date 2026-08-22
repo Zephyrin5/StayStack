@@ -22,4 +22,5 @@ public record ConfirmedHold
     public Guid UnitId { get; init; }
     public DateOnly CheckIn { get; init; }
     public DateOnly CheckOut { get; init; }
+    public int GuestCount { get; init; }
 }

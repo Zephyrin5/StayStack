@@ -1,6 +1,6 @@
+using Bookings.Entities;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
-using Bookings.Entities;
 using Catalog.Contracts;
 using Mediator;
 namespace Bookings.Features.ConfirmBooking;
@@ -25,7 +25,7 @@ public class ConfirmBookingHandler(
         ConfirmedHold hold = await holdConfirmation.ConfirmHoldAsync(request.HoldId, cancellationToken);
 
         UnitSummary unit = await unitLookup.GetUnitAsync(hold.UnitId, cancellationToken)
-                            ?? throw new NotFoundException("Unit", hold.UnitId);
+                           ?? throw new NotFoundException("Unit", hold.UnitId);
 
         int nights = hold.CheckOut.DayNumber - hold.CheckIn.DayNumber;
         decimal totalPrice = unit.BasePrice * nights;
@@ -39,7 +39,7 @@ public class ConfirmBookingHandler(
             request.GuestPhone,
             hold.CheckIn,
             hold.CheckOut,
-            request.GuestCount,
+            hold.GuestCount,
             totalPrice,
             unit.Currency);
 

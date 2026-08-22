@@ -70,8 +70,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
             HoldId = holdId,
             GuestName = "Jane Guest",
             GuestEmail = "jane@example.com",
-            GuestPhone = "+965 1234 5678",
-            GuestCount = 2
+            GuestPhone = "+965 1234 5678"
         };
     }
 
@@ -79,7 +78,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
     public async Task ConfirmBooking_ShouldReturn200_AndPersistPendingBooking_AndFlipHoldToBooked()
     {
         // Arrange
-        Unit unit = CreateTestUnit(basePrice: 100m);
+        Unit unit = CreateTestUnit(100m);
         await SeedCatalogAsync(unit);
         Guid holdId = await HoldUnitAsync(unit.Id);
 
@@ -102,6 +101,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(holdId, booking.HoldId);
         Assert.Null(booking.CustomerId);
         Assert.Equal("jane@example.com", booking.GuestEmail);
+        Assert.Equal(2, booking.GuestCount); // from the hold, not re-collected at confirm time
 
         AppCatalogDbContext catalogDb = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         UnitAvailabilityHold persistedHold = await catalogDb.UnitAvailabilityHolds
@@ -132,7 +132,8 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
             StayRange = new NpgsqlRange<DateOnly>(today, true, today.AddDays(2), false),
             Status = "held",
             HoldExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1),
-            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-16)
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-16),
+            GuestCount = 2
         };
         await SeedCatalogAsync(unit, expiredHold);
 

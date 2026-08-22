@@ -28,7 +28,7 @@ internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmati
                            UPDATE unit_availability_holds
                            SET status = 'booked'
                            WHERE id = @HoldId AND status = 'held' AND hold_expires_at > now()
-                           RETURNING unit_id AS "UnitId", lower(stay_range) AS "CheckIn", upper(stay_range) AS "CheckOut";
+                           RETURNING unit_id AS "UnitId", lower(stay_range) AS "CheckIn", upper(stay_range) AS "CheckOut", guest_count AS "GuestCount";
                            """;
 
         ConfirmedHold? confirmedHold = await connection.QuerySingleOrDefaultAsync<ConfirmedHold>(

@@ -47,8 +47,8 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
         DateTime holdExpiresAt = DateTime.UtcNow.Add(HoldDuration);
 
         const string sql = """
-                           INSERT INTO unit_availability_holds (id, unit_id, stay_range, status, hold_expires_at, created_at)
-                           VALUES (@Id, @UnitId, @StayRange, 'held', @HoldExpiresAt, @CreatedAt);
+                           INSERT INTO unit_availability_holds (id, unit_id, stay_range, status, hold_expires_at, created_at, guest_count)
+                           VALUES (@Id, @UnitId, @StayRange, 'held', @HoldExpiresAt, @CreatedAt, @GuestCount);
                            """;
 
         try
@@ -64,7 +64,8 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
                     // date semantics.
                     StayRange = new NpgsqlRange<DateOnly>(request.CheckIn, true, request.CheckOut, false),
                     HoldExpiresAt = holdExpiresAt,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
+                    request.GuestCount
                 },
                 transaction.GetDbTransaction(),
                 cancellationToken: cancellationToken));

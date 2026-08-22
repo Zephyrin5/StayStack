@@ -13,8 +13,7 @@ public class ConfirmBookingRequestValidatorTests
             HoldId = Guid.NewGuid(),
             GuestName = "Jane Guest",
             GuestEmail = "jane@example.com",
-            GuestPhone = "+965 1234 5678",
-            GuestCount = 2
+            GuestPhone = "+965 1234 5678"
         };
     }
 
@@ -23,7 +22,7 @@ public class ConfirmBookingRequestValidatorTests
     {
         ConfirmBookingRequest request = CreateValidRequest();
 
-        TestValidationResult<ConfirmBookingRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -33,7 +32,7 @@ public class ConfirmBookingRequestValidatorTests
     {
         ConfirmBookingRequest request = CreateValidRequest() with { GuestPhone = null };
 
-        TestValidationResult<ConfirmBookingRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldNotHaveValidationErrorFor(x => x.GuestPhone);
     }
@@ -43,7 +42,7 @@ public class ConfirmBookingRequestValidatorTests
     {
         ConfirmBookingRequest request = CreateValidRequest() with { HoldId = Guid.Empty };
 
-        TestValidationResult<ConfirmBookingRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.HoldId);
     }
@@ -55,7 +54,7 @@ public class ConfirmBookingRequestValidatorTests
     {
         ConfirmBookingRequest request = CreateValidRequest() with { GuestName = guestName };
 
-        TestValidationResult<ConfirmBookingRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.GuestName);
     }
@@ -65,7 +64,7 @@ public class ConfirmBookingRequestValidatorTests
     {
         ConfirmBookingRequest request = CreateValidRequest() with { GuestName = new string('a', 201) };
 
-        TestValidationResult<ConfirmBookingRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.GuestName);
     }
@@ -77,7 +76,7 @@ public class ConfirmBookingRequestValidatorTests
     {
         ConfirmBookingRequest request = CreateValidRequest() with { GuestEmail = guestEmail };
 
-        TestValidationResult<ConfirmBookingRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.GuestEmail);
     }
@@ -87,20 +86,8 @@ public class ConfirmBookingRequestValidatorTests
     {
         ConfirmBookingRequest request = CreateValidRequest() with { GuestPhone = new string('1', 51) };
 
-        TestValidationResult<ConfirmBookingRequest> result = _sut.TestValidate(request);
+        var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.GuestPhone);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public void Validate_ShouldHaveError_ForGuestCount_WhenNotPositive(int guestCount)
-    {
-        ConfirmBookingRequest request = CreateValidRequest() with { GuestCount = guestCount };
-
-        TestValidationResult<ConfirmBookingRequest> result = _sut.TestValidate(request);
-
-        result.ShouldHaveValidationErrorFor(x => x.GuestCount);
     }
 }

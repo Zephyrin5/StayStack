@@ -19,6 +19,7 @@ public sealed class UnitAvailabilityHold
 {
     public Guid Id { get; set; }
     public Guid UnitId { get; set; }
+    public int GuestCount { get; set; }
 
     // [CheckIn, CheckOut) - half-open, matches normal hotel-industry
     // date-range semantics (checkout day itself is not occupied).

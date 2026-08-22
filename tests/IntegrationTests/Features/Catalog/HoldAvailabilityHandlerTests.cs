@@ -71,6 +71,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         Assert.Equal(unit.Id, persistedHold.UnitId);
         Assert.Equal(new NpgsqlRange<DateOnly>(today, true,
             today.AddDays(3), false), persistedHold.StayRange);
+        Assert.Equal(2, persistedHold.GuestCount);
     }
 
     [Fact]
