@@ -1,6 +1,6 @@
 using BuildingBlocks.Observability;
 using Mediator;
-namespace Identity.Features.Auth.RefreshToken;
+namespace Identity.Features.RefreshToken;
 
 public record RefreshTokenRequest : IRequest<RefreshTokenResponse>
 {

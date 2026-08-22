@@ -23,15 +23,18 @@ public class GetPropertyByIdHandler(AppCatalogDbContext dbContext) : IRequestHan
             PropertyType = property.PropertyType,
             Name = new Dictionary<string, string>(property.Name.Values),
             City = property.City,
-            Units = units.Select(u => new UnitSummary
-            {
-                Id = u.Id,
-                UnitType = u.UnitType,
-                Name = new Dictionary<string, string>(u.Name.Values),
-                MaxOccupancy = u.MaxOccupancy,
-                BasePrice = u.BasePrice,
-                Currency = u.Currency
-            }).ToList()
+            Units =
+            [
+                .. units.Select(u => new UnitSummary
+                {
+                    Id = u.Id,
+                    UnitType = u.UnitType,
+                    Name = new Dictionary<string, string>(u.Name.Values),
+                    MaxOccupancy = u.MaxOccupancy,
+                    BasePrice = u.BasePrice,
+                    Currency = u.Currency
+                })
+            ]
         };
     }
 }

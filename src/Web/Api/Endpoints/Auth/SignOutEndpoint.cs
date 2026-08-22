@@ -1,6 +1,6 @@
 using Api.Security;
 using FastEndpoints;
-using Identity.Features.Auth.SignOut;
+using Identity.Features.SignOut;
 using Mediator;
 namespace Api.Endpoints.Auth;
 

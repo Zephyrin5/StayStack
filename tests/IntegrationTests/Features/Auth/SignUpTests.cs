@@ -1,6 +1,6 @@
 using Bogus;
 using Identity.Entities;
-using Identity.Features.Auth.SignUp;
+using Identity.Features.SignUp;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net;

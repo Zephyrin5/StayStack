@@ -1,8 +1,8 @@
 using Bogus;
 using Identity.Entities;
-using Identity.Features.Auth.RefreshToken;
-using Identity.Features.Auth.SignIn;
-using Identity.Features.Auth.SignOut;
+using Identity.Features.RefreshToken;
+using Identity.Features.SignIn;
+using Identity.Features.SignOut;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net;
@@ -65,7 +65,7 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
         // Arrange
         HttpClient client = factory.CreateClient();
         string email = _faker.Internet.Email();
-        string password = $"P@1{_faker.Internet.Password(10)}!";
+        string password = $"P@1{_faker.Internet.Password()}!";
         await SeedUserAsync(email, password);
 
         // Act
@@ -94,7 +94,7 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
         // Arrange
         HttpClient client = factory.CreateClient();
         string email = _faker.Internet.Email();
-        string password = $"P@1{_faker.Internet.Password(10)}!";
+        string password = $"P@1{_faker.Internet.Password()}!";
         await SeedUserAsync(email, password);
 
         // Act
@@ -116,7 +116,7 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
         // Arrange
         HttpClient client = factory.CreateClient();
         string email = _faker.Internet.Email();
-        string password = $"P@1{_faker.Internet.Password(10)}!";
+        string password = $"P@1{_faker.Internet.Password()}!";
         await SeedUserAsync(email, password);
 
         HttpResponseMessage signInResponse = await client.PostAsJsonAsync(
@@ -170,7 +170,7 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
         // Arrange
         HttpClient client = factory.CreateClient();
         string email = _faker.Internet.Email();
-        string password = $"P@1{_faker.Internet.Password(10)}!";
+        string password = $"P@1{_faker.Internet.Password()}!";
         await SeedUserAsync(email, password);
 
         await client.PostAsJsonAsync(

@@ -1,5 +1,5 @@
 using BuildingBlocks.Observability;
-namespace Identity.Features.Auth.SignUp;
+namespace Identity.Features.SignUp;
 
 public record SignUpResponse
 {

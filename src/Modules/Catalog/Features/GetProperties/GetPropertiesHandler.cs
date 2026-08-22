@@ -26,14 +26,17 @@ public class GetPropertiesHandler(AppCatalogDbContext dbContext) : IRequestHandl
 
         return new GetPropertiesResponse
         {
-            Properties = properties.Select(p => new PropertySummary
-            {
-                Id = p.Id,
-                HostId = p.HostId,
-                PropertyType = p.PropertyType,
-                Name = new Dictionary<string, string>(p.Name.Values),
-                City = p.City
-            }).ToList()
+            Properties =
+            [
+                .. properties.Select(p => new PropertySummary
+                {
+                    Id = p.Id,
+                    HostId = p.HostId,
+                    PropertyType = p.PropertyType,
+                    Name = new Dictionary<string, string>(p.Name.Values),
+                    City = p.City
+                })
+            ]
         };
     }
 }

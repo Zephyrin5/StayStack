@@ -1,6 +1,6 @@
 ﻿using BuildingBlocks.Observability;
 using Mediator;
-namespace Identity.Features.Auth.SignIn;
+namespace Identity.Features.SignIn;
 
 public record SignInRequest : IRequest<SignInResponse>
 {

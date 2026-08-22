@@ -31,7 +31,7 @@ public static class HostsServicesRegistration
                                       ?? throw new InvalidOperationException(
                                           "Connection string for AppHostsDbContext not found.");
 
-            options.ConfigureStayStackDefaults<AppHostsDbContext>(
+            options.ConfigureStayStackDefaults(
                 connectionString,
                 "hosts",
                 environment is not null && environment.IsDevelopment());

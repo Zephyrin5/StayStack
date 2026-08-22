@@ -31,7 +31,7 @@ public static class CatalogServicesRegistration
                                       ?? throw new InvalidOperationException(
                                           "Connection string for AppCatalogDbContext not found.");
 
-            options.ConfigureStayStackDefaults<AppCatalogDbContext>(
+            options.ConfigureStayStackDefaults(
                 connectionString,
                 "catalog",
                 environment is not null && environment.IsDevelopment());

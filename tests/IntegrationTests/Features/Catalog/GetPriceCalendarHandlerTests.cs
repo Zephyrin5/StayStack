@@ -53,7 +53,7 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         };
 
         // Act
-        GetPriceCalendarResponse? response = await handler.Handle(request, CancellationToken.None);
+        GetPriceCalendarResponse response = await handler.Handle(request, CancellationToken.None);
 
         // Assert
         Assert.NotNull(response.Days);

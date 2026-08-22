@@ -4,8 +4,8 @@ using Catalog.Features.CreateUnit;
 using Catalog.Features.GetProperties;
 using Catalog.Features.GetPropertyById;
 using Identity.Entities;
-using Identity.Features.Auth.SignIn;
 using Identity.Features.BecomeHost;
+using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using SeedWork.Enums;
@@ -28,7 +28,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     private async Task<(string AccessToken, Guid HostId)> SeedHostUserAsync()
     {
         string email = _faker.Internet.Email();
-        string password = $"P@1{_faker.Internet.Password(10)}!";
+        string password = $"P@1{_faker.Internet.Password()}!";
 
         using IServiceScope scope = factory.Services.CreateScope();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();

@@ -12,7 +12,7 @@ internal class HostRegistrar(AppHostsDbContext dbContext) : IHostRegistrar
         string? contactPhone,
         CancellationToken cancellationToken)
     {
-        Host host = Host.Create(businessName, contactEmail, contactPhone, null);
+        Host host = Host.Create(businessName, contactEmail, contactPhone);
 
         dbContext.Hosts.Add(host);
         await dbContext.SaveChangesAsync(cancellationToken);

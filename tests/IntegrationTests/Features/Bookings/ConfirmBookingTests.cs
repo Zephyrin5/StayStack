@@ -6,7 +6,7 @@ using Catalog;
 using Catalog.Entities;
 using Catalog.Features.HoldAvailability;
 using Identity.Entities;
-using Identity.Features.Auth.SignIn;
+using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -78,7 +78,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
     public async Task ConfirmBooking_ShouldReturn200_AndPersistPendingBooking_AndFlipHoldToBooked()
     {
         // Arrange
-        Unit unit = CreateTestUnit(100m);
+        Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         Guid holdId = await HoldUnitAsync(unit.Id);
 
@@ -197,7 +197,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
         Guid holdId = await HoldUnitAsync(unit.Id);
 
         string email = _faker.Internet.Email();
-        string password = $"P@1{_faker.Internet.Password(10)}!";
+        string password = $"P@1{_faker.Internet.Password()}!";
 
         using IServiceScope seedScope = factory.Services.CreateScope();
         var userManager = seedScope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
@@ -213,10 +213,8 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
         SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestContext.Current.CancellationToken);
         Assert.NotNull(signInResult?.AccessToken);
 
-        using HttpRequestMessage confirmRequest = new HttpRequestMessage(HttpMethod.Post, "/api/bookings")
-        {
-            Content = JsonContent.Create(CreateValidRequest(holdId))
-        };
+        using HttpRequestMessage confirmRequest = new HttpRequestMessage(HttpMethod.Post, "/api/bookings");
+        confirmRequest.Content = JsonContent.Create(CreateValidRequest(holdId));
         confirmRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", signInResult.AccessToken);
 
         // Act

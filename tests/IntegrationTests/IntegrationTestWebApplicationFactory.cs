@@ -59,19 +59,19 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             // constraints depend on).
             services.RemoveAll<DbContextOptions<AppIdentityDbContext>>();
             services.AddDbContext<AppIdentityDbContext>(options =>
-                options.ConfigureStayStackDefaults<AppIdentityDbContext>(_dbContainer.GetConnectionString(), "identity", false));
+                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "identity", false));
 
             services.RemoveAll<DbContextOptions<AppCatalogDbContext>>();
             services.AddDbContext<AppCatalogDbContext>(options =>
-                options.ConfigureStayStackDefaults<AppCatalogDbContext>(_dbContainer.GetConnectionString(), "catalog", false));
+                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "catalog", false));
 
             services.RemoveAll<DbContextOptions<AppHostsDbContext>>();
             services.AddDbContext<AppHostsDbContext>(options =>
-                options.ConfigureStayStackDefaults<AppHostsDbContext>(_dbContainer.GetConnectionString(), "hosts", false));
+                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "hosts", false));
 
             services.RemoveAll<DbContextOptions<AppBookingsDbContext>>();
             services.AddDbContext<AppBookingsDbContext>(options =>
-                options.ConfigureStayStackDefaults<AppBookingsDbContext>(_dbContainer.GetConnectionString(), "bookings", false));
+                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "bookings", false));
 
             // Build a temporary provider just to apply each module's real
             // migrations before any test runs. All four share one physical

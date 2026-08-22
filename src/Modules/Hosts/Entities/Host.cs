@@ -19,10 +19,10 @@ public sealed class Host : Entity
     }
 
     // Legal/registration identity - matches the business registration,
-    // the myFatoorah merchant record, invoices. Deliberately a single
-    // plain string, not LocalizedText: this isn't content that should
-    // ever have independently-editable per-language "versions" that could
-    // drift from what's actually on file.
+    // the merchant record, invoices. Deliberately a single plain string,
+    // not LocalizedText: this isn't content that should ever have
+    // independently-editable per-language "versions" that could drift
+    // from what's actually on file.
     public string BusinessName { get; private set; }
 
     public string ContactEmail { get; private set; }

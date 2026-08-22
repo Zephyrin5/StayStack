@@ -1,6 +1,6 @@
 using FastEndpoints;
 using FluentValidation;
-namespace Identity.Features.Auth.SignUp;
+namespace Identity.Features.SignUp;
 
 public sealed class SignUpRequestValidator : Validator<SignUpRequest>
 {

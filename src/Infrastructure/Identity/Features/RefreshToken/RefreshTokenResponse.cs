@@ -1,5 +1,5 @@
 ﻿using BuildingBlocks.Observability;
-namespace Identity.Features.Auth.RefreshToken;
+namespace Identity.Features.RefreshToken;
 
 public record RefreshTokenResponse
 {

@@ -1,9 +1,9 @@
 ﻿using BuildingBlocks.Exceptions;
 using Identity.Entities;
-using Identity.Features.Auth.Common;
+using Identity.Features.Common;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
-namespace Identity.Features.Auth.RefreshToken;
+namespace Identity.Features.RefreshToken;
 
 public class RefreshTokenHandler(
     UserManager<ApplicationUser> userManager,

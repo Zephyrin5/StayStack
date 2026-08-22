@@ -1,6 +1,6 @@
 using BuildingBlocks.Observability;
 using Mediator;
-namespace Identity.Features.Auth.SignOut;
+namespace Identity.Features.SignOut;
 
 public record SignOutRequest : IRequest<SignOutResponse>
 {

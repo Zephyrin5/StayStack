@@ -1,8 +1,8 @@
-using Identity.Features.Auth.RefreshToken;
-using Identity.Features.Auth.SignIn;
-using Identity.Features.Auth.SignOut;
-using Identity.Features.Auth.SignUp;
 using Identity.Features.BecomeHost;
+using Identity.Features.RefreshToken;
+using Identity.Features.SignIn;
+using Identity.Features.SignOut;
+using Identity.Features.SignUp;
 using System.Text.Json.Serialization;
 namespace Identity.Serialization;
 

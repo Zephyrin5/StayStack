@@ -3,7 +3,7 @@ using Hosts;
 using Hosts.Entities;
 using Hosts.Features.CreateHost;
 using Identity.Entities;
-using Identity.Features.Auth.SignIn;
+using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,7 +34,7 @@ public class CreateHostTests(IntegrationTestWebApplicationFactory factory)
     private async Task<string> SignInAsPlainCustomerAsync()
     {
         string email = _faker.Internet.Email();
-        string password = $"P@1{_faker.Internet.Password(10)}!";
+        string password = $"P@1{_faker.Internet.Password()}!";
 
         using IServiceScope scope = factory.Services.CreateScope();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();

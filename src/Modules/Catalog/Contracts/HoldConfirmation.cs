@@ -2,6 +2,7 @@ using BuildingBlocks.Exceptions;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
 using System.Data;
+using System.Data.Common;
 namespace Catalog.Contracts;
 
 // internal, same reasoning as HostRegistrar - Bookings should only ever
@@ -10,7 +11,7 @@ internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmati
 {
     public async Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken)
     {
-        IDbConnection connection = dbContext.Database.GetDbConnection();
+        DbConnection connection = dbContext.Database.GetDbConnection();
         if (connection.State != ConnectionState.Open)
         {
             await dbContext.Database.OpenConnectionAsync(cancellationToken);

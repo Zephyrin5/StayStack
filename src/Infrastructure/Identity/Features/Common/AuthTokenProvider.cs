@@ -8,7 +8,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-namespace Identity.Features.Auth.Common;
+namespace Identity.Features.Common;
 
 public class AuthTokenProvider(AppIdentityDbContext dbContext, IOptions<AuthTokenConfiguration> jwtSettings) : IAuthTokenProvider
 {

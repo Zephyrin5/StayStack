@@ -1,6 +1,6 @@
-using Identity.Features.Auth.Common;
+using Identity.Features.Common;
 using Mediator;
-namespace Identity.Features.Auth.SignOut;
+namespace Identity.Features.SignOut;
 
 public class SignOutHandler(IAuthTokenProvider authTokenProvider) : IRequestHandler<SignOutRequest, SignOutResponse>
 {

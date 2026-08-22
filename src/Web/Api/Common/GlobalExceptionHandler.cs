@@ -1,4 +1,5 @@
-﻿using BuildingBlocks.Exceptions;
+﻿using Api.Serialization;
+using BuildingBlocks.Exceptions;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 namespace Api.Common;
@@ -14,7 +15,7 @@ namespace Api.Common;
 ///     full detail, and returned as a generic 500 - callers never see raw
 ///     exception messages or stack traces for unexpected failures.
 /// </summary>
-public sealed class GlobalExceptionHandler(
+public sealed partial class GlobalExceptionHandler(
     ILogger<GlobalExceptionHandler> logger,
     IHostEnvironment environment) : IExceptionHandler
 {
@@ -34,9 +35,9 @@ public sealed class GlobalExceptionHandler(
 
         if (exception is AppException)
         {
-            logger.LogWarning(
+            LogHandledAppException(
+                logger,
                 exception,
-                "{ExceptionType} handled for {Path}: {Message}",
                 exception.GetType().Name,
                 httpContext.Request.Path,
                 exception.Message);
@@ -46,10 +47,7 @@ public sealed class GlobalExceptionHandler(
             // Unexpected exceptions get full detail in the logs - this is
             // the only place the real exception message and stack trace
             // should end up. The response to the caller stays generic.
-            logger.LogError(
-                exception,
-                "Unhandled exception for {Path}",
-                httpContext.Request.Path);
+            LogUnhandledException(logger, exception, httpContext.Request.Path);
         }
 
         httpContext.Response.StatusCode = problem.Status ?? StatusCodes.Status500InternalServerError;
@@ -65,12 +63,12 @@ public sealed class GlobalExceptionHandler(
         if (problem is ValidationProblemDetails validationProblem)
         {
             await httpContext.Response.WriteAsJsonAsync(
-                validationProblem, Serialization.AppJsonSerializerContext.Default.ValidationProblemDetails, cancellationToken: cancellationToken);
+                validationProblem, AppJsonSerializerContext.Default.ValidationProblemDetails, cancellationToken: cancellationToken);
         }
         else
         {
             await httpContext.Response.WriteAsJsonAsync(
-                problem, Serialization.AppJsonSerializerContext.Default.ProblemDetails, cancellationToken: cancellationToken);
+                problem, AppJsonSerializerContext.Default.ProblemDetails, cancellationToken: cancellationToken);
         }
 
         return true;
@@ -138,4 +136,15 @@ public sealed class GlobalExceptionHandler(
             _ => "6.1"
         };
     }
+
+    [LoggerMessage(LogLevel.Warning, "{ExceptionType} handled for {Path}: {Message}")]
+    private static partial void LogHandledAppException(
+        ILogger logger,
+        Exception exception,
+        string exceptionType,
+        PathString path,
+        string message);
+
+    [LoggerMessage(LogLevel.Error, "Unhandled exception for {Path}")]
+    private static partial void LogUnhandledException(ILogger logger, Exception exception, PathString path);
 }

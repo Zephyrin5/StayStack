@@ -1,6 +1,6 @@
 ﻿using Bogus;
 using Identity.Entities;
-using Identity.Features.Auth.SignIn;
+using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net;
@@ -34,7 +34,7 @@ public class SignInIntegrationTests(IntegrationTestWebApplicationFactory factory
     {
         // Arrange
         string email = _faker.Internet.Email();
-        string password = $"P@1{_faker.Internet.Password(10)}!";
+        string password = $"P@1{_faker.Internet.Password()}!";
         await SeedUserAsync(email, password);
 
         SignInRequest request = new SignInRequest
@@ -63,7 +63,7 @@ public class SignInIntegrationTests(IntegrationTestWebApplicationFactory factory
         SignInRequest request = new SignInRequest
         {
             Email = _faker.Random.Word(), // Non-email string
-            Password = $"P@1{_faker.Internet.Password(10)}!"
+            Password = $"P@1{_faker.Internet.Password()}!"
         };
 
         // Act
@@ -78,8 +78,8 @@ public class SignInIntegrationTests(IntegrationTestWebApplicationFactory factory
     {
         // Tests SignInHandler + SignInManager + GlobalExceptionHandler in 1 step
         string email = _faker.Internet.Email();
-        string correctPassword = $"P@1{_faker.Internet.Password(10)}!";
-        string wrongPassword = $"P@2{_faker.Internet.Password(10)}!";
+        string correctPassword = $"P@1{_faker.Internet.Password()}!";
+        string wrongPassword = $"P@2{_faker.Internet.Password()}!";
 
         await SeedUserAsync(email, correctPassword);
 

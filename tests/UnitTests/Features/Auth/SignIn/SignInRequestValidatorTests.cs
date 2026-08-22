@@ -1,5 +1,5 @@
 using FluentValidation.TestHelper;
-using Identity.Features.Auth.SignIn;
+using Identity.Features.SignIn;
 namespace UnitTests.Features.Auth.SignIn;
 
 public class SignInRequestValidatorTests

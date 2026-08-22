@@ -5,6 +5,7 @@ using Api.Serialization;
 using BuildingBlocks.Identity;
 using BuildingBlocks.Localization;
 using FastEndpoints;
+using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.Localization;
 namespace Api;
 
@@ -60,7 +61,7 @@ public static class ApiServicesRegistration
         // otherwise fall back to ASP.NET Core's own fully-reflection-based
         // default resolver even though every type they actually serialize
         // is already covered by ApiJsonTypeInfoResolver.Combined.
-        services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
+        services.Configure<JsonOptions>(o =>
             o.SerializerOptions.TypeInfoResolver = ApiJsonTypeInfoResolver.Combined);
 
         services.AddScoped<ICurrentUserProvider, HttpContextCurrentUserProvider>();

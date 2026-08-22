@@ -1,6 +1,7 @@
 ﻿using Mediator;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 namespace BuildingBlocks.Observability;
 
 /// <summary>
@@ -8,11 +9,13 @@ namespace BuildingBlocks.Observability;
 ///     metric, and a structured log line. Registered once as an open generic
 ///     against IPipelineBehavior&lt;,&gt; so it applies to every message on the
 ///     mediator pipeline automatically.
-///     Redaction itself lives in PayloadRedactor, not here - keeping it out
-///     of this generic class is what avoids one cache-per-closed-generic-type
-///     and keeps the trimming suppression in a single, well-justified spot.
+///     Redaction itself lives in PayloadRedactor, whose type-flow annotation
+///     preserves only the public message properties it needs to inspect.
 /// </summary>
-public sealed class TelemetryPipelineBehavior<TMessage, TResponse>(
+public sealed class TelemetryPipelineBehavior<
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]
+    TMessage,
+    TResponse>(
     ILogger<TelemetryPipelineBehavior<TMessage, TResponse>> logger)
     : IPipelineBehavior<TMessage, TResponse>
     where TMessage : IMessage

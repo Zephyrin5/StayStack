@@ -26,7 +26,7 @@ if (builder.Environment.IsDevelopment())
 builder.Services.ConfigureIdentityServices(builder.Configuration, builder.Environment);
 // TODO: Disabled until Grafana is configured
 //builder.Services.ConfigureObservabilityServices(builder.Configuration);
-builder.Services.ConfigurePersistenceServices(builder.Configuration);
+builder.Services.ConfigurePersistenceServices();
 builder.Services.ConfigureApiServices(builder.Configuration);
 builder.Services.ConfigureCatalogServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureHostsServices(builder.Configuration, builder.Environment);

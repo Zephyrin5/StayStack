@@ -1,7 +1,7 @@
 using Api.Security;
 using FastEndpoints;
 using Identity.Configurations;
-using Identity.Features.Auth.RefreshToken;
+using Identity.Features.RefreshToken;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;

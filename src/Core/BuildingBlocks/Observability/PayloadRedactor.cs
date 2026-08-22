@@ -5,20 +5,20 @@ namespace BuildingBlocks.Observability;
 
 /// <summary>
 ///     Redacts [Sensitive]-marked properties from an object for logging and
-///     tracing. Deliberately non-generic and standalone: it operates on
-///     object, not on any behavior's TMessage/TResponse, so the property
-///     cache lives in exactly one place regardless of how many closed
-///     generic instantiations of TelemetryPipelineBehavior&lt;,&gt; exist.
+///     tracing. The generic message type lets the trimmer preserve exactly
+///     the public properties this diagnostic formatter inspects.
 /// </summary>
 internal static class PayloadRedactor
 {
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> PropertyCache = new ConcurrentDictionary<Type, PropertyInfo[]>();
 
-    public static string Redact(object? instance)
+    public static string Redact<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]
+        TMessage>(TMessage? instance)
     {
         if (instance is null) return "null";
 
-        var properties = GetProperties(instance.GetType());
+        var properties = GetProperties<TMessage>();
         var parts = new List<string>(properties.Length);
 
         foreach (PropertyInfo property in properties)
@@ -43,18 +43,20 @@ internal static class PayloadRedactor
         return string.Join(", ", parts);
     }
 
-    // The one and only place this class calls Type.GetProperties(). Cached
-    // per type so repeated Redact() calls for the same message type don't
-    // pay the reflection cost twice - and there's exactly one suppression
-    // to justify, not one per call site.
-    [UnconditionalSuppressMessage(
-        "Trimming",
-        "IL2070",
-        Justification = "This app is never published trimmed or Native AOT. GetProperties() " +
-                        "is used only for best-effort diagnostic logging of message/response shapes, " +
-                        "not for anything that affects program correctness if properties were trimmed.")]
-    private static PropertyInfo[] GetProperties(Type type)
+    // The generic parameter carries the preservation requirement to typeof(TMessage),
+    // while the shared cache still avoids repeatedly enumerating a message type.
+    private static PropertyInfo[] GetProperties<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]
+        TMessage>()
     {
-        return PropertyCache.GetOrAdd(type, t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance));
+        Type type = typeof(TMessage);
+
+        if (PropertyCache.TryGetValue(type, out var properties))
+        {
+            return properties;
+        }
+
+        properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        return PropertyCache.GetOrAdd(type, properties);
     }
 }

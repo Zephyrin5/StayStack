@@ -1,5 +1,5 @@
 ﻿using Identity.Entities;
-namespace Identity.Features.Auth.Common;
+namespace Identity.Features.Common;
 
 public interface IAuthTokenProvider
 {

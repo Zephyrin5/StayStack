@@ -2,7 +2,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Moq;
-using Persistence;
 using Persistence.Interceptors;
 using SeedWork.Abstractions;
 namespace UnitTests.Persistence;

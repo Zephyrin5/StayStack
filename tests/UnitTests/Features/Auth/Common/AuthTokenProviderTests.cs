@@ -1,7 +1,7 @@
 ﻿using BuildingBlocks.Exceptions;
 using Identity;
 using Identity.Configurations;
-using Identity.Features.Auth.Common;
+using Identity.Features.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;

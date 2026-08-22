@@ -13,7 +13,7 @@ namespace Api.Security;
 /// </summary>
 public static class AuthCookies
 {
-    public const string RefreshTokenCookieName = "staystack_refresh_token";
+    private const string RefreshTokenCookieName = "staystack_refresh_token";
 
     extension(HttpResponse response)
     {
@@ -74,5 +74,4 @@ public static class AuthCookies
                    && useCookies;
         }
     }
-
 }

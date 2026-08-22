@@ -1,7 +1,7 @@
 ﻿using Bogus;
 using Identity.Entities;
-using Identity.Features.Auth.RefreshToken;
-using Identity.Features.Auth.SignIn;
+using Identity.Features.RefreshToken;
+using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net;
@@ -35,7 +35,7 @@ public class RefreshTokenTests(IntegrationTestWebApplicationFactory factory)
     {
         // Arrange: Use Bogus to generate user credentials
         string email = _faker.Internet.Email();
-        string password = $"P@{_faker.Internet.Password(10)}!";
+        string password = $"P@{_faker.Internet.Password()}!";
         await SeedUserAsync(email, password);
 
         HttpResponseMessage signInResponse = await _client.PostAsJsonAsync("/api/auth/sign-in", new SignInRequest
@@ -91,7 +91,7 @@ public class RefreshTokenTests(IntegrationTestWebApplicationFactory factory)
     {
         // Arrange: Generate user credentials using Bogus
         string email = _faker.Internet.Email();
-        string password = $"P@{_faker.Internet.Password(10)}!";
+        string password = $"P@{_faker.Internet.Password()}!";
         await SeedUserAsync(email, password);
 
         HttpResponseMessage signInResponse = await _client.PostAsJsonAsync("/api/auth/sign-in", new SignInRequest

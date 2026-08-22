@@ -30,7 +30,7 @@ public static class BookingsServicesRegistration
                                       ?? throw new InvalidOperationException(
                                           "Connection string for AppBookingsDbContext not found.");
 
-            options.ConfigureStayStackDefaults<AppBookingsDbContext>(
+            options.ConfigureStayStackDefaults(
                 connectionString,
                 "bookings",
                 environment is not null && environment.IsDevelopment());

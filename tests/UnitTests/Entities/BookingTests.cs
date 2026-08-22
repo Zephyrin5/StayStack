@@ -144,7 +144,7 @@ public class BookingTests
         Booking booking = CreateValidBooking();
 
         booking.Cancel();
-        Exception? exception = Record.Exception(() => booking.Cancel());
+        Exception? exception = Record.Exception(booking.Cancel);
 
         Assert.Null(exception);
         Assert.Equal(BookingStatus.Cancelled, booking.BookingStatus);

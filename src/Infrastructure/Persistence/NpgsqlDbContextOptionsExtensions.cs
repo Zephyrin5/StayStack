@@ -12,15 +12,17 @@ public static class NpgsqlDbContextOptionsExtensions
     ///     the earlier note on why that matters once two DbContexts target
     ///     the same connection string.
     /// </summary>
-    public static void ConfigureStayStackDefaults<TContext>(
+    public static void ConfigureStayStackDefaults(
         this DbContextOptionsBuilder builder,
         string connectionString,
         string moduleName,
-        bool isDevelopment) where TContext : DbContext
+        bool isDevelopment)
     {
         builder.UseNpgsql(connectionString, npgsql =>
         {
-            npgsql.MigrationsAssembly(typeof(TContext).Assembly.FullName);
+            // EF Core resolves migrations from the DbContext's assembly by
+            // default. Keeping that default avoids runtime assembly-name
+            // lookup while preserving one migration set per module.
             npgsql.MigrationsHistoryTable($"__ef_migrations_history_{moduleName}");
             npgsql.EnableRetryOnFailure();
         });

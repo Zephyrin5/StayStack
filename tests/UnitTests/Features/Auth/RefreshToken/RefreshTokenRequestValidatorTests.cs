@@ -1,5 +1,5 @@
 using FluentValidation.TestHelper;
-using Identity.Features.Auth.RefreshToken;
+using Identity.Features.RefreshToken;
 namespace UnitTests.Features.Auth.RefreshToken;
 
 public class RefreshTokenRequestValidatorTests

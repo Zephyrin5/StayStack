@@ -14,17 +14,15 @@ namespace Api.Serialization;
 ///     GlobalExceptionHandler and Results.Problem for the 404 page actually
 ///     use). Kept as a single instance so a type added to one module's
 ///     context is immediately covered everywhere, instead of the two paths
-///     silently drifting apart. The trailing DefaultJsonTypeInfoResolver is
-///     a reflection fallback for anything none of the source-generated
-///     contexts cover.
+///     silently drifting apart. There is deliberately no reflection fallback:
+///     new JSON shapes must be added to a source-generated context.
 /// </summary>
 public static class ApiJsonTypeInfoResolver
 {
     public static readonly IJsonTypeInfoResolver Combined = JsonTypeInfoResolver.Combine(
         IdentityJsonSerializerContext.Default,
         CatalogJsonSerializerContext.Default,
-        HostsFeaturesJsonSerializerContext.Default,
+        HostsJsonSerializerContext.Default,
         BookingsJsonSerializerContext.Default,
-        AppJsonSerializerContext.Default,
-        new DefaultJsonTypeInfoResolver());
+        AppJsonSerializerContext.Default);
 }

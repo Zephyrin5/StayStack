@@ -10,13 +10,13 @@ public class AppIdentityDbContext(DbContextOptions<AppIdentityDbContext> options
 {
     public DbSet<RefreshToken> RefreshTokens { get; set; }
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    protected override void OnModelCreating(ModelBuilder builder)
     {
-        modelBuilder.Ignore<IdentityRoleClaim<Guid>>();
-        modelBuilder.Ignore<IdentityUserClaim<Guid>>();
-        base.OnModelCreating(modelBuilder);
+        builder.Ignore<IdentityRoleClaim<Guid>>();
+        builder.Ignore<IdentityUserClaim<Guid>>();
+        base.OnModelCreating(builder);
 
-        modelBuilder.Entity<RefreshToken>(entity =>
+        builder.Entity<RefreshToken>(entity =>
         {
             // Sets max length in the database schema (e.g., VARCHAR(64) / NVARCHAR(64))
             entity.Property(e => e.TokenHash)
@@ -28,15 +28,15 @@ public class AppIdentityDbContext(DbContextOptions<AppIdentityDbContext> options
                 .IsUnique();
         });
 
-        modelBuilder.ApplyConfiguration(new RoleConfiguration());
-        modelBuilder.ApplyConfiguration(new UserConfiguration());
-        modelBuilder.ApplyConfiguration(new UserRoleConfiguration());
+        builder.ApplyConfiguration(new RoleConfiguration());
+        builder.ApplyConfiguration(new UserConfiguration());
+        builder.ApplyConfiguration(new UserRoleConfiguration());
 
         // Convert names to snake case
-        modelBuilder.Entity<ApplicationUser>().ToTable("users");
-        modelBuilder.Entity<IdentityRole<Guid>>().ToTable("roles");
-        modelBuilder.Entity<IdentityUserToken<Guid>>().ToTable("user_tokens");
-        modelBuilder.Entity<IdentityUserRole<Guid>>().ToTable("user_roles");
-        modelBuilder.Entity<IdentityUserLogin<Guid>>().ToTable("user_logins");
+        builder.Entity<ApplicationUser>().ToTable("users");
+        builder.Entity<IdentityRole<Guid>>().ToTable("roles");
+        builder.Entity<IdentityUserToken<Guid>>().ToTable("user_tokens");
+        builder.Entity<IdentityUserRole<Guid>>().ToTable("user_roles");
+        builder.Entity<IdentityUserLogin<Guid>>().ToTable("user_logins");
     }
 }

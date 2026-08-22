@@ -1,7 +1,7 @@
 ﻿using BuildingBlocks.Identity;
 using Identity.Configurations;
 using Identity.Entities;
-using Identity.Features.Auth.Common;
+using Identity.Features.Common;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
@@ -47,7 +47,7 @@ public static class IdentityServicesRegistration
             string connectionString = configuration.GetConnectionString("AppConnection")
                                       ?? throw new InvalidOperationException("Connection string for IdentityDbContext not found.");
 
-            options.ConfigureStayStackDefaults<AppIdentityDbContext>(
+            options.ConfigureStayStackDefaults(
                 connectionString,
                 "identity",
                 environment is not null && environment.IsDevelopment());
@@ -114,13 +114,11 @@ public static class IdentityServicesRegistration
         // it. HostOrAdministrator exists because combining Policies(Host,
         // Administrator) on one endpoint would be an AND of two policies,
         // not the "either role" check CreateUnit actually needs.
-        services.AddAuthorization(options =>
-        {
-            options.AddPolicy(AuthorizationPolicies.Host, policy => policy.RequireRole(AuthorizationPolicies.Host));
-            options.AddPolicy(AuthorizationPolicies.Administrator, policy => policy.RequireRole(AuthorizationPolicies.Administrator));
-            options.AddPolicy(AuthorizationPolicies.HostOrAdministrator,
+        services.AddAuthorizationBuilder()
+            .AddPolicy(AuthorizationPolicies.Host, policy => policy.RequireRole(AuthorizationPolicies.Host))
+            .AddPolicy(AuthorizationPolicies.Administrator, policy => policy.RequireRole(AuthorizationPolicies.Administrator))
+            .AddPolicy(AuthorizationPolicies.HostOrAdministrator,
                 policy => policy.RequireRole(AuthorizationPolicies.Host, AuthorizationPolicies.Administrator));
-        });
 
         return services;
     }
