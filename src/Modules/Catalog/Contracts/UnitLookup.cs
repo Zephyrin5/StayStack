@@ -1,3 +1,4 @@
+using Catalog.Entities;
 using Microsoft.EntityFrameworkCore;
 namespace Catalog.Contracts;
 
@@ -5,19 +6,25 @@ namespace Catalog.Contracts;
 // should only ever reach this through IUnitLookup, resolved via DI.
 internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
 {
-    public Task<UnitSummary?> GetUnitAsync(Guid unitId, CancellationToken cancellationToken)
+    public async Task<UnitSummary?> GetUnitAsync(Guid unitId, CancellationToken cancellationToken)
     {
-        // Plain scalar fields only, no LocalizedText involved - safe to
-        // project server-side, unlike GetPropertyByIdHandler's Name field.
-        return dbContext.Units.AsNoTracking()
-            .Where(u => u.Id == unitId)
-            .Select(u => new UnitSummary
+        // Materialize first, map after - Name is a LocalizedText (a
+        // value-converted jsonb column via StayStackDbContext's global
+        // convention), and EF Core can't translate .Values access on a
+        // converted CLR type into SQL inside a server-side .Select(). Same
+        // constraint GetPropertyByIdHandler (Catalog) already documents.
+        Unit? unit = await dbContext.Units.AsNoTracking()
+            .SingleOrDefaultAsync(u => u.Id == unitId, cancellationToken);
+
+        return unit is null
+            ? null
+            : new UnitSummary
             {
-                Id = u.Id,
-                MaxOccupancy = u.MaxOccupancy,
-                BasePrice = u.BasePrice,
-                Currency = u.Currency
-            })
-            .SingleOrDefaultAsync(cancellationToken);
+                Id = unit.Id,
+                Name = new Dictionary<string, string>(unit.Name.Values),
+                MaxOccupancy = unit.MaxOccupancy,
+                BasePrice = unit.BasePrice,
+                Currency = unit.Currency
+            };
     }
 }
