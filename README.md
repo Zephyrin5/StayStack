@@ -1,8 +1,8 @@
 # StayStack
 
-A hotel & chalet booking platform API, built as a modular monolith on .NET 10. Customers browse properties, check live availability on a price calendar, and hold a unit while they complete a booking - all backed by a single source of truth for inventory, so no unit ever gets double-booked regardless of which door it's booked through.
+A hotel & chalet booking platform API, built as a modular monolith on .NET 10. Customers browse properties, check live availability on a price calendar, hold a unit, and complete a booking as a guest or signed-in customer - all backed by a single source of truth for inventory, so no unit ever gets double-booked regardless of which door it's booked through.
 
-This is a backend-first, in-progress reference project. There's no frontend yet. See [Status](#status) for what's built and what's next.
+This is an in-progress reference project. See [Status](#status) for what's built and what's next.
 
 ## Architecture
 
@@ -18,13 +18,12 @@ src/
     Identity/            Auth: sign up/in, refresh tokens, JWT issuance
     Observability/       OpenTelemetry wiring (currently disabled, pending Grafana config)
   Modules/
-    Catalog/              Properties, units, price calendar, availability holds
+    Catalog/              Properties, units, price calendar, availability holds, plus a Catalog.Contracts sub-project Bookings depends on instead of Catalog itself
     Hosts/                 Host accounts, plus a Hosts.Contracts sub-project other modules depend on instead of Hosts itself
+    Bookings/               Guest/customer bookings - confirms a hold into a Pending booking (no payment integration yet)
   Web/
     Api/                    FastEndpoints host - the composition root, no business logic of its own
 ```
-
-A few decisions worth calling out:
 
 - **Module boundaries are compiler-enforced, not just convention.** Catalog and Identity depend on `Hosts.Contracts` (a handful of interfaces, zero dependencies), never on `Hosts` itself - they physically cannot reach `Hosts`' entities or `DbContext`, not just "don't currently."
 - **No double-booking, enforced by the database.** Availability holds use a Postgres `EXCLUDE` constraint (via `btree_gist`) on the unit + date range, so two overlapping holds on the same unit can't both commit even under concurrent requests - this isn't application-level locking, Postgres itself rejects the second write.
@@ -54,12 +53,13 @@ ASP.NET Core / FastEndpoints, Mediator, EF Core (Npgsql) + Dapper.AOT for hot-pa
    dotnet ef database update --project src/Infrastructure/Identity/Identity.csproj --startup-project src/Web/Api/Api.csproj --context AppIdentityDbContext
    dotnet ef database update --project src/Modules/Catalog/Catalog.csproj --startup-project src/Web/Api/Api.csproj --context AppCatalogDbContext
    dotnet ef database update --project src/Modules/Hosts/Hosts.csproj --startup-project src/Web/Api/Api.csproj --context AppHostsDbContext
+   dotnet ef database update --project src/Modules/Bookings/Bookings.csproj --startup-project src/Web/Api/Api.csproj --context AppBookingsDbContext
    ```
 4. **Run it:**
    ```
    dotnet run --project src/Web/Api/Api.csproj
    ```
-   API docs (Scalar) at `/api/docs`, health check at `/health`.
+   API docs (Scalar) at `/api/docs`, health check at `/health`. Runs at `http://localhost:5277` by default (see `src/Web/Api/Properties/launchSettings.json`).
 
 A seeded admin account is available for local testing: `admin@staystack.com` / `1234` (seed-only - see [Status](#status)).
 
@@ -86,11 +86,12 @@ dotnet tests/artifacts/bin/IntegrationTests/Debug/net10.0/IntegrationTests.dll
 
 ## Status
 
-**Built:** property/unit catalog (hotels + chalets), JWT auth (sign up, sign in, refresh, become-a-host), admin-assisted host/property creation, availability holds with database-enforced double-booking prevention, a price calendar endpoint (flat pricing only - see below), localization.
+**Built:** property/unit catalog (hotels + chalets) with public browse/search endpoints, JWT auth (sign up, sign in, refresh, become-a-host), admin-assisted host/property creation, availability holds with database-enforced double-booking prevention, a price calendar endpoint (flat pricing only - see below), guest-checkout bookings (created `Pending` - no payment integration yet), localization.
 
 **Not built yet:**
-- A confirmed `Booking` entity - holds exist, but there's no booking lifecycle (payment, confirmation, e-ticket) built on top of them yet.
-- Payment integration, guest checkout, coupons/offers/bundles.
+- Payment integration - bookings are created `Pending` and nothing confirms them yet.
+- Coupons/offers/bundles.
 - Rule-based pricing (seasonal/weekend/weekday/holiday/manual override) - `GetPriceCalendarHandler` currently returns each unit's flat base price for every day.
-- A frontend - customer site and admin panel are planned once the backend supports a full booking flow end-to-end.
+- A "list my bookings" or "list my properties" endpoint - `GetPropertiesResponse` does carry `HostId` for client-side filtering, but there's no server-side "mine only" query yet.
+- A frontend - in progress, not yet part of this repo's committed history.
 - The seeded admin account's password is a known local-dev value, not something meant to survive a real deployment - a proper credential-rotation flow is planned before that matters.

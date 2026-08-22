@@ -21,6 +21,7 @@
         <ProjectReference Include="..\..\src\Core\SeedWork\SeedWork.csproj"/>
         <ProjectReference Include="..\..\src\Infrastructure\Identity\Identity.csproj"/>
         <ProjectReference Include="..\..\src\Infrastructure\Persistence\Persistence.csproj"/>
+        <ProjectReference Include="..\..\src\Modules\Bookings\Bookings.csproj"/>
         <ProjectReference Include="..\..\src\Modules\Catalog\Catalog.csproj"/>
         <ProjectReference Include="..\..\src\Modules\Hosts\Hosts.csproj"/>
     </ItemGroup>

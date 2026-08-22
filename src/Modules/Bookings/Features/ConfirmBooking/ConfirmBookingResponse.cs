@@ -1,0 +1,12 @@
+using Bookings.Entities;
+namespace Bookings.Features.ConfirmBooking;
+
+public record ConfirmBookingResponse
+{
+    public Guid BookingId { get; init; }
+    public BookingStatus BookingStatus { get; init; }
+    public DateOnly CheckIn { get; init; }
+    public DateOnly CheckOut { get; init; }
+    public decimal TotalPrice { get; init; }
+    public string Currency { get; init; } = string.Empty;
+}

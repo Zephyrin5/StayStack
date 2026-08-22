@@ -1,14 +1,13 @@
-using Catalog.Contracts;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Persistence;
-namespace Catalog;
+namespace Bookings;
 
-public static class CatalogServicesRegistration
+public static class BookingsServicesRegistration
 {
-    public static IServiceCollection ConfigureCatalogServices(
+    public static IServiceCollection ConfigureBookingsServices(
         this IServiceCollection services,
         IConfiguration configuration,
         IWebHostEnvironment? environment = null)
@@ -24,22 +23,19 @@ public static class CatalogServicesRegistration
         // than being newed up by hand.
         services.AddScoped<AuditableEntitySaveChangesInterceptor>();
 
-        services.AddDbContext<AppCatalogDbContext>((serviceProvider, options) =>
+        services.AddDbContext<AppBookingsDbContext>((serviceProvider, options) =>
         {
             string connectionString = configuration.GetConnectionString("AppConnection")
                                       ?? throw new InvalidOperationException(
-                                          "Connection string for AppCatalogDbContext not found.");
+                                          "Connection string for AppBookingsDbContext not found.");
 
-            options.ConfigureStayStackDefaults<AppCatalogDbContext>(
+            options.ConfigureStayStackDefaults<AppBookingsDbContext>(
                 connectionString,
-                "catalog",
+                "bookings",
                 environment is not null && environment.IsDevelopment());
 
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
-
-        services.AddScoped<IUnitLookup, UnitLookup>();
-        services.AddScoped<IHoldConfirmation, HoldConfirmation>();
 
         return services;
     }

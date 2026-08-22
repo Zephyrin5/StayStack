@@ -1,3 +1,4 @@
+using Bookings;
 using Catalog;
 using Hosts;
 using Identity;
@@ -68,8 +69,12 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             services.AddDbContext<AppHostsDbContext>(options =>
                 options.ConfigureStayStackDefaults<AppHostsDbContext>(_dbContainer.GetConnectionString(), "hosts", isDevelopment: false));
 
+            services.RemoveAll<DbContextOptions<AppBookingsDbContext>>();
+            services.AddDbContext<AppBookingsDbContext>(options =>
+                options.ConfigureStayStackDefaults<AppBookingsDbContext>(_dbContainer.GetConnectionString(), "bookings", isDevelopment: false));
+
             // Build a temporary provider just to apply each module's real
-            // migrations before any test runs. All three share one physical
+            // migrations before any test runs. All four share one physical
             // database in this container, which Migrate() handles safely
             // regardless of call order - each module tracks its own applied
             // migrations in its own history table (see
@@ -80,6 +85,7 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppHostsDbContext>().Database.Migrate();
+            scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Database.Migrate();
         });
     }
 }

@@ -1,20 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
     </PropertyGroup>
-
-    <ItemGroup>
-        <!-- Catalog.Contracts is nested inside this project's folder; without
-             this, SDK-default globbing would compile its files into both
-             projects (the same CS0436 gotcha Hosts.csproj already hit and
-             documents for its own nested Contracts project). -->
-        <Compile Remove="Catalog.Contracts\**"/>
-        <EmbeddedResource Remove="Catalog.Contracts\**"/>
-        <None Remove="Catalog.Contracts\**"/>
-    </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="FastEndpoints"/>
@@ -27,8 +17,7 @@
         <ProjectReference Include="..\..\Core\SeedWork\SeedWork.csproj"/>
         <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
         <ProjectReference Include="..\..\Infrastructure\Persistence\Persistence.csproj"/>
-        <ProjectReference Include="..\Hosts\Hosts.Contracts\Hosts.Contracts.csproj"/>
-        <ProjectReference Include="Catalog.Contracts\Catalog.Contracts.csproj"/>
+        <ProjectReference Include="..\Catalog\Catalog.Contracts\Catalog.Contracts.csproj"/>
     </ItemGroup>
 
 </Project>

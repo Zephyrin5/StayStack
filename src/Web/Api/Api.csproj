@@ -22,6 +22,7 @@
         <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj" />
         <ProjectReference Include="..\..\Infrastructure\Identity\Identity.csproj" />
         <ProjectReference Include="..\..\Infrastructure\Observability\Observability.csproj" />
+        <ProjectReference Include="..\..\Modules\Bookings\Bookings.csproj" />
         <ProjectReference Include="..\..\Modules\Catalog\Catalog.csproj" />
         <ProjectReference Include="..\..\Modules\Hosts\Hosts.csproj" />
     </ItemGroup>

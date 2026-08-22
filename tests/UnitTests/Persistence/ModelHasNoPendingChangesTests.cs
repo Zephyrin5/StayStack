@@ -1,3 +1,4 @@
+using Bookings;
 using Catalog;
 using Hosts;
 using Identity;
@@ -42,6 +43,16 @@ public class ModelHasNoPendingChangesTests
         DbContextOptionsBuilder<AppHostsDbContext> builder = new DbContextOptionsBuilder<AppHostsDbContext>();
         builder.ConfigureStayStackDefaults<AppHostsDbContext>(UnusedConnectionString, "hosts", isDevelopment: false);
         using AppHostsDbContext context = new AppHostsDbContext(builder.Options);
+
+        Assert.False(context.Database.HasPendingModelChanges());
+    }
+
+    [Fact]
+    public void AppBookingsDbContext_HasNoPendingModelChanges()
+    {
+        DbContextOptionsBuilder<AppBookingsDbContext> builder = new DbContextOptionsBuilder<AppBookingsDbContext>();
+        builder.ConfigureStayStackDefaults<AppBookingsDbContext>(UnusedConnectionString, "bookings", isDevelopment: false);
+        using AppBookingsDbContext context = new AppBookingsDbContext(builder.Options);
 
         Assert.False(context.Database.HasPendingModelChanges());
     }

@@ -16,3 +16,8 @@ riderModule.iml
 # Misc
 *.zip
 *.log
+
+# Frontend (client/) - deferred from version control for now, not part of
+# this increment's commit. client/ has its own .gitignore for when it is
+# committed (node_modules, .next, .env.local, etc.).
+/client/

@@ -7,13 +7,36 @@ using FastEndpoints;
 using Microsoft.AspNetCore.Localization;
 namespace Api;
 
+using BookingsDiscoveredTypes = Bookings.DiscoveredTypes;
+using CatalogDiscoveredTypes = Catalog.DiscoveredTypes;
+using HostsDiscoveredTypes = Hosts.DiscoveredTypes;
+using IdentityDiscoveredTypes = Identity.DiscoveredTypes;
+
 public static class ApiServicesRegistration
 {
+    public const string ClientAppCorsPolicy = "ClientApp";
+
     public static IServiceCollection ConfigureApiServices(
         this IServiceCollection services,
         IConfiguration configuration)
     {
         services.AddScoped<ICurrentLanguageProvider, CultureInfoLanguageProvider>();
+
+        // Bearer-token auth (Authorization header), not cookies, so no
+        // AllowCredentials() needed - the browser client just needs the
+        // dev origin allowed to read responses at all. Origins come from
+        // config rather than being hardcoded so prod can set a different
+        // list without a code change.
+        string[] allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+        services.AddCors(options =>
+        {
+            options.AddPolicy(ClientAppCorsPolicy, policy =>
+            {
+                policy.WithOrigins(allowedOrigins)
+                    .AllowAnyHeader()
+                    .WithMethods("GET", "POST", "PUT", "DELETE");
+            });
+        });
 
         services.Configure<RequestLocalizationOptions>(options =>
         {
@@ -31,8 +54,18 @@ public static class ApiServicesRegistration
 
         services.AddScoped<ICurrentUserProvider, HttpContextCurrentUserProvider>();
         services.AddExceptionHandler<GlobalExceptionHandler>();
+        // Every module with its own Endpoint/Validator types needs its
+        // source-generated DiscoveredTypes list passed explicitly - once any
+        // list is passed, FastEndpoints stops reflection-scanning assemblies
+        // it wasn't given, so an omitted module's validators silently never
+        // fire (a request just reaches the handler with unvalidated data
+        // instead of failing with 400 - caught via a Bookings HTTP test that
+        // expected 400 and got 500 instead).
         services.AddFastEndpoints(
-            Identity.DiscoveredTypes.All,
+            IdentityDiscoveredTypes.All,
+            CatalogDiscoveredTypes.All,
+            HostsDiscoveredTypes.All,
+            BookingsDiscoveredTypes.All,
             DiscoveredTypes.All);
         // The combined source-generated resolver (each module's own DTOs
         // plus a reflection fallback) is wired onto Config.Serializer.Options

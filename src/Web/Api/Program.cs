@@ -1,4 +1,6 @@
 using Api;
+using Bookings;
+using Bookings.Serialization;
 using Catalog;
 using Catalog.Serialization;
 using FastEndpoints;
@@ -32,6 +34,7 @@ builder.Services.ConfigurePersistenceServices(builder.Configuration);
 builder.Services.ConfigureApiServices(builder.Configuration);
 builder.Services.ConfigureCatalogServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureHostsServices(builder.Configuration, builder.Environment);
+builder.Services.ConfigureBookingsServices(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHealthChecks();
 
@@ -91,6 +94,8 @@ app.UseWhen(context => context.Request.Path.StartsWithSegments("/api"), apiApp =
 
 app.UseHttpsRedirection();
 
+app.UseCors(ApiServicesRegistration.ClientAppCorsPolicy);
+
 // Outside the /api scoping above and unauthenticated on purpose - this is
 // for a load balancer/orchestrator to poll, not an API consumer, so it
 // shouldn't inherit either the ProblemDetails error shaping or any auth
@@ -100,18 +105,20 @@ app.MapHealthChecks("/health");
 app.UseFastEndpoints(options =>
 {
     // Each module owns the source-generated context for its own Request/
-    // Response DTOs (IdentityJsonSerializerContext, CatalogFeaturesJsonSerializerContext,
-    // HostsFeaturesJsonSerializerContext); this combines them into the one
-    // resolver FastEndpoints actually uses for (de)serialization. The
-    // DefaultJsonTypeInfoResolver at the end is a reflection fallback for
-    // anything none of those cover - framework types like ProblemDetails/
-    // ValidationProblemDetails that FastEndpoints' own validation-failure
-    // responses build (see Errors.ResponseBuilder below) - so an
-    // unregistered type fails closed to reflection instead of throwing.
+    // Response DTOs (IdentityJsonSerializerContext, CatalogJsonSerializerContext,
+    // HostsFeaturesJsonSerializerContext, BookingsJsonSerializerContext);
+    // this combines them into the one resolver FastEndpoints actually uses
+    // for (de)serialization. The DefaultJsonTypeInfoResolver at the end is
+    // a reflection fallback for anything none of those cover - framework
+    // types like ProblemDetails/ValidationProblemDetails that FastEndpoints'
+    // own validation-failure responses build (see Errors.ResponseBuilder
+    // below) - so an unregistered type fails closed to reflection instead
+    // of throwing.
     options.Serializer.Options.TypeInfoResolver = JsonTypeInfoResolver.Combine(
         IdentityJsonSerializerContext.Default,
         CatalogJsonSerializerContext.Default,
         HostsFeaturesJsonSerializerContext.Default,
+        BookingsJsonSerializerContext.Default,
         AppJsonSerializerContext.Default,
         new DefaultJsonTypeInfoResolver());
 
