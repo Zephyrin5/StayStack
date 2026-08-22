@@ -1,18 +1,14 @@
 using Api;
+using Api.Serialization;
 using Bookings;
-using Bookings.Serialization;
 using Catalog;
-using Catalog.Serialization;
 using FastEndpoints;
 using FastEndpoints.OpenApi;
 using Hosts;
-using Hosts.Serialization;
 using Identity;
-using Identity.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence;
 using Scalar.AspNetCore;
-using System.Text.Json.Serialization.Metadata;
 WebApplicationBuilder builder = WebApplication.CreateSlimBuilder(args);
 builder.WebHost.UseKestrelHttpsConfiguration();
 
@@ -21,7 +17,7 @@ builder.WebHost.UseKestrelHttpsConfiguration();
 // the Secret Manager instead of appsettings.json.
 if (builder.Environment.IsDevelopment())
 {
-    builder.Configuration.AddUserSecrets<Program>(optional: true);
+    builder.Configuration.AddUserSecrets<Program>(true);
 }
 
 // Add services to the container.
@@ -104,23 +100,13 @@ app.MapHealthChecks("/health");
 
 app.UseFastEndpoints(options =>
 {
-    // Each module owns the source-generated context for its own Request/
-    // Response DTOs (IdentityJsonSerializerContext, CatalogJsonSerializerContext,
-    // HostsFeaturesJsonSerializerContext, BookingsJsonSerializerContext);
-    // this combines them into the one resolver FastEndpoints actually uses
-    // for (de)serialization. The DefaultJsonTypeInfoResolver at the end is
-    // a reflection fallback for anything none of those cover - framework
-    // types like ProblemDetails/ValidationProblemDetails that FastEndpoints'
-    // own validation-failure responses build (see Errors.ResponseBuilder
-    // below) - so an unregistered type fails closed to reflection instead
-    // of throwing.
-    options.Serializer.Options.TypeInfoResolver = JsonTypeInfoResolver.Combine(
-        IdentityJsonSerializerContext.Default,
-        CatalogJsonSerializerContext.Default,
-        HostsFeaturesJsonSerializerContext.Default,
-        BookingsJsonSerializerContext.Default,
-        AppJsonSerializerContext.Default,
-        new DefaultJsonTypeInfoResolver());
+    // See ApiJsonTypeInfoResolver - the same combined resolver is also wired
+    // onto ASP.NET Core's native Http.Json.JsonOptions in
+    // ApiServicesRegistration, so GlobalExceptionHandler's WriteAsJsonAsync
+    // and the 404 page's Results.Problem (neither of which goes through
+    // FastEndpoints) get the same source-generated coverage instead of
+    // silently falling back to full reflection.
+    options.Serializer.Options.TypeInfoResolver = ApiJsonTypeInfoResolver.Combined;
 
     options.Errors.StatusCode = StatusCodes.Status400BadRequest;
 

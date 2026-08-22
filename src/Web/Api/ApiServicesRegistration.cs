@@ -1,6 +1,7 @@
 ﻿using Api.Common;
 using Api.Localization;
 using Api.Security;
+using Api.Serialization;
 using BuildingBlocks.Identity;
 using BuildingBlocks.Localization;
 using FastEndpoints;
@@ -53,6 +54,14 @@ public static class ApiServicesRegistration
                 new AcceptLanguageHeaderRequestCultureProvider()
             ];
         });
+
+        // WriteAsJsonAsync (GlobalExceptionHandler) and Results.Problem (the
+        // 404 page in Program.cs) don't go through FastEndpoints, so they'd
+        // otherwise fall back to ASP.NET Core's own fully-reflection-based
+        // default resolver even though every type they actually serialize
+        // is already covered by ApiJsonTypeInfoResolver.Combined.
+        services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
+            o.SerializerOptions.TypeInfoResolver = ApiJsonTypeInfoResolver.Combined);
 
         services.AddScoped<ICurrentUserProvider, HttpContextCurrentUserProvider>();
         services.AddExceptionHandler<GlobalExceptionHandler>();

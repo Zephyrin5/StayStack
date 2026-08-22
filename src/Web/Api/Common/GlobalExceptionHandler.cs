@@ -54,7 +54,24 @@ public sealed class GlobalExceptionHandler(
 
         httpContext.Response.StatusCode = problem.Status ?? StatusCodes.Status500InternalServerError;
         httpContext.Response.ContentType = "application/problem+json";
-        await httpContext.Response.WriteAsJsonAsync(problem, cancellationToken);
+
+        // problem's declared type is the base ProblemDetails (the switch
+        // above's common type), so writing it through the generic
+        // WriteAsJsonAsync(problem, ct) overload would serialize only base
+        // members - silently dropping ValidationProblemDetails.Errors for
+        // every ValidationException thrown from application code. Branching
+        // on the actual runtime type and passing its own source-generated
+        // JsonTypeInfo keeps Errors in the response and avoids reflection.
+        if (problem is ValidationProblemDetails validationProblem)
+        {
+            await httpContext.Response.WriteAsJsonAsync(
+                validationProblem, Serialization.AppJsonSerializerContext.Default.ValidationProblemDetails, cancellationToken: cancellationToken);
+        }
+        else
+        {
+            await httpContext.Response.WriteAsJsonAsync(
+                problem, Serialization.AppJsonSerializerContext.Default.ProblemDetails, cancellationToken: cancellationToken);
+        }
 
         return true;
     }
