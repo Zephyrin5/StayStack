@@ -19,6 +19,28 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
 
         builder.Property(t => t.FailureReason).HasMaxLength(500);
 
-        builder.HasIndex(t => t.BookingId);
+        // Two indexes over the same column, not one reconfigured - EF Core
+        // still treats repeated HasIndex(x => x.Prop).HasDatabaseName(...)
+        // calls as the same index even with two different explicit names
+        // (confirmed: it generated a migration that DROPped the first one).
+        // The HasIndex(expression, name) overload - naming the index at the
+        // call itself rather than via a later chained call - is what
+        // actually keys two calls on the same property as distinct indexes.
+        builder.HasIndex(t => t.BookingId, "ix_transactions_booking_id");
+
+        // A Pending or Succeeded transaction is the "active" one for a
+        // booking - only one may exist at a time. Enforced here (not just
+        // in InitiateTransactionHandler's pre-check, which alone can't stop
+        // two concurrent requests from both passing it and both inserting -
+        // see the DbUpdateException catch in the handler that turns a
+        // violation of this index into TransactionAlreadyInProgressException).
+        // Unlike UnitAvailabilityHold's exclusion constraint, a partial
+        // unique index has a real fluent API (HasFilter), so - unlike that
+        // one - this belongs in the model, not hand-written into a
+        // migration: it now survives a migration squash/regenerate for free.
+        builder.HasIndex(t => t.BookingId, "ix_transactions_booking_id_active")
+            .IsUnique()
+            .HasDatabaseName("ix_transactions_booking_id_active")
+            .HasFilter("transaction_status IN ('Pending', 'Succeeded')");
     }
 }
