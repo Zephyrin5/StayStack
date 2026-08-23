@@ -94,7 +94,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
 
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
-        TimeProvider timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(fixedInstant);
         HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
 
         HoldAvailabilityRequest command = new HoldAvailabilityRequest
@@ -158,7 +159,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
 
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
-        TimeProvider timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(fixedInstant);
         HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
 
         HoldAvailabilityRequest command = new HoldAvailabilityRequest
