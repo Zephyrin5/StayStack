@@ -16,15 +16,25 @@ public static class NpgsqlDbContextOptionsExtensions
         this DbContextOptionsBuilder builder,
         string connectionString,
         string moduleName,
-        bool isDevelopment)
+        bool isDevelopment,
+        string? migrationsAssembly = null)
     {
         builder.UseNpgsql(connectionString, npgsql =>
         {
             // EF Core resolves migrations from the DbContext's assembly by
             // default. Keeping that default avoids runtime assembly-name
-            // lookup while preserving one migration set per module.
+            // lookup while preserving one migration set per module - except
+            // for Jobs (TickerQDbContext), whose DbContext type is declared
+            // inside the TickerQ.EntityFrameworkCore package itself rather
+            // than a project this solution owns, so it has to name its
+            // migrations assembly explicitly instead.
             npgsql.MigrationsHistoryTable($"__ef_migrations_history_{moduleName}");
             npgsql.EnableRetryOnFailure();
+
+            if (migrationsAssembly is not null)
+            {
+                npgsql.MigrationsAssembly(migrationsAssembly);
+            }
         });
 
         builder.UseSnakeCaseNamingConvention();

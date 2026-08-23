@@ -5,10 +5,12 @@ using Identity;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Persistence;
 using Testcontainers.PostgreSql;
+using TickerQ.EntityFrameworkCore.DbContextFactory;
 using Transactions;
 namespace IntegrationTests;
 
@@ -36,6 +38,26 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+
+        // TickerQDbContext can't go through the RemoveAll<DbContextOptions<...>>
+        // + fresh AddDbContext override every other module's context uses
+        // below - AddOperationalStore registers it through its own internal
+        // wiring rather than a plain AddDbContext<TickerQDbContext> call, so
+        // RemoveAll<DbContextOptions<TickerQDbContext>> has nothing of
+        // TickerQ's own to actually remove (confirmed: resolving
+        // TickerQDbContext after that override still produced a context
+        // with no connection string at all). Feeding the container's
+        // connection string in through configuration instead means
+        // JobsServicesRegistration's own configuration.GetConnectionString
+        // call - the same one that runs in production - picks it up
+        // naturally, with no need to fight TickerQ's registration mechanism.
+        builder.ConfigureAppConfiguration((_, configBuilder) =>
+        {
+            configBuilder.AddInMemoryCollection([
+                new KeyValuePair<string, string?>("ConnectionStrings:AppConnection", _dbContainer.GetConnectionString())
+            ]);
+        });
+
         builder.ConfigureServices(services =>
         {
             // Production registration (ConfigureIdentityServices /
@@ -92,6 +114,7 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             scope.ServiceProvider.GetRequiredService<AppHostsDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>().Database.Migrate();
+            scope.ServiceProvider.GetRequiredService<TickerQDbContext>().Database.Migrate();
         });
     }
 }

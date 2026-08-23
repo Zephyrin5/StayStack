@@ -20,6 +20,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
+        <ProjectReference Include="..\..\Infrastructure\Jobs\Jobs.csproj"/>
         <ProjectReference Include="..\..\Infrastructure\Observability\Observability.csproj"/>
         <ProjectReference Include="..\..\Modules\Bookings\Bookings.csproj"/>
         <ProjectReference Include="..\..\Modules\Catalog\Catalog.csproj"/>

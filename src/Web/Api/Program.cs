@@ -7,6 +7,8 @@ using FastEndpoints;
 using FastEndpoints.OpenApi;
 using Hosts;
 using Identity;
+using Jobs;
+using TickerQ.DependencyInjection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
@@ -37,6 +39,7 @@ builder.Services.ConfigureCatalogServices(builder.Configuration, builder.Environ
 builder.Services.ConfigureHostsServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureBookingsServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureTransactionsServices(builder.Configuration, builder.Environment);
+builder.Services.ConfigureJobsServices(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHealthChecks();
 
@@ -133,7 +136,16 @@ app.UseHttpsRedirection();
 
 app.UseCors(ApiServicesRegistration.ClientAppCorsPolicy);
 
+// Explicit rather than relying on WebApplication's implicit auto-insertion
+// (which only fires immediately before the first endpoint-routing-aware
+// middleware) - UseTickerQ below maps the dashboard's own endpoints and
+// needs HttpContext.User already populated via WithHostAuthentication.
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.UseRateLimiter();
+
+app.UseTickerQ();
 
 // Outside the /api scoping above and unauthenticated on purpose - this is
 // for a load balancer/orchestrator to poll, not an API consumer, so it

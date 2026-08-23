@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="TickerQ"/>
+        <PackageReference Include="TickerQ.EntityFrameworkCore"/>
+        <PackageReference Include="TickerQ.Dashboard"/>
+        <!-- Direct (not just transitive via TickerQ.EntityFrameworkCore) so
+             dotnet ef's own "does the startup project reference
+             Microsoft.EntityFrameworkCore.Design" check passes when this
+             project is used as the startup project on its own -
+             TickerQDbContext (see TickerQDbContextDesignTimeFactory) isn't
+             discoverable through Api.csproj's broader DI-based scan the way
+             every other module's DbContext is, so migrations for it are
+             generated against this project directly instead. -->
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- BuildingBlocks only for AuthorizationPolicies.Administrator, used
+             to gate the TickerQ dashboard behind the same role check every
+             other admin-only surface in this app already uses - see
+             JobsServicesRegistration. Persistence for ConfigureStayStackDefaults
+             (Npgsql/snake-case/retry/migrations-history-table conventions) -
+             TickerQDbContext isn't a StayStackDbContext (it's owned by the
+             TickerQ package itself, no soft-delete/jsonb conventions to opt
+             into), but the connection-level conventions every other module's
+             DbContext gets still apply here, so this reuses the same helper
+             instead of hand-rolling UseNpgsql/UseSnakeCaseNamingConvention a
+             second time. -->
+        <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
+        <ProjectReference Include="..\Persistence\Persistence.csproj"/>
+    </ItemGroup>
+
+</Project>
