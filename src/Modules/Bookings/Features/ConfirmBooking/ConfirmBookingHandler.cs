@@ -1,5 +1,4 @@
 using Bookings.Entities;
-using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using Catalog.Contracts;
 using Mediator;
@@ -8,7 +7,6 @@ namespace Bookings.Features.ConfirmBooking;
 public class ConfirmBookingHandler(
     AppBookingsDbContext dbContext,
     IHoldConfirmation holdConfirmation,
-    IUnitLookup unitLookup,
     ICurrentUserProvider currentUserProvider) : IRequestHandler<ConfirmBookingRequest, ConfirmBookingResponse>
 {
     public async ValueTask<ConfirmBookingResponse> Handle(ConfirmBookingRequest request, CancellationToken cancellationToken)
@@ -17,18 +15,15 @@ public class ConfirmBookingHandler(
         // throws (missing/already-consumed/expired), nothing in Bookings
         // has been touched yet. Two separate DbContexts/connections here,
         // same "sequential writes, narrow failure window, no distributed
-        // transaction" tradeoff BecomeHostHandler already documents: if the
-        // save below fails after this succeeds, the hold stays 'booked'
-        // with no corresponding Booking row - rare (only a Bookings-side
-        // DB failure between the two calls), and out of scope to fully
-        // close for this first increment.
+        // transaction" tradeoff BecomeHostHandler already documents. Unlike
+        // that handler's own two writes, though, this one now has an
+        // explicit compensating rollback below if the second write fails.
+        //
+        // Price/currency come from the hold's own snapshot (taken at
+        // HoldAvailabilityHandler time), not a fresh unit lookup - the
+        // price the customer saw when they held the range is the price
+        // they get, even if the unit's base price changed since.
         ConfirmedHold hold = await holdConfirmation.ConfirmHoldAsync(request.HoldId, cancellationToken);
-
-        UnitSummary unit = await unitLookup.GetUnitAsync(hold.UnitId, cancellationToken)
-                           ?? throw new NotFoundException("Unit", hold.UnitId);
-
-        int nights = hold.CheckOut.DayNumber - hold.CheckIn.DayNumber;
-        decimal totalPrice = unit.BasePrice * nights;
 
         Booking booking = Booking.Create(
             hold.UnitId,
@@ -40,11 +35,23 @@ public class ConfirmBookingHandler(
             hold.CheckIn,
             hold.CheckOut,
             hold.GuestCount,
-            totalPrice,
-            unit.Currency);
+            hold.TotalPrice,
+            hold.Currency);
 
-        dbContext.Bookings.Add(booking);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            dbContext.Bookings.Add(booking);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            // Best-effort compensation: revert the hold back to 'held' so
+            // it isn't permanently stuck occupying inventory nobody ever
+            // got a Booking for. Same idiom as BecomeHostHandler's
+            // rollback on its second write failing.
+            await holdConfirmation.ReleaseHoldAsync(request.HoldId, cancellationToken);
+            throw;
+        }
 
         return new ConfirmBookingResponse
         {

@@ -2,6 +2,7 @@ using Bookings.Contracts;
 using BuildingBlocks.Exceptions;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Transactions.Entities;
 namespace Transactions.Features.InitiateTransaction;
 
@@ -20,7 +21,12 @@ public class InitiateTransactionHandler(
         }
 
         // A Pending or already-Succeeded transaction blocks a new one -
-        // only a Failed transaction leaves room for a retry.
+        // only a Failed transaction leaves room for a retry. This check is
+        // just a fast-path/friendly-error optimization: it's not what
+        // actually prevents double-charging under concurrent requests (two
+        // callers can both pass it before either inserts) - the partial
+        // unique index in the migration is the real authority, enforced
+        // below via the DbUpdateException catch.
         bool hasTransactionInProgress = await dbContext.Transactions
             .AnyAsync(t => t.BookingId == request.BookingId && t.TransactionStatus != TransactionStatus.Failed, cancellationToken);
 
@@ -32,7 +38,15 @@ public class InitiateTransactionHandler(
         Transaction transaction = Transaction.Create(request.BookingId, booking.TotalPrice, booking.Currency);
 
         dbContext.Transactions.Add(transaction);
-        await dbContext.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            throw new TransactionAlreadyInProgressException(request.BookingId);
+        }
 
         return new InitiateTransactionResponse
         {

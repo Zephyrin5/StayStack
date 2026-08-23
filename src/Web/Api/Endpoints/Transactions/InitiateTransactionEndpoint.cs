@@ -1,6 +1,7 @@
 using FastEndpoints;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Transactions.Features.InitiateTransaction;
 using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
@@ -13,6 +14,7 @@ public class InitiateTransactionEndpoint(IMediator mediator) : Endpoint<Initiate
         Post("");
         AllowAnonymous();
         Group<TransactionsGroup>();
+        Options(x => x.RequireRateLimiting(ApiServicesRegistration.AuthRateLimitPolicy));
 
         Summary(s =>
         {

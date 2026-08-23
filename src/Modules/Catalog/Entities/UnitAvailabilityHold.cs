@@ -1,4 +1,5 @@
 using NpgsqlTypes;
+using SeedWork.Enums;
 namespace Catalog.Entities;
 
 /// <summary>
@@ -26,11 +27,23 @@ public sealed class UnitAvailabilityHold
     public NpgsqlRange<DateOnly> StayRange { get; set; }
 
     // "held" | "booked" - plain string rather than an enum/EF conversion,
-    // since the exclusion constraint's WHERE clause references these
-    // literal values directly in raw SQL; keeping the C# side as the same
-    // literal strings avoids a translation step to keep in sync.
+    // since HoldAvailabilityHandler/HoldConfirmation reference these literal
+    // values directly in hand-written SQL; keeping the C# side as the same
+    // literal strings avoids a translation step to keep in sync. NOTE: the
+    // exclusion constraint itself has no WHERE clause - it applies to every
+    // row regardless of status/expiry, which is exactly why stale 'held'
+    // rows past hold_expires_at must be actively deleted (see
+    // HoldAvailabilityHandler's cleanup DELETE) rather than relying on the
+    // constraint to ignore them.
     public string Status { get; set; } = "held";
 
     public DateTimeOffset? HoldExpiresAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+
+    // Snapshotted from the unit at hold-creation time, not read live at
+    // confirm time - Unit.BasePrice can change (SetBasePrice) between a
+    // customer holding a range and confirming it; the price they saw when
+    // they held it is the price they get.
+    public decimal TotalPrice { get; set; }
+    public Currency Currency { get; set; }
 }

@@ -4,6 +4,7 @@ using Identity.Configurations;
 using Identity.Features.SignIn;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
@@ -23,6 +24,7 @@ public class SignInEndpoint(
         AllowAnonymous();
 
         Group<AuthGroup>();
+        Options(x => x.RequireRateLimiting(ApiServicesRegistration.AuthRateLimitPolicy));
 
         // Document the endpoint
         Summary(s =>

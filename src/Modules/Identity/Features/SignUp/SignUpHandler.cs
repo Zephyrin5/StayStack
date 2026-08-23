@@ -70,7 +70,7 @@ public class SignUpHandler(
         var roles = await userManager.GetRolesAsync(user);
 
         string accessToken = authTokenProvider.GenerateJwtToken(user, roles);
-        string refreshToken = await authTokenProvider.GenerateRefreshToken(user.Id, cancellationToken);
+        string refreshToken = await authTokenProvider.GenerateRefreshToken(user.Id, familyId: null, parentTokenId: null, cancellationToken);
 
         return new SignUpResponse
         {

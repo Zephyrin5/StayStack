@@ -83,7 +83,10 @@ public class BecomeHostHandler(
         // again just to get one that reflects what they just did.
         var roles = await userManager.GetRolesAsync(user);
         string accessToken = authTokenProvider.GenerateJwtToken(user, roles);
-        string refreshToken = await authTokenProvider.GenerateRefreshToken(user.Id, cancellationToken);
+        // Not a rotation of any specific presented refresh token (this
+        // endpoint doesn't take one) - starts a new family, same as
+        // SignIn/SignUp.
+        string refreshToken = await authTokenProvider.GenerateRefreshToken(user.Id, familyId: null, parentTokenId: null, cancellationToken);
 
         return new BecomeHostResponse
         {

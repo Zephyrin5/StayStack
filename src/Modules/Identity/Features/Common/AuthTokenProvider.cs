@@ -10,7 +10,10 @@ using System.Security.Cryptography;
 using System.Text;
 namespace Identity.Features.Common;
 
-public class AuthTokenProvider(AppIdentityDbContext dbContext, IOptions<AuthTokenConfiguration> jwtSettings) : IAuthTokenProvider
+public class AuthTokenProvider(
+    AppIdentityDbContext dbContext,
+    IOptions<AuthTokenConfiguration> jwtSettings,
+    TimeProvider timeProvider) : IAuthTokenProvider
 {
     private readonly AuthTokenConfiguration _authTokenSettings = jwtSettings.Value;
 
@@ -43,7 +46,7 @@ public class AuthTokenProvider(AppIdentityDbContext dbContext, IOptions<AuthToke
         SecurityTokenDescriptor tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddMinutes(_authTokenSettings.AccessTokenLifespanInMinutes),
+            Expires = timeProvider.GetUtcNow().UtcDateTime.AddMinutes(_authTokenSettings.AccessTokenLifespanInMinutes),
             SigningCredentials = credentials,
             Issuer = _authTokenSettings.Issuer,
             Audience = _authTokenSettings.Audience
@@ -53,7 +56,7 @@ public class AuthTokenProvider(AppIdentityDbContext dbContext, IOptions<AuthToke
         return handler.CreateToken(tokenDescriptor);
     }
 
-    public async Task<string> GenerateRefreshToken(Guid userId, CancellationToken cancellationToken)
+    public async Task<string> GenerateRefreshToken(Guid userId, Guid? familyId, Guid? parentTokenId, CancellationToken cancellationToken)
     {
         byte[] randomNumber = new byte[64];
         using RandomNumberGenerator rng = RandomNumberGenerator.Create();
@@ -61,48 +64,78 @@ public class AuthTokenProvider(AppIdentityDbContext dbContext, IOptions<AuthToke
         string newRefreshTokenPlain = Convert.ToBase64String(randomNumber);
 
         string newRefreshTokenHash = HashToken(newRefreshTokenPlain);
+        DateTime now = timeProvider.GetUtcNow().UtcDateTime;
 
         Entities.RefreshToken newRefreshTokenEntity = new Entities.RefreshToken
         {
             TokenHash = newRefreshTokenHash,
             UserId = userId,
-            ExpiresAt = DateTime.UtcNow.AddDays(_authTokenSettings.RefreshTokenLifespanInDays),
+            FamilyId = familyId ?? Guid.CreateVersion7(),
+            ParentTokenId = parentTokenId,
+            CreatedAt = now,
+            ExpiresAt = now.AddDays(_authTokenSettings.RefreshTokenLifespanInDays),
             IsRevoked = false
         };
 
         dbContext.RefreshTokens.Add(newRefreshTokenEntity);
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        if (parentTokenId is not null)
+        {
+            await dbContext.RefreshTokens
+                .Where(rt => rt.Id == parentTokenId)
+                .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.ReplacedByTokenId, newRefreshTokenEntity.Id), cancellationToken);
+        }
+
         return newRefreshTokenPlain;
     }
 
-    public async Task<Guid> ValidateRefreshToken(string refreshToken, CancellationToken cancellationToken)
+    public async Task<RefreshTokenValidationResult> ValidateRefreshToken(string refreshToken, CancellationToken cancellationToken)
     {
         string incomingTokenHash = HashToken(refreshToken);
+        DateTime now = timeProvider.GetUtcNow().UtcDateTime;
 
-        Entities.RefreshToken? storedToken = await dbContext.RefreshTokens
+        // A single conditional UPDATE, not a SELECT-then-check-then-UPDATE:
+        // two concurrent callers presenting the same still-valid token can
+        // no longer both observe IsRevoked == false and both rotate it -
+        // only one UPDATE can match `!rt.IsRevoked` before the other
+        // commits, so exactly one succeeds and the other lands in the
+        // rows == 0 branch below, where it's correctly classified as reuse
+        // rather than silently succeeding a second time.
+        int rowsUpdated = await dbContext.RefreshTokens
+            .Where(rt => rt.TokenHash == incomingTokenHash && !rt.IsRevoked && rt.ExpiresAt > now)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(rt => rt.IsRevoked, true)
+                .SetProperty(rt => rt.RevokedAt, now), cancellationToken);
+
+        if (rowsUpdated == 1)
+        {
+            Entities.RefreshToken consumed = await dbContext.RefreshTokens.AsNoTracking()
+                .SingleAsync(rt => rt.TokenHash == incomingTokenHash, cancellationToken);
+
+            return new RefreshTokenValidationResult(consumed.UserId, consumed.Id, consumed.FamilyId);
+        }
+
+        // The atomic update matched nothing - find out why, to return the
+        // right error (and, for reuse, revoke the family). A second lookup
+        // rather than folding this into the UPDATE's WHERE clause, since we
+        // need to tell "doesn't exist" apart from "expired" apart from
+        // "already revoked" for the caller.
+        Entities.RefreshToken? existing = await dbContext.RefreshTokens.AsNoTracking()
             .SingleOrDefaultAsync(rt => rt.TokenHash == incomingTokenHash, cancellationToken);
 
-        if (storedToken == null)
+        if (existing is null)
         {
             throw new InvalidRefreshTokenException();
         }
 
-        if (storedToken.IsRevoked)
+        if (existing.IsRevoked)
         {
-            await RevokeAllUserTokensAsync(storedToken.UserId, cancellationToken);
+            await RevokeFamilyAsync(existing.FamilyId, cancellationToken);
             throw new RefreshTokenReuseDetectedException();
         }
 
-        if (storedToken.ExpiresAt <= DateTime.UtcNow)
-        {
-            throw new RefreshTokenExpiredException();
-        }
-
-        storedToken.IsRevoked = true;
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return storedToken.UserId;
+        throw new RefreshTokenExpiredException();
     }
 
     public async Task RevokeRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken)
@@ -118,6 +151,7 @@ public class AuthTokenProvider(AppIdentityDbContext dbContext, IOptions<AuthToke
         }
 
         storedToken.IsRevoked = true;
+        storedToken.RevokedAt = timeProvider.GetUtcNow().UtcDateTime;
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -128,17 +162,18 @@ public class AuthTokenProvider(AppIdentityDbContext dbContext, IOptions<AuthToke
         return Convert.ToBase64String(hash);
     }
 
-    private async Task RevokeAllUserTokensAsync(Guid userId, CancellationToken cancellationToken)
+    // Reuse detection revokes only the replayed token's own family (every
+    // token descended from one sign-in), not every session the user has
+    // anywhere - a stolen token on one device shouldn't sign the user out
+    // of an unrelated device's session too.
+    private async Task RevokeFamilyAsync(Guid familyId, CancellationToken cancellationToken)
     {
-        var activeTokens = await dbContext.RefreshTokens
-            .Where(rt => rt.UserId == userId && !rt.IsRevoked)
-            .ToListAsync(cancellationToken);
+        DateTime now = timeProvider.GetUtcNow().UtcDateTime;
 
-        foreach (Entities.RefreshToken token in activeTokens)
-        {
-            token.IsRevoked = true;
-        }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await dbContext.RefreshTokens
+            .Where(rt => rt.FamilyId == familyId && !rt.IsRevoked)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(rt => rt.IsRevoked, true)
+                .SetProperty(rt => rt.RevokedAt, now), cancellationToken);
     }
 }

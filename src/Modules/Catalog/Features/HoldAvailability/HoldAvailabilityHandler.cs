@@ -43,12 +43,34 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
             await dbContext.Database.BeginTransactionAsync(cancellationToken);
         IDbConnection connection = dbContext.Database.GetDbConnection();
 
+        DateTimeOffset now = timeProvider.GetUtcNow();
+
+        // Stale holds from abandoned checkouts otherwise sit in 'held'
+        // forever (nothing else ever transitions them out), permanently
+        // occupying their slot in the exclusion constraint below even
+        // though GetPriceCalendarHandler already treats them as available.
+        // Scoped to this unit and run right before the INSERT that would
+        // actually be blocked by them - the one case where a stale row's
+        // presence matters.
+        const string cleanupSql = """
+                                  DELETE FROM unit_availability_holds
+                                  WHERE unit_id = @UnitId AND status = 'held' AND hold_expires_at <= @Now;
+                                  """;
+
+        await connection.ExecuteAsync(new CommandDefinition(
+            cleanupSql,
+            new { request.UnitId, Now = now },
+            transaction.GetDbTransaction(),
+            cancellationToken: cancellationToken));
+
         Guid holdId = Guid.CreateVersion7();
-        DateTime holdExpiresAt = DateTime.UtcNow.Add(HoldDuration);
+        DateTimeOffset holdExpiresAt = now.Add(HoldDuration);
+        int nights = request.CheckOut.DayNumber - request.CheckIn.DayNumber;
+        decimal totalPrice = unit.BasePrice * nights;
 
         const string sql = """
-                           INSERT INTO unit_availability_holds (id, unit_id, stay_range, status, hold_expires_at, created_at, guest_count)
-                           VALUES (@Id, @UnitId, @StayRange, 'held', @HoldExpiresAt, @CreatedAt, @GuestCount);
+                           INSERT INTO unit_availability_holds (id, unit_id, stay_range, status, hold_expires_at, created_at, guest_count, total_price, currency)
+                           VALUES (@Id, @UnitId, @StayRange, 'held', @HoldExpiresAt, @CreatedAt, @GuestCount, @TotalPrice, @Currency);
                            """;
 
         try
@@ -64,8 +86,10 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
                     // date semantics.
                     StayRange = new NpgsqlRange<DateOnly>(request.CheckIn, true, request.CheckOut, false),
                     HoldExpiresAt = holdExpiresAt,
-                    CreatedAt = DateTime.UtcNow,
-                    request.GuestCount
+                    CreatedAt = now,
+                    request.GuestCount,
+                    TotalPrice = totalPrice,
+                    Currency = unit.Currency.ToString()
                 },
                 transaction.GetDbTransaction(),
                 cancellationToken: cancellationToken));
@@ -87,7 +111,9 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
         return new HoldAvailabilityResponse
         {
             HoldId = holdId,
-            HoldExpiresAt = holdExpiresAt
+            HoldExpiresAt = holdExpiresAt.UtcDateTime,
+            TotalPrice = totalPrice,
+            Currency = unit.Currency
         };
     }
 }

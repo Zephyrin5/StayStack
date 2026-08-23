@@ -43,7 +43,7 @@ public class AuthTokenProviderTests : IDisposable
         var optionsMock = new Mock<IOptions<AuthTokenConfiguration>>();
         optionsMock.Setup(o => o.Value).Returns(config);
 
-        _sut = new AuthTokenProvider(_dbContext, optionsMock.Object);
+        _sut = new AuthTokenProvider(_dbContext, optionsMock.Object, TimeProvider.System);
     }
 
     public void Dispose()
@@ -58,7 +58,7 @@ public class AuthTokenProviderTests : IDisposable
     {
         Guid userId = Guid.NewGuid();
 
-        string rawToken = await _sut.GenerateRefreshToken(userId, CancellationToken.None);
+        string rawToken = await _sut.GenerateRefreshToken(userId, familyId: null, parentTokenId: null, CancellationToken.None);
 
         string expectedHash = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(rawToken)));
         Identity.Entities.RefreshToken? storedToken = await _dbContext.RefreshTokens.SingleOrDefaultAsync(rt => rt.UserId == userId);
@@ -71,12 +71,19 @@ public class AuthTokenProviderTests : IDisposable
     public async Task ValidateRefreshToken_ShouldRevokeTokenOnFirstUse()
     {
         Guid userId = Guid.NewGuid();
-        string rawToken = await _sut.GenerateRefreshToken(userId, CancellationToken.None);
+        string rawToken = await _sut.GenerateRefreshToken(userId, familyId: null, parentTokenId: null, CancellationToken.None);
 
-        Guid returnedUserId = await _sut.ValidateRefreshToken(rawToken, CancellationToken.None);
+        RefreshTokenValidationResult result = await _sut.ValidateRefreshToken(rawToken, CancellationToken.None);
 
-        Assert.Equal(userId, returnedUserId);
-        Identity.Entities.RefreshToken storedToken = await _dbContext.RefreshTokens.FirstAsync(rt => rt.UserId == userId);
+        Assert.Equal(userId, result.UserId);
+
+        // AsNoTracking - ValidateRefreshToken now consumes the token via
+        // ExecuteUpdateAsync (a direct UPDATE, not a tracked-entity
+        // mutation), so the row GenerateRefreshToken's Add() call left
+        // tracked in this same DbContext is stale; a tracking query here
+        // would return that stale in-memory copy instead of the DB's
+        // current state.
+        Identity.Entities.RefreshToken storedToken = await _dbContext.RefreshTokens.AsNoTracking().FirstAsync(rt => rt.UserId == userId);
         Assert.True(storedToken.IsRevoked);
     }
 
@@ -94,7 +101,7 @@ public class AuthTokenProviderTests : IDisposable
     public async Task ValidateRefreshToken_ShouldThrowRefreshTokenReuseDetectedException_WhenTokenIsReused()
     {
         Guid userId = Guid.NewGuid();
-        string rawToken = await _sut.GenerateRefreshToken(userId, CancellationToken.None);
+        string rawToken = await _sut.GenerateRefreshToken(userId, familyId: null, parentTokenId: null, CancellationToken.None);
 
         // First use (valid)
         await _sut.ValidateRefreshToken(rawToken, CancellationToken.None);

@@ -4,6 +4,7 @@ using Identity.Configurations;
 using Identity.Features.SignUp;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
@@ -19,6 +20,7 @@ public class RegisterEndpoint(
         AllowAnonymous();
 
         Group<AuthGroup>();
+        Options(x => x.RequireRateLimiting(ApiServicesRegistration.AuthRateLimitPolicy));
 
         Summary(s =>
         {

@@ -18,18 +18,22 @@ public class RefreshTokenHandler(
         // than a separate manual check in the endpoint.
         string refreshToken = request.RefreshToken ?? throw new InvalidRefreshTokenException();
 
-        // 1. Validate the refresh token
-        Guid userId = await authTokenProvider.ValidateRefreshToken(refreshToken, cancellationToken);
+        // 1. Validate the refresh token (atomically consumes it - see
+        // AuthTokenProvider.ValidateRefreshToken)
+        RefreshTokenValidationResult validated = await authTokenProvider.ValidateRefreshToken(refreshToken, cancellationToken);
 
         // 2. Get user roles
-        ApplicationUser user = await userManager.FindByIdAsync(userId.ToString())
+        ApplicationUser user = await userManager.FindByIdAsync(validated.UserId.ToString())
                                ?? throw new UnauthorizedAccessException("Invalid refresh token.");
         var roles = await userManager.GetRolesAsync(user);
 
 
-        // 3. Generate a brand-new Access Token and Refresh Token pair
+        // 3. Generate a brand-new Access Token and Refresh Token pair - the
+        // new refresh token stays in the same rotation family as the one
+        // just consumed.
         string newAccessToken = authTokenProvider.GenerateJwtToken(user, roles);
-        string newRefreshToken = await authTokenProvider.GenerateRefreshToken(userId, cancellationToken);
+        string newRefreshToken = await authTokenProvider.GenerateRefreshToken(
+            validated.UserId, validated.FamilyId, validated.TokenId, cancellationToken);
 
 
         // 4. Return the new token pair

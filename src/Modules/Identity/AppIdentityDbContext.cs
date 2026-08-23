@@ -26,6 +26,9 @@ public class AppIdentityDbContext(DbContextOptions<AppIdentityDbContext> options
             // Adds a unique index for lightning-fast lookups
             entity.HasIndex(e => e.TokenHash)
                 .IsUnique();
+
+            // RevokeFamilyAsync's WHERE FamilyId == ... AND !IsRevoked scan.
+            entity.HasIndex(e => e.FamilyId);
         });
 
         builder.ApplyConfiguration(new RoleConfiguration());

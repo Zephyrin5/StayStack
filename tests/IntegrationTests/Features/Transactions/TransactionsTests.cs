@@ -15,6 +15,7 @@ using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Transactions;
 using Transactions.Features.GetTransactions;
 using Transactions.Features.InitiateTransaction;
 using Transactions.Features.MarkTransactionFailed;
@@ -183,6 +184,38 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Initiate_ConcurrentRequestsForSameBooking_ExactlyOneTransactionIsCreated()
+    {
+        // The pre-check (AnyAsync) alone can't stop two concurrent requests
+        // from both observing "no transaction yet" and both inserting -
+        // the partial unique index on (booking_id) WHERE status IN
+        // (Pending, Succeeded) is the actual authority, surfaced back as
+        // TransactionAlreadyInProgressException via the DbUpdateException
+        // catch in InitiateTransactionHandler.
+        // Arrange
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        Guid bookingId = await HoldAndConfirmBookingAsync(unit.Id);
+
+        // Act: fire concurrent InitiateTransaction requests for the same booking.
+        const int concurrentRequests = 10;
+        Task<HttpResponseMessage>[] tasks = [.. Enumerable.Range(0, concurrentRequests)
+            .Select(_ => factory.CreateClient().PostAsJsonAsync(
+                "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, TestContext.Current.CancellationToken))];
+
+        HttpResponseMessage[] responses = await Task.WhenAll(tasks);
+
+        // Assert
+        Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
+        Assert.Equal(concurrentRequests - 1, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppTransactionsDbContext transactionsDb = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        int transactionCount = await transactionsDb.Transactions.CountAsync(t => t.BookingId == bookingId, TestContext.Current.CancellationToken);
+        Assert.Equal(1, transactionCount);
     }
 
     [Fact]

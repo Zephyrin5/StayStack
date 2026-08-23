@@ -64,8 +64,11 @@ public class GetPriceCalendarHandler(
                                NOT EXISTS (
                                    SELECT 1 FROM unit_availability_holds h
                                    WHERE h.unit_id = @UnitId
-                                     AND h.status IN ('held', 'booked')
                                      AND h.stay_range @> d::date
+                                     AND (
+                                         h.status = 'booked'
+                                         OR (h.status = 'held' AND (h.hold_expires_at IS NULL OR h.hold_expires_at > now()))
+                                     )
                                ) AS "IsAvailable"
                            FROM generate_series(@From::date, @To::date - interval '1 day', interval '1 day') AS d
                            CROSS JOIN units u

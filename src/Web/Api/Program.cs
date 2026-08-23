@@ -1,4 +1,5 @@
 using Api;
+using Api.RateLimiting;
 using Api.Serialization;
 using Bookings;
 using Catalog;
@@ -7,8 +8,11 @@ using FastEndpoints.OpenApi;
 using Hosts;
 using Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 using Persistence;
 using Scalar.AspNetCore;
+using System.Threading.RateLimiting;
 using Transactions;
 WebApplicationBuilder builder = WebApplication.CreateSlimBuilder(args);
 builder.WebHost.UseKestrelHttpsConfiguration();
@@ -35,6 +39,41 @@ builder.Services.ConfigureBookingsServices(builder.Configuration, builder.Enviro
 builder.Services.ConfigureTransactionsServices(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHealthChecks();
+
+// Fixed-window, keyed by caller IP - auth and payment-initiation endpoints
+// are the obvious credential-stuffing/abuse targets and had no
+// application-level limiting at all. RequireRateLimiting("auth") is
+// applied per-endpoint via Options() in Configure() (SignInEndpoint,
+// RegisterEndpoint, RefreshTokenEndpoint, InitiateTransactionEndpoint).
+//
+// Limit/window resolved from IOptions<AuthRateLimitOptions> per partition
+// (not captured once into a local at startup) specifically so tests can
+// override it via the standard services.Configure<AuthRateLimitOptions>
+// DI-replacement pattern: appsettings.Testing.json sets a very high limit
+// so the shared integration-test WebApplicationFactory (one instance, one
+// rate limiter, reused by every test in the collection) doesn't trip it on
+// ordinary test traffic; RateLimitingTests overrides it back down on its
+// own WithWebHostBuilder-derived factory to actually exercise a 429.
+builder.Services.Configure<AuthRateLimitOptions>(builder.Configuration.GetSection("RateLimiting"));
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.AddPolicy(ApiServicesRegistration.AuthRateLimitPolicy, httpContext =>
+    {
+        AuthRateLimitOptions limits = httpContext.RequestServices.GetRequiredService<IOptions<AuthRateLimitOptions>>().Value;
+
+        return RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = limits.AuthPermitLimit,
+                Window = TimeSpan.FromSeconds(limits.AuthWindowSeconds),
+                QueueLimit = 0
+            });
+    });
+});
 
 builder.Services.AddHttpContextAccessor();
 
@@ -93,6 +132,8 @@ app.UseWhen(context => context.Request.Path.StartsWithSegments("/api"), apiApp =
 app.UseHttpsRedirection();
 
 app.UseCors(ApiServicesRegistration.ClientAppCorsPolicy);
+
+app.UseRateLimiter();
 
 // Outside the /api scoping above and unauthenticated on purpose - this is
 // for a load balancer/orchestrator to poll, not an API consumer, so it

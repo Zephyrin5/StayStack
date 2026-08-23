@@ -124,6 +124,43 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
     }
 
     [Fact]
+    public async Task Handle_ExpiredHeldRow_DoesNotBlockAvailability()
+    {
+        // An abandoned 'held' row past its hold_expires_at must show as
+        // available even before anyone's HoldAvailabilityHandler cleanup
+        // DELETE has actually removed the row - see the review finding
+        // this closes (expired holds otherwise blocked inventory forever).
+        // Arrange
+        Unit unit = CreateTestUnit();
+        DateOnly from = new DateOnly(2026, 9, 1);
+        DateOnly to = new DateOnly(2026, 9, 3);
+
+        UnitAvailabilityHold expiredHold = new UnitAvailabilityHold
+        {
+            Id = Guid.NewGuid(),
+            UnitId = unit.Id,
+            Status = "held",
+            StayRange = new NpgsqlRange<DateOnly>(from, true, to, false),
+            HoldExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+        };
+
+        await SeedDatabaseAsync(unit, expiredHold);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        HybridCache cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
+        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache);
+
+        GetPriceCalendarRequest request = new GetPriceCalendarRequest { UnitId = unit.Id, From = from, To = to };
+
+        // Act
+        GetPriceCalendarResponse response = await handler.Handle(request, CancellationToken.None);
+
+        // Assert
+        Assert.All(response.Days, day => Assert.True(day.IsAvailable));
+    }
+
+    [Fact]
     public async Task Handle_NonActiveHoldStatuses_DoesNotBlockAvailability()
     {
         // Statuses other than 'held' or 'booked' (e.g. 'released', 'expired') should be ignored by SQL

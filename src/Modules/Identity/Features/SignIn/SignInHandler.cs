@@ -25,7 +25,7 @@ public class SignInHandler(
 
         // 4. Generate the JWT Token (Using the AOT-safe JsonWebTokenHandler instead of JwtSecurityTokenHandler)
         string accessToken = authTokenProvider.GenerateJwtToken(user, roles);
-        string refreshToken = await authTokenProvider.GenerateRefreshToken(user.Id, cancellationToken);
+        string refreshToken = await authTokenProvider.GenerateRefreshToken(user.Id, familyId: null, parentTokenId: null, cancellationToken);
 
         // 5. Return our positional record using modern constructor syntax
         return new SignInResponse

@@ -111,6 +111,37 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task ConfirmBooking_ShouldUsePriceLockedAtHoldTime_NotUnitsCurrentPrice()
+    {
+        // A hold snapshots total_price/currency at HoldAvailabilityHandler
+        // time - if the unit's base price changes afterward, confirming
+        // that hold must still charge what the customer saw when they held
+        // it, not the unit's new price.
+        // Arrange
+        Unit unit = CreateTestUnit(100m);
+        await SeedCatalogAsync(unit);
+        Guid holdId = await HoldUnitAsync(unit.Id); // 100/night * 3 nights = 300
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppCatalogDbContext catalogDb = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            Unit trackedUnit = await catalogDb.Units.SingleAsync(u => u.Id == unit.Id, TestContext.Current.CancellationToken);
+            trackedUnit.SetBasePrice(500m);
+            await catalogDb.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        // Act
+        HttpResponseMessage response = await _client.PostAsJsonAsync(
+            "/api/bookings", CreateValidRequest(holdId), TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        ConfirmBookingResponse? result = await response.Content.ReadFromJsonAsync<ConfirmBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.Equal(300m, result.TotalPrice); // the price at hold time, not 1500m (the new price)
+    }
+
+    [Fact]
     public async Task ConfirmBooking_ShouldReturn404_WhenHoldIdDoesNotExist()
     {
         HttpResponseMessage response = await _client.PostAsJsonAsync(

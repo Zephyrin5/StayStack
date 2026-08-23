@@ -1,6 +1,7 @@
 using BuildingBlocks.Exceptions;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
+using SeedWork.Enums;
 using System.Data;
 using System.Data.Common;
 namespace Catalog.Contracts;
@@ -9,6 +10,20 @@ namespace Catalog.Contracts;
 // reach this through IHoldConfirmation, resolved via DI.
 internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmation
 {
+    // Raw shape of the RETURNING row - Currency comes back as its
+    // character(3) column text, mapped to the enum after materializing
+    // rather than asking Dapper to convert it, same "materialize first, map
+    // after" reasoning UnitLookup already documents for its jsonb column.
+    private sealed record ConfirmedHoldRow
+    {
+        public Guid UnitId { get; init; }
+        public DateOnly CheckIn { get; init; }
+        public DateOnly CheckOut { get; init; }
+        public int GuestCount { get; init; }
+        public decimal TotalPrice { get; init; }
+        public string Currency { get; init; } = string.Empty;
+    }
+
     public async Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken)
     {
         DbConnection connection = dbContext.Database.GetDbConnection();
@@ -29,12 +44,42 @@ internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmati
                            UPDATE unit_availability_holds
                            SET status = 'booked'
                            WHERE id = @HoldId AND status = 'held' AND hold_expires_at > now()
-                           RETURNING unit_id AS "UnitId", lower(stay_range) AS "CheckIn", upper(stay_range) AS "CheckOut", guest_count AS "GuestCount";
+                           RETURNING unit_id AS "UnitId", lower(stay_range) AS "CheckIn", upper(stay_range) AS "CheckOut", guest_count AS "GuestCount", total_price AS "TotalPrice", currency AS "Currency";
                            """;
 
-        ConfirmedHold? confirmedHold = await connection.QuerySingleOrDefaultAsync<ConfirmedHold>(
+        ConfirmedHoldRow? row = await connection.QuerySingleOrDefaultAsync<ConfirmedHoldRow>(
             new CommandDefinition(sql, new { HoldId = holdId }, cancellationToken: cancellationToken));
 
-        return confirmedHold ?? throw new NotFoundException("Hold", holdId);
+        if (row is null)
+        {
+            throw new NotFoundException("Hold", holdId);
+        }
+
+        return new ConfirmedHold
+        {
+            UnitId = row.UnitId,
+            CheckIn = row.CheckIn,
+            CheckOut = row.CheckOut,
+            GuestCount = row.GuestCount,
+            TotalPrice = row.TotalPrice,
+            Currency = Enum.Parse<Currency>(row.Currency.Trim())
+        };
+    }
+
+    public async Task ReleaseHoldAsync(Guid holdId, CancellationToken cancellationToken)
+    {
+        DbConnection connection = dbContext.Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open)
+        {
+            await dbContext.Database.OpenConnectionAsync(cancellationToken);
+        }
+
+        const string sql = """
+                           UPDATE unit_availability_holds
+                           SET status = 'held'
+                           WHERE id = @HoldId AND status = 'booked';
+                           """;
+
+        await connection.ExecuteAsync(new CommandDefinition(sql, new { HoldId = holdId }, cancellationToken: cancellationToken));
     }
 }

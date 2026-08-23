@@ -1,3 +1,4 @@
+using SeedWork.Enums;
 namespace Catalog.Contracts;
 
 /// <summary>
@@ -15,6 +16,16 @@ public interface IHoldConfirmation
     ///     hold succeed silently.
     /// </summary>
     Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     Compensating action for a ConfirmHoldAsync that succeeded but
+    ///     whose corresponding Booking write then failed - reverts 'booked'
+    ///     back to 'held' so the hold isn't permanently stuck occupying
+    ///     inventory nobody ever got a Booking for. Best-effort/idempotent:
+    ///     a no-op if the hold is no longer 'booked' (already released, or
+    ///     never existed).
+    /// </summary>
+    Task ReleaseHoldAsync(Guid holdId, CancellationToken cancellationToken);
 }
 
 public record ConfirmedHold
@@ -23,4 +34,6 @@ public record ConfirmedHold
     public DateOnly CheckIn { get; init; }
     public DateOnly CheckOut { get; init; }
     public int GuestCount { get; init; }
+    public decimal TotalPrice { get; init; }
+    public Currency Currency { get; init; }
 }

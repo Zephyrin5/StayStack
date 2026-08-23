@@ -7,17 +7,18 @@ using BuildingBlocks.Localization;
 using FastEndpoints;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.Localization;
-namespace Api;
-
 using BookingsDiscoveredTypes = Bookings.DiscoveredTypes;
 using CatalogDiscoveredTypes = Catalog.DiscoveredTypes;
 using HostsDiscoveredTypes = Hosts.DiscoveredTypes;
 using IdentityDiscoveredTypes = Identity.DiscoveredTypes;
 using TransactionsDiscoveredTypes = Transactions.DiscoveredTypes;
 
+namespace Api;
+
 public static class ApiServicesRegistration
 {
     public const string ClientAppCorsPolicy = "ClientApp";
+    public const string AuthRateLimitPolicy = "auth";
 
     public static IServiceCollection ConfigureApiServices(
         this IServiceCollection services,

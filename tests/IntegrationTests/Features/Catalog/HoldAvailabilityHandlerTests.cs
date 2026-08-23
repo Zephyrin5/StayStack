@@ -72,6 +72,16 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         Assert.Equal(new NpgsqlRange<DateOnly>(today, true,
             today.AddDays(3), false), persistedHold.StayRange);
         Assert.Equal(2, persistedHold.GuestCount);
+
+        // Price/currency snapshotted at hold time (100/night * 3 nights),
+        // not left to be recomputed from a possibly-changed unit price
+        // later at confirm time.
+        Assert.Equal(300m, persistedHold.TotalPrice);
+        Assert.Equal(SeedWork.Enums.Currency.KWD, persistedHold.Currency);
+
+        // TimeProvider-derived, not DateTime.UtcNow - deterministic given
+        // the FakeTimeProvider above.
+        Assert.Equal(fixedInstant.AddMinutes(15).UtcDateTime, result.HoldExpiresAt);
     }
 
     [Fact]
@@ -112,6 +122,60 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         // Assert
         Assert.NotNull(result);
         Assert.NotEqual(Guid.Empty, result.HoldId);
+    }
+
+    [Fact]
+    public async Task Handle_ExpiredHeldRowOverlapsRequestedRange_DeletesStaleHoldAndSucceeds()
+    {
+        // A held row nobody ever confirmed or retried sits in 'held' past
+        // its hold_expires_at otherwise forever - the exclusion constraint
+        // has no WHERE clause of its own to ignore it, so the handler must
+        // actively delete it before inserting. Proves that cleanup fires.
+        // Arrange
+        Unit unit = CreateTestUnit();
+        DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
+        DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
+
+        UnitAvailabilityHold expiredHold = new UnitAvailabilityHold
+        {
+            Id = Guid.NewGuid(),
+            UnitId = unit.Id,
+            Status = "held",
+            StayRange = new NpgsqlRange<DateOnly>(today, true, today.AddDays(2), false),
+            HoldExpiresAt = fixedInstant.AddMinutes(-1),
+            CreatedAt = fixedInstant.AddMinutes(-16)
+        };
+
+        await SeedDatabaseAsync(unit, expiredHold);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(fixedInstant);
+        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+
+        HoldAvailabilityRequest command = new HoldAvailabilityRequest
+        {
+            UnitId = unit.Id,
+            CheckIn = today,
+            CheckOut = today.AddDays(2),
+            GuestCount = 2
+        };
+
+        // Act
+        HoldAvailabilityResponse result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        Assert.NotEqual(Guid.Empty, result.HoldId);
+
+        List<UnitAvailabilityHold> holds = await context.UnitAvailabilityHolds
+            .AsNoTracking()
+            .Where(h => h.UnitId == unit.Id)
+            .ToListAsync();
+
+        // The stale row is gone, not just superseded - only the new hold remains.
+        UnitAvailabilityHold onlyHold = Assert.Single(holds);
+        Assert.Equal(result.HoldId, onlyHold.Id);
     }
 
     [Fact]

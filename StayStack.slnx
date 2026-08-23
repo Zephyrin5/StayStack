@@ -9,7 +9,7 @@
         <Project Path="src/Infrastructure/Persistence/Persistence.csproj"/>
     </Folder>
     <Folder Name="/src/Modules/">
-        <Project Path="src/Infrastructure/Identity/Identity.csproj"/>
+        <Project Path="src/Modules/Identity/Identity.csproj"/>
         <Project Path="src/Modules/Bookings/Bookings.Contracts/Bookings.Contracts.csproj"/>
         <Project Path="src/Modules/Bookings/Bookings.csproj"/>
         <Project Path="src/Modules/Catalog/Catalog.Contracts/Catalog.Contracts.csproj"/>

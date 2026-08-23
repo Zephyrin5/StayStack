@@ -7,6 +7,7 @@
         <PackageReference Include="Dapper"/>
         <PackageReference Include="Dapper.AOT"/>
         <PackageReference Include="EFCore.NamingConventions"/>
+        <PackageReference Include="JetBrains.Annotations"/>
         <PackageReference Include="Microsoft.EntityFrameworkCore"/>
         <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL"/>
     </ItemGroup>
@@ -14,12 +15,6 @@
     <ItemGroup>
         <ProjectReference Include="..\..\Core\SeedWork\SeedWork.csproj"/>
         <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
-    </ItemGroup>
-
-    <ItemGroup>
-        <Reference Include="JetBrains.Annotations">
-            <HintPath>C:\Users\Zephyrus\.nuget\packages\jetbrains.annotations\2026.2.0\lib\netstandard2.0\JetBrains.Annotations.dll</HintPath>
-        </Reference>
     </ItemGroup>
 
 </Project>

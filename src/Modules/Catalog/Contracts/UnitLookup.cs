@@ -27,4 +27,27 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
                 Currency = unit.Currency
             };
     }
+
+    public async Task<IReadOnlyDictionary<Guid, UnitSummary>> GetUnitsAsync(IEnumerable<Guid> unitIds, CancellationToken cancellationToken)
+    {
+        List<Guid> ids = [.. unitIds];
+
+        // Same materialize-first-map-after constraint as GetUnitAsync
+        // above - Name is a value-converted jsonb column, so .Values can't
+        // be part of the server-side .Select().
+        List<Unit> units = await dbContext.Units.AsNoTracking()
+            .Where(u => ids.Contains(u.Id))
+            .ToListAsync(cancellationToken);
+
+        return units.ToDictionary(
+            unit => unit.Id,
+            unit => new UnitSummary
+            {
+                Id = unit.Id,
+                Name = new Dictionary<string, string>(unit.Name.Values),
+                MaxOccupancy = unit.MaxOccupancy,
+                BasePrice = unit.BasePrice,
+                Currency = unit.Currency
+            });
+    }
 }
