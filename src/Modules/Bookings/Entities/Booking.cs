@@ -1,5 +1,5 @@
 using Ardalis.GuardClauses;
-using BuildingBlocks.Exceptions;
+using Bookings.Contracts;
 using SeedWork.Abstractions;
 using SeedWork.Enums;
 using SeedWork.Interfaces;

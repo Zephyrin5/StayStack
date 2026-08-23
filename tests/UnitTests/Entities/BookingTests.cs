@@ -1,5 +1,5 @@
+using Bookings.Contracts;
 using Bookings.Entities;
-using BuildingBlocks.Exceptions;
 using SeedWork.Enums;
 namespace UnitTests.Entities;
 
