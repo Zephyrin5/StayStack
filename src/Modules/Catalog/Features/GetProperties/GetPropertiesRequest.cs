@@ -6,4 +6,5 @@ public record GetPropertiesRequest : IRequest<GetPropertiesResponse>
 {
     public string? City { get; init; }
     public PropertyType? PropertyType { get; init; }
+    public Guid? HostId { get; init; }
 }

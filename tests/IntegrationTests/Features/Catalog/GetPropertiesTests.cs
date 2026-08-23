@@ -59,6 +59,28 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         return (becomeHostResult.AccessToken, becomeHostResult.HostId);
     }
 
+    private async Task<string> SeedNonHostUserAsync()
+    {
+        string email = _faker.Internet.Email();
+        string password = $"P@1{_faker.Internet.Password()}!";
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        ApplicationUser user = new ApplicationUser { Id = Guid.NewGuid(), Email = email, UserName = email };
+        IdentityResult createResult = await userManager.CreateAsync(user, password);
+        Assert.True(createResult.Succeeded, "Failed to seed test user.");
+
+        HttpResponseMessage signInResponse = await _client.PostAsJsonAsync("/api/auth/sign-in", new SignInRequest
+        {
+            Email = email,
+            Password = password
+        }, TestContext.Current.CancellationToken);
+        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(signInResult?.AccessToken);
+
+        return signInResult.AccessToken;
+    }
+
     private async Task<Guid> CreatePropertyAsync(string accessToken, string city, PropertyType propertyType = PropertyType.Hotel)
     {
         using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/catalog/properties");
@@ -159,5 +181,74 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         HttpResponseMessage response = await _client.GetAsync($"/api/catalog/properties/{Guid.NewGuid()}", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetProperties_ShouldFilterByHostId_ForAnonymousCaller()
+    {
+        // Arrange
+        (string firstHostToken, Guid firstHostId) = await SeedHostUserAsync();
+        (string secondHostToken, _) = await SeedHostUserAsync();
+        Guid firstHostPropertyId = await CreatePropertyAsync(firstHostToken, "Kuwait City");
+        await CreatePropertyAsync(secondHostToken, "Kuwait City");
+
+        // Act
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/catalog/properties?HostId={firstHostId}", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        GetPropertiesResponse? result = await response.Content.ReadFromJsonAsync<GetPropertiesResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.All(result.Properties, p => Assert.Equal(firstHostId, p.HostId));
+        Assert.Contains(result.Properties, p => p.Id == firstHostPropertyId);
+    }
+
+    [Fact]
+    public async Task GetMyProperties_ShouldReturnOnlyTheCallersOwnProperties()
+    {
+        // Arrange
+        (string firstHostToken, Guid firstHostId) = await SeedHostUserAsync();
+        (string secondHostToken, _) = await SeedHostUserAsync();
+        Guid firstPropertyId = await CreatePropertyAsync(firstHostToken, "Kuwait City");
+        Guid secondPropertyId = await CreatePropertyAsync(firstHostToken, "Al Ahmadi");
+        await CreatePropertyAsync(secondHostToken, "Kuwait City");
+
+        // Act
+        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, "/api/catalog/properties/mine");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", firstHostToken);
+        HttpResponseMessage response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        GetPropertiesResponse? result = await response.Content.ReadFromJsonAsync<GetPropertiesResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.Equal(2, result.Properties.Count);
+        Assert.All(result.Properties, p => Assert.Equal(firstHostId, p.HostId));
+        Assert.Contains(result.Properties, p => p.Id == firstPropertyId);
+        Assert.Contains(result.Properties, p => p.Id == secondPropertyId);
+    }
+
+    [Fact]
+    public async Task GetMyProperties_ShouldReturn403_ForNonHostCaller()
+    {
+        // Arrange
+        string nonHostToken = await SeedNonHostUserAsync();
+
+        // Act
+        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, "/api/catalog/properties/mine");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", nonHostToken);
+        HttpResponseMessage response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetMyProperties_ShouldReturn401_WhenNotAuthenticated()
+    {
+        HttpResponseMessage response = await _client.GetAsync("/api/catalog/properties/mine", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 }

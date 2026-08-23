@@ -18,6 +18,11 @@ public class GetPropertiesHandler(AppCatalogDbContext dbContext) : IRequestHandl
             query = query.Where(p => p.PropertyType == request.PropertyType);
         }
 
+        if (request.HostId is not null)
+        {
+            query = query.Where(p => p.HostId == request.HostId);
+        }
+
         // Materialize first, project after - Name is a LocalizedText (a
         // value-converted jsonb column via StayStackDbContext's global
         // convention), and EF Core can't translate .Values access on a
