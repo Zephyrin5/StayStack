@@ -1,3 +1,5 @@
+using BuildingBlocks.Pagination;
+using Catalog.Entities;
 using Catalog.Features.GetProperties;
 using Hosts.Contracts;
 using Mediator;
@@ -22,17 +24,26 @@ namespace Catalog.Features.GetMyProperties;
 // call (PropertySummaryMapper), not through the Mediator dispatch layer.
 public class GetMyPropertiesHandler(
     AppCatalogDbContext dbContext,
-    IHostAuthorization hostAuthorization) : IRequestHandler<GetMyPropertiesRequest, GetPropertiesResponse>
+    IHostAuthorization hostAuthorization) : IRequestHandler<GetMyPropertiesRequest, PagedResponse<PropertySummary>>
 {
-    public async ValueTask<GetPropertiesResponse> Handle(GetMyPropertiesRequest request, CancellationToken cancellationToken)
+    public async ValueTask<PagedResponse<PropertySummary>> Handle(GetMyPropertiesRequest request, CancellationToken cancellationToken)
     {
         Guid hostId = hostAuthorization.RequireHostId();
 
-        var properties = await dbContext.Properties
+        // Id as a tiebreaker convention, not a deliberate sort - see
+        // GetPropertiesHandler's identical comment.
+        (List<Property> properties, int totalCount) = await dbContext.Properties
             .AsNoTracking()
             .Where(p => p.HostId == hostId)
-            .ToListAsync(cancellationToken);
+            .OrderBy(p => p.Id)
+            .ToPagedListAsync(request.Page, request.PageSize, cancellationToken);
 
-        return new GetPropertiesResponse { Properties = PropertySummaryMapper.Map(properties) };
+        return new PagedResponse<PropertySummary>
+        {
+            Items = PropertySummaryMapper.Map(properties),
+            Page = request.Page,
+            PageSize = request.PageSize,
+            TotalCount = totalCount
+        };
     }
 }

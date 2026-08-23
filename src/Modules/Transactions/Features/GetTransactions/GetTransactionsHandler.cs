@@ -1,11 +1,12 @@
+using BuildingBlocks.Pagination;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Transactions.Entities;
 namespace Transactions.Features.GetTransactions;
 
-public class GetTransactionsHandler(AppTransactionsDbContext dbContext) : IRequestHandler<GetTransactionsRequest, GetTransactionsResponse>
+public class GetTransactionsHandler(AppTransactionsDbContext dbContext) : IRequestHandler<GetTransactionsRequest, PagedResponse<TransactionSummary>>
 {
-    public async ValueTask<GetTransactionsResponse> Handle(GetTransactionsRequest request, CancellationToken cancellationToken)
+    public async ValueTask<PagedResponse<TransactionSummary>> Handle(GetTransactionsRequest request, CancellationToken cancellationToken)
     {
         var query = dbContext.Transactions.AsNoTracking();
 
@@ -14,13 +15,17 @@ public class GetTransactionsHandler(AppTransactionsDbContext dbContext) : IReque
             query = query.Where(t => t.TransactionStatus == request.Status);
         }
 
-        List<Transaction> transactions = await query
-            .OrderByDescending(t => t.CreatedAt)
-            .ToListAsync(cancellationToken);
+        // Id as a tiebreaker, not a sort criterion - CreatedAt alone isn't
+        // a total order (two transactions can share a timestamp), so
+        // pagination needs it appended to keep page boundaries
+        // deterministic. See GetPropertiesHandler's identical reasoning.
+        (List<Transaction> transactions, int totalCount) = await query
+            .OrderByDescending(t => t.CreatedAt).ThenBy(t => t.Id)
+            .ToPagedListAsync(request.Page, request.PageSize, cancellationToken);
 
-        return new GetTransactionsResponse
+        return new PagedResponse<TransactionSummary>
         {
-            Transactions =
+            Items =
             [
                 .. transactions.Select(t => new TransactionSummary
                 {
@@ -32,7 +37,10 @@ public class GetTransactionsHandler(AppTransactionsDbContext dbContext) : IReque
                     FailureReason = t.FailureReason,
                     CreatedAt = t.CreatedAt
                 })
-            ]
+            ],
+            Page = request.Page,
+            PageSize = request.PageSize,
+            TotalCount = totalCount
         };
     }
 }

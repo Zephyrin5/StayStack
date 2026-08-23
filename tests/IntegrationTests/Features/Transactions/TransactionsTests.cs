@@ -2,6 +2,7 @@ using Bogus;
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
+using BuildingBlocks.Pagination;
 using Catalog;
 using Catalog.Entities;
 using Catalog.Enums;
@@ -308,10 +309,10 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert - unfiltered
         Assert.Equal(HttpStatusCode.OK, allResponse.StatusCode);
-        GetTransactionsResponse? all =
-            await allResponse.Content.ReadFromJsonAsync<GetTransactionsResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedResponse<TransactionSummary>? all =
+            await allResponse.Content.ReadFromJsonAsync<PagedResponse<TransactionSummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(all);
-        Assert.Contains(all.Transactions, t => t.TransactionId == initiated.TransactionId);
+        Assert.Contains(all.Items, t => t.TransactionId == initiated.TransactionId);
 
         // Act - filtered to a status the seeded transaction doesn't have
         HttpResponseMessage filteredResponse = await _client.SendAsync(
@@ -319,10 +320,10 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert - filtered
         Assert.Equal(HttpStatusCode.OK, filteredResponse.StatusCode);
-        GetTransactionsResponse? filtered =
-            await filteredResponse.Content.ReadFromJsonAsync<GetTransactionsResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedResponse<TransactionSummary>? filtered =
+            await filteredResponse.Content.ReadFromJsonAsync<PagedResponse<TransactionSummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(filtered);
-        Assert.DoesNotContain(filtered.Transactions, t => t.TransactionId == initiated.TransactionId);
+        Assert.DoesNotContain(filtered.Items, t => t.TransactionId == initiated.TransactionId);
     }
 
     [Fact]

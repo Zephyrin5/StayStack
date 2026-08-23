@@ -1,6 +1,8 @@
+using BuildingBlocks.Pagination;
 using Catalog.Features.AdminCreateProperty;
 using Catalog.Features.CreateProperty;
 using Catalog.Features.CreateUnit;
+using Catalog.Features.GetMyProperties;
 using Catalog.Features.GetPriceCalendar;
 using Catalog.Features.GetProperties;
 using Catalog.Features.GetPropertyById;
@@ -19,7 +21,8 @@ namespace Catalog.Serialization;
 [JsonSerializable(typeof(HoldAvailabilityRequest))]
 [JsonSerializable(typeof(HoldAvailabilityResponse))]
 [JsonSerializable(typeof(GetPropertiesRequest))]
-[JsonSerializable(typeof(GetPropertiesResponse))]
+[JsonSerializable(typeof(PagedResponse<PropertySummary>))]
+[JsonSerializable(typeof(GetMyPropertiesRequest))]
 [JsonSerializable(typeof(GetPropertyByIdRequest))]
 [JsonSerializable(typeof(GetPropertyByIdResponse))]
 public partial class CatalogJsonSerializerContext : JsonSerializerContext;

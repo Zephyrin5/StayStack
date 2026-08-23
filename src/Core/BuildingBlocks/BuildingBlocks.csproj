@@ -6,6 +6,11 @@
     <ItemGroup>
         <PackageReference Include="JetBrains.Annotations"/>
         <PackageReference Include="Mediator.Abstractions"/>
+        <!-- Only for PaginationExtensions.ToPagedListAsync's IQueryable
+             extension - every module consuming BuildingBlocks already
+             references EF Core transitively via Persistence, so this isn't
+             a new dependency in practice, just a direct one. -->
+        <PackageReference Include="Microsoft.EntityFrameworkCore"/>
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
     </ItemGroup>
 

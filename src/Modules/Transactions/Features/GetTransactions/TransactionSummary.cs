@@ -2,11 +2,6 @@ using SeedWork.Enums;
 using Transactions.Entities;
 namespace Transactions.Features.GetTransactions;
 
-public record GetTransactionsResponse
-{
-    public List<TransactionSummary> Transactions { get; init; } = [];
-}
-
 public record TransactionSummary
 {
     public Guid TransactionId { get; init; }

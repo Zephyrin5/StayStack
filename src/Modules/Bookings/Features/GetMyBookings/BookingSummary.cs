@@ -2,11 +2,6 @@ using Bookings.Entities;
 using SeedWork.Enums;
 namespace Bookings.Features.GetMyBookings;
 
-public record GetMyBookingsResponse
-{
-    public List<BookingSummary> Bookings { get; init; } = [];
-}
-
 public record BookingSummary
 {
     public Guid BookingId { get; init; }

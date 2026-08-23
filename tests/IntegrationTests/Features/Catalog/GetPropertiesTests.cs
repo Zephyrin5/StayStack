@@ -1,4 +1,5 @@
 using Bogus;
+using BuildingBlocks.Pagination;
 using Catalog.Enums;
 using Catalog.Features.CreateProperty;
 using Catalog.Features.CreateUnit;
@@ -129,9 +130,9 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        GetPropertiesResponse? result = await response.Content.ReadFromJsonAsync<GetPropertiesResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
-        PropertySummary property = Assert.Single(result.Properties, p => p.Id == propertyId);
+        PropertySummary property = Assert.Single(result.Items, p => p.Id == propertyId);
         Assert.Equal(hostId, property.HostId);
     }
 
@@ -150,10 +151,56 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        GetPropertiesResponse? result = await response.Content.ReadFromJsonAsync<GetPropertiesResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
-        Assert.All(result.Properties, p => Assert.Equal(uniqueCity, p.City));
-        Assert.Contains(result.Properties, p => p.Id == matchingPropertyId);
+        Assert.All(result.Items, p => Assert.Equal(uniqueCity, p.City));
+        Assert.Contains(result.Items, p => p.Id == matchingPropertyId);
+    }
+
+    [Fact]
+    public async Task GetProperties_ShouldSliceByPageAndReportTotalCount()
+    {
+        // Arrange - 3 properties sharing one unique city (isolates this
+        // test from other seed data in the shared test database, same
+        // trick GetProperties_ShouldFilterByCity uses), pageSize 2.
+        (string hostAccessToken, _) = await SeedHostUserAsync();
+        string uniqueCity = $"City-{Guid.NewGuid():N}";
+        Guid firstId = await CreatePropertyAsync(hostAccessToken, uniqueCity);
+        Guid secondId = await CreatePropertyAsync(hostAccessToken, uniqueCity);
+        Guid thirdId = await CreatePropertyAsync(hostAccessToken, uniqueCity);
+
+        // Act
+        HttpResponseMessage page1Response = await _client.GetAsync(
+            $"/api/catalog/properties?City={Uri.EscapeDataString(uniqueCity)}&Page=1&PageSize=2", TestContext.Current.CancellationToken);
+        HttpResponseMessage page2Response = await _client.GetAsync(
+            $"/api/catalog/properties?City={Uri.EscapeDataString(uniqueCity)}&Page=2&PageSize=2", TestContext.Current.CancellationToken);
+
+        // Assert
+        PagedResponse<PropertySummary>? page1 =
+            await page1Response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedResponse<PropertySummary>? page2 =
+            await page2Response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(page1);
+        Assert.NotNull(page2);
+
+        Assert.Equal(2, page1.Items.Count);
+        Assert.Equal(3, page1.TotalCount);
+        Assert.Equal(1, page1.Page);
+
+        Assert.Single(page2.Items);
+        Assert.Equal(3, page2.TotalCount);
+        Assert.Equal(2, page2.Page);
+
+        // No overlap/gap between pages - together they cover exactly the
+        // 3 seeded ids, once each. This is what the Id tiebreaker in
+        // GetPropertiesHandler's OrderBy is actually protecting. Set
+        // equality, not sequence equality - deliberately not asserting an
+        // expected order here, since that would mean re-deriving Postgres's
+        // uuid ordering client-side in .NET, which isn't guaranteed to
+        // agree with it.
+        List<Guid> allIds = [.. page1.Items.Select(p => p.Id), .. page2.Items.Select(p => p.Id)];
+        Assert.Equal(3, allIds.Distinct().Count());
+        Assert.Equal(new HashSet<Guid> { firstId, secondId, thirdId }, allIds.ToHashSet());
     }
 
     [Fact]
@@ -208,10 +255,10 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        GetPropertiesResponse? result = await response.Content.ReadFromJsonAsync<GetPropertiesResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
-        Assert.Contains(result.Properties, p => p.Id == firstHostPropertyId);
-        Assert.Contains(result.Properties, p => p.Id == secondHostPropertyId);
+        Assert.Contains(result.Items, p => p.Id == firstHostPropertyId);
+        Assert.Contains(result.Items, p => p.Id == secondHostPropertyId);
     }
 
     [Fact]
@@ -231,12 +278,12 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        GetPropertiesResponse? result = await response.Content.ReadFromJsonAsync<GetPropertiesResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
-        Assert.Equal(2, result.Properties.Count);
-        Assert.All(result.Properties, p => Assert.Equal(firstHostId, p.HostId));
-        Assert.Contains(result.Properties, p => p.Id == firstPropertyId);
-        Assert.Contains(result.Properties, p => p.Id == secondPropertyId);
+        Assert.Equal(2, result.Items.Count);
+        Assert.All(result.Items, p => Assert.Equal(firstHostId, p.HostId));
+        Assert.Contains(result.Items, p => p.Id == firstPropertyId);
+        Assert.Contains(result.Items, p => p.Id == secondPropertyId);
     }
 
     [Fact]

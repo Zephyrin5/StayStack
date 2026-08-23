@@ -1,6 +1,7 @@
 using Bogus;
 using Bookings.Features.ConfirmBooking;
 using Bookings.Features.GetMyBookings;
+using BuildingBlocks.Pagination;
 using Catalog;
 using Catalog.Entities;
 using Catalog.Enums;
@@ -129,9 +130,9 @@ public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        GetMyBookingsResponse? result = await response.Content.ReadFromJsonAsync<GetMyBookingsResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedResponse<BookingSummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<BookingSummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
-        BookingSummary booking = Assert.Single(result.Bookings);
+        BookingSummary booking = Assert.Single(result.Items);
         Assert.Equal(bookingId, booking.BookingId);
         Assert.Equal(unit.Id, booking.UnitId);
         Assert.Equal("Standard Room", booking.UnitName["en"]);
@@ -155,9 +156,9 @@ public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        GetMyBookingsResponse? result = await response.Content.ReadFromJsonAsync<GetMyBookingsResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedResponse<BookingSummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<BookingSummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
-        Assert.Empty(result.Bookings);
+        Assert.Empty(result.Items);
     }
 
     [Fact]

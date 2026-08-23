@@ -1,4 +1,5 @@
 using BuildingBlocks.Identity;
+using BuildingBlocks.Pagination;
 using Catalog.Features.GetMyProperties;
 using Catalog.Features.GetProperties;
 using FastEndpoints;
@@ -9,7 +10,7 @@ using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 namespace Api.Endpoints.Catalog;
 
 public class GetMyPropertiesEndpoint(IMediator mediator)
-    : EndpointWithoutRequest<GetPropertiesResponse>
+    : Endpoint<GetMyPropertiesRequest, PagedResponse<PropertySummary>>
 {
     public override void Configure()
     {
@@ -21,15 +22,16 @@ public class GetMyPropertiesEndpoint(IMediator mediator)
         {
             s.Summary = "List the caller's own properties";
             s.Description = "Requires the caller to be a host - HostId is derived from the caller's token, " +
-                            "never accepted as input. Same PropertySummary shape as the public browse endpoint.";
-            s.Response<GetPropertiesResponse>(200, "Properties returned.");
+                            "never accepted as input. Same PropertySummary shape as the public browse endpoint. " +
+                            "Paginated (defaults to page 1, 20 per page).";
+            s.Response<PagedResponse<PropertySummary>>(200, "Properties returned.");
             s.Response<ProblemDetails>(403, "Caller is not linked to a host.");
         });
     }
 
-    public override async Task HandleAsync(CancellationToken ct)
+    public override async Task HandleAsync(GetMyPropertiesRequest req, CancellationToken ct)
     {
-        GetPropertiesResponse result = await mediator.Send(new GetMyPropertiesRequest(), ct);
+        PagedResponse<PropertySummary> result = await mediator.Send(req, ct);
         await Send.OkAsync(result, ct);
     }
 }

@@ -1,11 +1,6 @@
 using Catalog.Enums;
 namespace Catalog.Features.GetProperties;
 
-public record GetPropertiesResponse
-{
-    public List<PropertySummary> Properties { get; init; } = [];
-}
-
 public record PropertySummary
 {
     public Guid Id { get; init; }

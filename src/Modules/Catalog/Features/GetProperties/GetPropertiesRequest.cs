@@ -1,3 +1,4 @@
+using BuildingBlocks.Pagination;
 using Catalog.Enums;
 using Mediator;
 namespace Catalog.Features.GetProperties;
@@ -9,8 +10,10 @@ namespace Catalog.Features.GetProperties;
 // guessed a host id, not just derived from an authenticated caller's own
 // token the way GetMyPropertiesRequest's handler resolves it. See
 // GetMyProperties for the host-scoped equivalent.
-public record GetPropertiesRequest : IRequest<GetPropertiesResponse>
+public record GetPropertiesRequest : IRequest<PagedResponse<PropertySummary>>
 {
     public string? City { get; init; }
     public PropertyType? PropertyType { get; init; }
+    public int Page { get; init; } = 1;
+    public int PageSize { get; init; } = PaginationExtensions.DefaultPageSize;
 }

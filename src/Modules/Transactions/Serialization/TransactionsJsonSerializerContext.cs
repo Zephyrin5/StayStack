@@ -1,3 +1,4 @@
+using BuildingBlocks.Pagination;
 using System.Text.Json.Serialization;
 using Transactions.Features.GetTransactions;
 using Transactions.Features.InitiateTransaction;
@@ -13,5 +14,5 @@ namespace Transactions.Serialization;
 [JsonSerializable(typeof(MarkTransactionFailedRequest))]
 [JsonSerializable(typeof(MarkTransactionFailedResponse))]
 [JsonSerializable(typeof(GetTransactionsRequest))]
-[JsonSerializable(typeof(GetTransactionsResponse))]
+[JsonSerializable(typeof(PagedResponse<TransactionSummary>))]
 public partial class TransactionsJsonSerializerContext : JsonSerializerContext;

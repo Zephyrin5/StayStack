@@ -1,5 +1,6 @@
 using Bookings.Entities;
 using BuildingBlocks.Identity;
+using BuildingBlocks.Pagination;
 using Catalog.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
@@ -8,14 +9,22 @@ namespace Bookings.Features.GetMyBookings;
 public class GetMyBookingsHandler(
     AppBookingsDbContext dbContext,
     IUnitLookup unitLookup,
-    ICurrentUserProvider currentUserProvider) : IRequestHandler<GetMyBookingsRequest, GetMyBookingsResponse>
+    ICurrentUserProvider currentUserProvider) : IRequestHandler<GetMyBookingsRequest, PagedResponse<BookingSummary>>
 {
-    public async ValueTask<GetMyBookingsResponse> Handle(GetMyBookingsRequest request, CancellationToken cancellationToken)
+    public async ValueTask<PagedResponse<BookingSummary>> Handle(GetMyBookingsRequest request, CancellationToken cancellationToken)
     {
-        List<Booking> bookings = await dbContext.Bookings.AsNoTracking()
+        // OrderByDescending(CreatedAt) alone isn't a total order - two
+        // bookings can share a timestamp - so it's not safe to paginate on
+        // by itself: without a tiebreaker, Skip/Take isn't guaranteed to
+        // draw the same page boundary on two requests, which can duplicate
+        // or skip a row. Id is the tiebreaker convention (see
+        // GetPropertiesHandler's equivalent comment), not the sort
+        // criteria - keep it appended if CreatedAt is ever replaced with a
+        // different primary sort.
+        (List<Booking> bookings, int totalCount) = await dbContext.Bookings.AsNoTracking()
             .Where(b => b.CustomerId == currentUserProvider.UserId)
-            .OrderByDescending(b => b.CreatedAt)
-            .ToListAsync(cancellationToken);
+            .OrderByDescending(b => b.CreatedAt).ThenBy(b => b.Id)
+            .ToPagedListAsync(request.Page, request.PageSize, cancellationToken);
 
         // One batched lookup for every distinct unit, not one call per
         // booking - a customer with 100 bookings costs a single cross-
@@ -23,9 +32,9 @@ public class GetMyBookingsHandler(
         IReadOnlyDictionary<Guid, UnitSummary> unitsById = await unitLookup.GetUnitsAsync(
             bookings.Select(b => b.UnitId).Distinct(), cancellationToken);
 
-        return new GetMyBookingsResponse
+        return new PagedResponse<BookingSummary>
         {
-            Bookings =
+            Items =
             [
                 .. bookings.Select(b => new BookingSummary
                 {
@@ -44,7 +53,10 @@ public class GetMyBookingsHandler(
                     BookingStatus = b.BookingStatus,
                     CreatedAt = b.CreatedAt
                 })
-            ]
+            ],
+            Page = request.Page,
+            PageSize = request.PageSize,
+            TotalCount = totalCount
         };
     }
 }

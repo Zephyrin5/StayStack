@@ -1,5 +1,6 @@
 using Bookings.Features.ConfirmBooking;
 using Bookings.Features.GetMyBookings;
+using BuildingBlocks.Pagination;
 using System.Text.Json.Serialization;
 namespace Bookings.Serialization;
 
@@ -7,5 +8,5 @@ namespace Bookings.Serialization;
 [JsonSerializable(typeof(ConfirmBookingRequest))]
 [JsonSerializable(typeof(ConfirmBookingResponse))]
 [JsonSerializable(typeof(GetMyBookingsRequest))]
-[JsonSerializable(typeof(GetMyBookingsResponse))]
+[JsonSerializable(typeof(PagedResponse<BookingSummary>))]
 public partial class BookingsJsonSerializerContext : JsonSerializerContext;
