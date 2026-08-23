@@ -42,7 +42,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
             Password = password
         }, TestContext.Current.CancellationToken);
 
-        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestContext.Current.CancellationToken);
+        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(signInResult?.AccessToken);
 
         return (user.Id, signInResult.AccessToken);
@@ -80,7 +80,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        BecomeHostResponse? result = await response.Content.ReadFromJsonAsync<BecomeHostResponse>(TestContext.Current.CancellationToken);
+        BecomeHostResponse? result = await response.Content.ReadFromJsonAsync<BecomeHostResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.NotEqual(Guid.Empty, result.HostId);
         Assert.Contains("Host", result.Roles);

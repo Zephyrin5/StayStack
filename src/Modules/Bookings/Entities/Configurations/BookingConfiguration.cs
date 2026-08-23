@@ -11,7 +11,7 @@ public class BookingConfiguration : IEntityTypeConfiguration<Booking>
         builder.Property(b => b.GuestName).HasMaxLength(200).IsRequired();
         builder.Property(b => b.GuestEmail).HasMaxLength(200).IsRequired();
         builder.Property(b => b.GuestPhone).HasMaxLength(50);
-        builder.Property(b => b.Currency).HasMaxLength(3).IsRequired();
+        builder.Property(b => b.Currency).HasConversion<string>().HasMaxLength(3).IsFixedLength().IsRequired();
 
         // Stored as text, not the integer enum value - same reasoning as
         // Property.PropertyType (Catalog): legible in psql, safe against

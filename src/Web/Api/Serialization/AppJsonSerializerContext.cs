@@ -11,6 +11,7 @@ namespace Api.Serialization;
 // else is each module's own JsonSerializerContext (see
 // IdentityJsonSerializerContext, CatalogFeaturesJsonSerializerContext,
 // HostsFeaturesJsonSerializerContext).
+[JsonSourceGenerationOptions(UseStringEnumConverter = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(LanguageDto))]
 [JsonSerializable(typeof(List<LanguageDto>))]
 [JsonSerializable(typeof(ProblemDetails))]

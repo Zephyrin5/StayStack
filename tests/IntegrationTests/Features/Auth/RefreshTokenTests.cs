@@ -44,7 +44,7 @@ public class RefreshTokenTests(IntegrationTestWebApplicationFactory factory)
             Password = password
         }, TestContext.Current.CancellationToken);
 
-        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestContext.Current.CancellationToken);
+        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(signInResult);
 
         RefreshTokenRequest refreshRequest = new RefreshTokenRequest { RefreshToken = signInResult.RefreshToken ?? string.Empty };
@@ -56,7 +56,7 @@ public class RefreshTokenTests(IntegrationTestWebApplicationFactory factory)
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        RefreshTokenResponse? refreshResult = await response.Content.ReadFromJsonAsync<RefreshTokenResponse>(TestContext.Current.CancellationToken);
+        RefreshTokenResponse? refreshResult = await response.Content.ReadFromJsonAsync<RefreshTokenResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(refreshResult);
         Assert.NotEmpty(refreshResult.AccessToken);
         Assert.False(string.IsNullOrEmpty(refreshResult.RefreshToken));
@@ -100,7 +100,7 @@ public class RefreshTokenTests(IntegrationTestWebApplicationFactory factory)
             Password = password
         }, TestContext.Current.CancellationToken);
 
-        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestContext.Current.CancellationToken);
+        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(signInResult);
 
         RefreshTokenRequest refreshRequest = new RefreshTokenRequest { RefreshToken = signInResult.RefreshToken ?? string.Empty };

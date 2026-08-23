@@ -58,7 +58,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
         }, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        HoldAvailabilityResponse? hold = await response.Content.ReadFromJsonAsync<HoldAvailabilityResponse>(TestContext.Current.CancellationToken);
+        HoldAvailabilityResponse? hold = await response.Content.ReadFromJsonAsync<HoldAvailabilityResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(hold);
         return hold.HoldId;
     }
@@ -88,11 +88,11 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        ConfirmBookingResponse? result = await response.Content.ReadFromJsonAsync<ConfirmBookingResponse>(TestContext.Current.CancellationToken);
+        ConfirmBookingResponse? result = await response.Content.ReadFromJsonAsync<ConfirmBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.Equal(BookingStatus.Pending, result.BookingStatus);
         Assert.Equal(300m, result.TotalPrice); // 100/night * 3 nights
-        Assert.Equal("KWD", result.Currency);
+        Assert.Equal(Currency.KWD, result.Currency);
 
         using IServiceScope scope = factory.Services.CreateScope();
         AppBookingsDbContext bookingsDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
@@ -179,7 +179,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        ConfirmBookingResponse? result = await response.Content.ReadFromJsonAsync<ConfirmBookingResponse>(TestContext.Current.CancellationToken);
+        ConfirmBookingResponse? result = await response.Content.ReadFromJsonAsync<ConfirmBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
 
         using IServiceScope scope = factory.Services.CreateScope();
@@ -210,7 +210,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
             Email = email,
             Password = password
         }, TestContext.Current.CancellationToken);
-        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestContext.Current.CancellationToken);
+        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(signInResult?.AccessToken);
 
         using HttpRequestMessage confirmRequest = new HttpRequestMessage(HttpMethod.Post, "/api/bookings");
@@ -222,7 +222,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        ConfirmBookingResponse? result = await response.Content.ReadFromJsonAsync<ConfirmBookingResponse>(TestContext.Current.CancellationToken);
+        ConfirmBookingResponse? result = await response.Content.ReadFromJsonAsync<ConfirmBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
 
         using IServiceScope assertScope = factory.Services.CreateScope();

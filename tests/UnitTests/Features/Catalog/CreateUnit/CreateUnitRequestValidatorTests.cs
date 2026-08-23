@@ -16,7 +16,7 @@ public class CreateUnitRequestValidatorTests
             Name = new Dictionary<string, string> { { "en", "Deluxe Room" } },
             MaxOccupancy = 2,
             BasePrice = 45.5m,
-            Currency = "KWD"
+            Currency = Currency.KWD
         };
     }
 
@@ -84,12 +84,10 @@ public class CreateUnitRequestValidatorTests
         result.ShouldHaveValidationErrorFor(x => x.BasePrice);
     }
 
-    [Theory]
-    [InlineData("K")]
-    [InlineData("KWDD")]
-    public void Validate_ShouldHaveError_ForCurrency_WhenNotExactlyThreeCharacters(string currency)
+    [Fact]
+    public void Validate_ShouldHaveError_ForCurrency_WhenNotAValidEnumMember()
     {
-        CreateUnitRequest request = CreateValidRequest() with { Currency = currency };
+        CreateUnitRequest request = CreateValidRequest() with { Currency = (Currency)99 };
 
         var result = _sut.TestValidate(request);
 

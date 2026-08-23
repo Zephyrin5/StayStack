@@ -35,7 +35,7 @@ public class SignUpTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        SignUpResponse? result = await response.Content.ReadFromJsonAsync<SignUpResponse>(TestContext.Current.CancellationToken);
+        SignUpResponse? result = await response.Content.ReadFromJsonAsync<SignUpResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.NotEqual(Guid.Empty, result.Id);
         Assert.Equal(email, result.Email);

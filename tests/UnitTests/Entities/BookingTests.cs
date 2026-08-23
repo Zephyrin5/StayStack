@@ -1,4 +1,5 @@
 using Bookings.Entities;
+using SeedWork.Enums;
 namespace UnitTests.Entities;
 
 public class BookingTests
@@ -10,7 +11,7 @@ public class BookingTests
         return Booking.Create(
             Guid.NewGuid(), Guid.NewGuid(), customerId,
             "Jane Guest", "jane@example.com", "+965 1234 5678",
-            Today, Today.AddDays(3), 2, 150m, "KWD");
+            Today, Today.AddDays(3), 2, 150m, Currency.KWD);
     }
 
     [Fact]
@@ -23,7 +24,7 @@ public class BookingTests
         Booking booking = Booking.Create(
             unitId, holdId, customerId,
             "Jane Guest", "jane@example.com", "+965 1234 5678",
-            Today, Today.AddDays(3), 2, 150m, "KWD");
+            Today, Today.AddDays(3), 2, 150m, Currency.KWD);
 
         Assert.NotEqual(Guid.Empty, booking.Id);
         Assert.Equal(unitId, booking.UnitId);
@@ -36,7 +37,7 @@ public class BookingTests
         Assert.Equal(Today.AddDays(3), booking.CheckOut);
         Assert.Equal(2, booking.GuestCount);
         Assert.Equal(150m, booking.TotalPrice);
-        Assert.Equal("KWD", booking.Currency);
+        Assert.Equal(Currency.KWD, booking.Currency);
         Assert.Equal(BookingStatus.Pending, booking.BookingStatus);
     }
 
@@ -46,7 +47,7 @@ public class BookingTests
         Booking booking = Booking.Create(
             Guid.NewGuid(), Guid.NewGuid(), null,
             "Jane Guest", "jane@example.com", null,
-            Today, Today.AddDays(1), 1, 50m, "KWD");
+            Today, Today.AddDays(1), 1, 50m, Currency.KWD);
 
         Assert.Null(booking.CustomerId);
         Assert.Null(booking.GuestPhone);
@@ -56,14 +57,14 @@ public class BookingTests
     public void Create_ShouldThrow_WhenUnitIdIsEmpty()
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.Empty, Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, 50m, "KWD"));
+            Guid.Empty, Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, 50m, Currency.KWD));
     }
 
     [Fact]
     public void Create_ShouldThrow_WhenHoldIdIsEmpty()
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.Empty, null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, 50m, "KWD"));
+            Guid.NewGuid(), Guid.Empty, null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, 50m, Currency.KWD));
     }
 
     [Theory]
@@ -73,7 +74,7 @@ public class BookingTests
     public void Create_ShouldThrow_WhenGuestNameIsNullOrWhitespace(string? guestName)
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), null, guestName!, "jane@example.com", null, Today, Today.AddDays(1), 1, 50m, "KWD"));
+            Guid.NewGuid(), Guid.NewGuid(), null, guestName!, "jane@example.com", null, Today, Today.AddDays(1), 1, 50m, Currency.KWD));
     }
 
     [Theory]
@@ -83,14 +84,14 @@ public class BookingTests
     public void Create_ShouldThrow_WhenGuestEmailIsInvalid(string? guestEmail)
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), null, "Jane", guestEmail!, null, Today, Today.AddDays(1), 1, 50m, "KWD"));
+            Guid.NewGuid(), Guid.NewGuid(), null, "Jane", guestEmail!, null, Today, Today.AddDays(1), 1, 50m, Currency.KWD));
     }
 
     [Fact]
     public void Create_ShouldThrow_WhenCheckOutIsNotAfterCheckIn()
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today, 1, 50m, "KWD"));
+            Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today, 1, 50m, Currency.KWD));
     }
 
     [Theory]
@@ -99,33 +100,23 @@ public class BookingTests
     public void Create_ShouldThrow_WhenGuestCountIsNotPositive(int guestCount)
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), guestCount, 50m, "KWD"));
+            Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), guestCount, 50m, Currency.KWD));
     }
 
     [Fact]
     public void Create_ShouldThrow_WhenTotalPriceIsNegative()
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, -1m, "KWD"));
+            Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, -1m, Currency.KWD));
     }
 
     [Fact]
     public void Create_ShouldAllowZeroTotalPrice()
     {
         Booking booking = Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, 0m, "KWD");
+            Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, 0m, Currency.KWD);
 
         Assert.Equal(0m, booking.TotalPrice);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void Create_ShouldThrow_WhenCurrencyIsNullOrWhitespace(string? currency)
-    {
-        Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, 50m, currency!));
     }
 
     [Fact]

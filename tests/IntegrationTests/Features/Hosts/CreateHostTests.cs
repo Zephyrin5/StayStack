@@ -26,7 +26,7 @@ public class CreateHostTests(IntegrationTestWebApplicationFactory factory)
             Password = "1234"
         }, TestContext.Current.CancellationToken);
 
-        SignInResponse? result = await response.Content.ReadFromJsonAsync<SignInResponse>(TestContext.Current.CancellationToken);
+        SignInResponse? result = await response.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result?.AccessToken);
         return result.AccessToken;
     }
@@ -47,7 +47,7 @@ public class CreateHostTests(IntegrationTestWebApplicationFactory factory)
             Email = email,
             Password = password
         }, TestContext.Current.CancellationToken);
-        SignInResponse? result = await response.Content.ReadFromJsonAsync<SignInResponse>(TestContext.Current.CancellationToken);
+        SignInResponse? result = await response.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result?.AccessToken);
         return result.AccessToken;
     }
@@ -77,7 +77,7 @@ public class CreateHostTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        CreateHostResponse? result = await response.Content.ReadFromJsonAsync<CreateHostResponse>(TestContext.Current.CancellationToken);
+        CreateHostResponse? result = await response.Content.ReadFromJsonAsync<CreateHostResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.NotEqual(Guid.Empty, result.HostId);
 

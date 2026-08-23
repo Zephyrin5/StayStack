@@ -8,6 +8,7 @@ using Catalog.Features.HoldAvailability;
 using System.Text.Json.Serialization;
 namespace Catalog.Serialization;
 
+[JsonSourceGenerationOptions(UseStringEnumConverter = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(CreatePropertyRequest))]
 [JsonSerializable(typeof(CreatePropertyResponse))]
 [JsonSerializable(typeof(AdminCreatePropertyRequest))]

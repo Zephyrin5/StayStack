@@ -11,7 +11,7 @@ public sealed class CreateUnitRequestValidator : Validator<CreateUnitRequest>
         RuleFor(x => x.Name).NotEmpty().WithMessage("At least one localized name value is required.");
         RuleFor(x => x.MaxOccupancy).GreaterThan(0);
         RuleFor(x => x.BasePrice).GreaterThan(0);
-        RuleFor(x => x.Currency).Length(3);
+        RuleFor(x => x.Currency).IsInEnum();
 
         // Whether PropertyId refers to a real Property is a database
         // concern, checked in the handler - Property lives in this same

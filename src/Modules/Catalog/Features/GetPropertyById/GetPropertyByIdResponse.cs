@@ -18,5 +18,5 @@ public record UnitSummary
     public Dictionary<string, string> Name { get; init; } = new Dictionary<string, string>();
     public int MaxOccupancy { get; init; }
     public decimal BasePrice { get; init; }
-    public string Currency { get; init; } = string.Empty;
+    public Currency Currency { get; init; }
 }

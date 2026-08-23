@@ -46,7 +46,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
             Email = email,
             Password = password
         }, TestContext.Current.CancellationToken);
-        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestContext.Current.CancellationToken);
+        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(signInResult?.AccessToken);
 
         using HttpRequestMessage becomeHostRequest = new HttpRequestMessage(HttpMethod.Post, "/api/hosts/become");
@@ -58,7 +58,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         becomeHostRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", signInResult.AccessToken);
         HttpResponseMessage becomeHostResponse = await _client.SendAsync(becomeHostRequest, TestContext.Current.CancellationToken);
         BecomeHostResponse? becomeHostResult =
-            await becomeHostResponse.Content.ReadFromJsonAsync<BecomeHostResponse>(TestContext.Current.CancellationToken);
+            await becomeHostResponse.Content.ReadFromJsonAsync<BecomeHostResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(becomeHostResult?.AccessToken);
 
         // Reissued token from BecomeHost, not the original sign-in one -
@@ -91,7 +91,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        CreatePropertyResponse? result = await response.Content.ReadFromJsonAsync<CreatePropertyResponse>(TestContext.Current.CancellationToken);
+        CreatePropertyResponse? result = await response.Content.ReadFromJsonAsync<CreatePropertyResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.NotEqual(Guid.Empty, result.PropertyId);
 
@@ -124,7 +124,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
             Email = "admin@staystack.com",
             Password = "1234"
         }, TestContext.Current.CancellationToken);
-        SignInResponse? adminSignInResult = await adminSignIn.Content.ReadFromJsonAsync<SignInResponse>(TestContext.Current.CancellationToken);
+        SignInResponse? adminSignInResult = await adminSignIn.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(adminSignInResult?.AccessToken);
 
         AdminCreatePropertyRequest request = new AdminCreatePropertyRequest
@@ -142,7 +142,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        CreatePropertyResponse? result = await response.Content.ReadFromJsonAsync<CreatePropertyResponse>(TestContext.Current.CancellationToken);
+        CreatePropertyResponse? result = await response.Content.ReadFromJsonAsync<CreatePropertyResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
 
         using IServiceScope assertScope = factory.Services.CreateScope();
@@ -164,7 +164,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
             }, hostAccessToken),
             TestContext.Current.CancellationToken);
         CreatePropertyResponse? property =
-            await propertyResponse.Content.ReadFromJsonAsync<CreatePropertyResponse>(TestContext.Current.CancellationToken);
+            await propertyResponse.Content.ReadFromJsonAsync<CreatePropertyResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(property);
 
         CreateUnitRequest request = new CreateUnitRequest
@@ -174,7 +174,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
             Name = new Dictionary<string, string> { { "en", "Deluxe Room" } },
             MaxOccupancy = 2,
             BasePrice = 45.5m,
-            Currency = "KWD"
+            Currency = Currency.KWD
         };
 
         // Act
@@ -183,7 +183,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        CreateUnitResponse? result = await response.Content.ReadFromJsonAsync<CreateUnitResponse>(TestContext.Current.CancellationToken);
+        CreateUnitResponse? result = await response.Content.ReadFromJsonAsync<CreateUnitResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.NotEqual(Guid.Empty, result.UnitId);
 

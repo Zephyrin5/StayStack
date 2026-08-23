@@ -41,7 +41,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
             Email = email,
             Password = password
         }, TestContext.Current.CancellationToken);
-        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestContext.Current.CancellationToken);
+        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(signInResult?.AccessToken);
 
         using HttpRequestMessage becomeHostRequest = new HttpRequestMessage(HttpMethod.Post, "/api/hosts/become");
@@ -53,7 +53,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         becomeHostRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", signInResult.AccessToken);
         HttpResponseMessage becomeHostResponse = await _client.SendAsync(becomeHostRequest, TestContext.Current.CancellationToken);
         BecomeHostResponse? becomeHostResult =
-            await becomeHostResponse.Content.ReadFromJsonAsync<BecomeHostResponse>(TestContext.Current.CancellationToken);
+            await becomeHostResponse.Content.ReadFromJsonAsync<BecomeHostResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(becomeHostResult?.AccessToken);
 
         return (becomeHostResult.AccessToken, becomeHostResult.HostId);
@@ -70,7 +70,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         });
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         HttpResponseMessage response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
-        CreatePropertyResponse? result = await response.Content.ReadFromJsonAsync<CreatePropertyResponse>(TestContext.Current.CancellationToken);
+        CreatePropertyResponse? result = await response.Content.ReadFromJsonAsync<CreatePropertyResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         return result.PropertyId;
     }
@@ -85,11 +85,11 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
             Name = new Dictionary<string, string> { { "en", "Deluxe Room" } },
             MaxOccupancy = 2,
             BasePrice = 45.5m,
-            Currency = "KWD"
+            Currency = Currency.KWD
         });
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         HttpResponseMessage response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
-        CreateUnitResponse? result = await response.Content.ReadFromJsonAsync<CreateUnitResponse>(TestContext.Current.CancellationToken);
+        CreateUnitResponse? result = await response.Content.ReadFromJsonAsync<CreateUnitResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         return result.UnitId;
     }
@@ -106,7 +106,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        GetPropertiesResponse? result = await response.Content.ReadFromJsonAsync<GetPropertiesResponse>(TestContext.Current.CancellationToken);
+        GetPropertiesResponse? result = await response.Content.ReadFromJsonAsync<GetPropertiesResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         PropertySummary property = Assert.Single(result.Properties, p => p.Id == propertyId);
         Assert.Equal(hostId, property.HostId);
@@ -127,7 +127,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        GetPropertiesResponse? result = await response.Content.ReadFromJsonAsync<GetPropertiesResponse>(TestContext.Current.CancellationToken);
+        GetPropertiesResponse? result = await response.Content.ReadFromJsonAsync<GetPropertiesResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.All(result.Properties, p => Assert.Equal(uniqueCity, p.City));
         Assert.Contains(result.Properties, p => p.Id == matchingPropertyId);
@@ -146,7 +146,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        GetPropertyByIdResponse? result = await response.Content.ReadFromJsonAsync<GetPropertyByIdResponse>(TestContext.Current.CancellationToken);
+        GetPropertyByIdResponse? result = await response.Content.ReadFromJsonAsync<GetPropertyByIdResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.Equal(propertyId, result.Id);
         Assert.Equal(hostId, result.HostId);

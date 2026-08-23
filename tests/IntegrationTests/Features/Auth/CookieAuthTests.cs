@@ -79,7 +79,7 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
         Assert.Contains(CookieName, cookieHeader);
         Assert.Contains("httponly", cookieHeader, StringComparison.OrdinalIgnoreCase);
 
-        SignInResponse? result = await response.Content.ReadFromJsonAsync<SignInResponse>();
+        SignInResponse? result = await response.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default);
         Assert.NotNull(result);
         Assert.False(string.IsNullOrWhiteSpace(result.AccessToken));
         Assert.Null(result.RefreshToken);
@@ -105,7 +105,7 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(response.Headers.Contains("Set-Cookie"));
 
-        SignInResponse? result = await response.Content.ReadFromJsonAsync<SignInResponse>();
+        SignInResponse? result = await response.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default);
         Assert.NotNull(result);
         Assert.False(string.IsNullOrWhiteSpace(result.RefreshToken));
     }
@@ -135,7 +135,7 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(rotatedCookieValue);
         Assert.NotEqual(originalCookieValue, rotatedCookieValue);
 
-        RefreshTokenResponse? refreshResult = await refreshResponse.Content.ReadFromJsonAsync<RefreshTokenResponse>();
+        RefreshTokenResponse? refreshResult = await refreshResponse.Content.ReadFromJsonAsync<RefreshTokenResponse>(TestJsonOptions.Default);
         Assert.NotNull(refreshResult);
         Assert.Null(refreshResult.RefreshToken);
 

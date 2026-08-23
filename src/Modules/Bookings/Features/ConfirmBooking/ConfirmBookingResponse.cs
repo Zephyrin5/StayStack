@@ -1,4 +1,5 @@
 using Bookings.Entities;
+using SeedWork.Enums;
 namespace Bookings.Features.ConfirmBooking;
 
 public record ConfirmBookingResponse
@@ -8,5 +9,5 @@ public record ConfirmBookingResponse
     public DateOnly CheckIn { get; init; }
     public DateOnly CheckOut { get; init; }
     public decimal TotalPrice { get; init; }
-    public string Currency { get; init; } = string.Empty;
+    public Currency Currency { get; init; }
 }

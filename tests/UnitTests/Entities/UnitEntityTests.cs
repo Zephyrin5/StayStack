@@ -18,7 +18,7 @@ public class UnitEntityTests
         Guid propertyId = Guid.NewGuid();
         LocalizedText name = CreateName();
 
-        Unit unit = Unit.Create(propertyId, UnitType.Room, name, 2, 45.5m, "KWD");
+        Unit unit = Unit.Create(propertyId, UnitType.Room, name, 2, 45.5m, Currency.KWD);
 
         Assert.NotEqual(Guid.Empty, unit.Id);
         Assert.Equal(propertyId, unit.PropertyId);
@@ -26,7 +26,7 @@ public class UnitEntityTests
         Assert.Equal(name, unit.Name);
         Assert.Equal(2, unit.MaxOccupancy);
         Assert.Equal(45.5m, unit.BasePrice);
-        Assert.Equal("KWD", unit.Currency);
+        Assert.Equal(Currency.KWD, unit.Currency);
         Assert.Equal(EntityStatus.Active, unit.Status);
     }
 
@@ -35,7 +35,7 @@ public class UnitEntityTests
     {
         Unit unit = Unit.Create(Guid.NewGuid(), UnitType.Room, CreateName(), 2, 45.5m);
 
-        Assert.Equal("KWD", unit.Currency);
+        Assert.Equal(Currency.KWD, unit.Currency);
     }
 
     [Fact]
@@ -64,15 +64,6 @@ public class UnitEntityTests
     public void Create_ShouldThrow_WhenBasePriceIsNotPositive(decimal basePrice)
     {
         Assert.ThrowsAny<ArgumentException>(() => Unit.Create(Guid.NewGuid(), UnitType.Room, CreateName(), 2, basePrice));
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void Create_ShouldThrow_WhenCurrencyIsNullOrWhitespace(string? currency)
-    {
-        Assert.ThrowsAny<ArgumentException>(() => Unit.Create(Guid.NewGuid(), UnitType.Room, CreateName(), 2, 45.5m, currency!));
     }
 
     [Fact]

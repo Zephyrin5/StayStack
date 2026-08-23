@@ -6,6 +6,7 @@ using Identity.Features.SignUp;
 using System.Text.Json.Serialization;
 namespace Identity.Serialization;
 
+[JsonSourceGenerationOptions(UseStringEnumConverter = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(SignInRequest))]
 [JsonSerializable(typeof(SignInResponse))]
 [JsonSerializable(typeof(SignUpRequest))]

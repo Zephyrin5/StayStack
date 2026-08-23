@@ -1,5 +1,6 @@
 using Ardalis.GuardClauses;
 using SeedWork.Abstractions;
+using SeedWork.Enums;
 using SeedWork.Interfaces;
 namespace Bookings.Entities;
 
@@ -19,7 +20,7 @@ public sealed class Booking : Entity, IAggregateRoot
         DateOnly checkOut,
         int guestCount,
         decimal totalPrice,
-        string currency,
+        Currency currency,
         BookingStatus bookingStatus)
     {
         Id = id;
@@ -58,7 +59,7 @@ public sealed class Booking : Entity, IAggregateRoot
     public int GuestCount { get; private set; }
 
     public decimal TotalPrice { get; private set; }
-    public string Currency { get; private set; }
+    public Currency Currency { get; private set; }
 
     // Named BookingStatus, not Status - Status is already claimed by the
     // inherited Entity.Status (EntityStatus: soft-delete state), a
@@ -76,7 +77,7 @@ public sealed class Booking : Entity, IAggregateRoot
         DateOnly checkOut,
         int guestCount,
         decimal totalPrice,
-        string currency)
+        Currency currency)
     {
         Guard.Against.Default(unitId);
         Guard.Against.Default(holdId);
@@ -88,7 +89,6 @@ public sealed class Booking : Entity, IAggregateRoot
             c => c > checkIn, "Check-out must be after check-in.");
         Guard.Against.NegativeOrZero(guestCount);
         Guard.Against.Negative(totalPrice);
-        Guard.Against.NullOrWhiteSpace(currency);
 
         return new Booking(
             Guid.CreateVersion7(), unitId, holdId, customerId, guestName, guestEmail, guestPhone,

@@ -37,7 +37,7 @@ public class ExceptionHandlingTests(IntegrationTestWebApplicationFactory factory
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        ValidationProblemDetails? problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        ValidationProblemDetails? problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>(TestJsonOptions.Default);
         Assert.NotNull(problem);
         Assert.Equal(400, problem.Status);
     }

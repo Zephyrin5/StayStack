@@ -1,4 +1,5 @@
 using Bookings.Entities;
+using SeedWork.Enums;
 namespace Bookings.Features.GetMyBookings;
 
 public record GetMyBookingsResponse
@@ -15,7 +16,7 @@ public record BookingSummary
     public DateOnly CheckOut { get; init; }
     public int GuestCount { get; init; }
     public decimal TotalPrice { get; init; }
-    public string Currency { get; init; } = string.Empty;
+    public Currency Currency { get; init; }
     public BookingStatus BookingStatus { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
 }

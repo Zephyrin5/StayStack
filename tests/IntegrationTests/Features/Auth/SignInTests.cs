@@ -49,7 +49,7 @@ public class SignInIntegrationTests(IntegrationTestWebApplicationFactory factory
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        SignInResponse? result = await response.Content.ReadFromJsonAsync<SignInResponse>();
+        SignInResponse? result = await response.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default);
         Assert.NotNull(result);
         Assert.False(string.IsNullOrWhiteSpace(result.AccessToken));
         Assert.False(string.IsNullOrWhiteSpace(result.RefreshToken));

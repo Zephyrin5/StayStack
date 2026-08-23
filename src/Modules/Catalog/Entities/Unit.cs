@@ -17,7 +17,7 @@ public sealed class Unit : Entity, IAggregateRoot
         LocalizedText name,
         int maxOccupancy,
         decimal basePrice,
-        string currency)
+        Currency currency)
     {
         Id = id;
         PropertyId = propertyId;
@@ -32,7 +32,7 @@ public sealed class Unit : Entity, IAggregateRoot
     public LocalizedText Name { get; private set; }
     public int MaxOccupancy { get; private set; }
     public decimal BasePrice { get; private set; }
-    public string Currency { get; private set; }
+    public Currency Currency { get; private set; }
 
     public static Unit Create(
         Guid propertyId,
@@ -40,13 +40,12 @@ public sealed class Unit : Entity, IAggregateRoot
         LocalizedText name,
         int maxOccupancy,
         decimal basePrice,
-        string currency = "KWD")
+        Currency currency = Currency.KWD)
     {
         Guard.Against.Default(propertyId);
         Guard.Against.Null(name);
         Guard.Against.NegativeOrZero(maxOccupancy);
         Guard.Against.NegativeOrZero(basePrice);
-        Guard.Against.NullOrWhiteSpace(currency);
 
         return new Unit(Guid.CreateVersion7(), propertyId, unitType, name, maxOccupancy, basePrice, currency);
     }

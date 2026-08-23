@@ -60,7 +60,7 @@ public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
             Email = email,
             Password = password
         }, TestContext.Current.CancellationToken);
-        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestContext.Current.CancellationToken);
+        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(signInResult?.AccessToken);
         return signInResult.AccessToken;
     }
@@ -77,7 +77,7 @@ public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
         }, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        HoldAvailabilityResponse? hold = await response.Content.ReadFromJsonAsync<HoldAvailabilityResponse>(TestContext.Current.CancellationToken);
+        HoldAvailabilityResponse? hold = await response.Content.ReadFromJsonAsync<HoldAvailabilityResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(hold);
         return hold.HoldId;
     }
@@ -98,7 +98,7 @@ public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
         HttpResponseMessage response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        ConfirmBookingResponse? result = await response.Content.ReadFromJsonAsync<ConfirmBookingResponse>(TestContext.Current.CancellationToken);
+        ConfirmBookingResponse? result = await response.Content.ReadFromJsonAsync<ConfirmBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         return result.BookingId;
     }
@@ -129,7 +129,7 @@ public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        GetMyBookingsResponse? result = await response.Content.ReadFromJsonAsync<GetMyBookingsResponse>(TestContext.Current.CancellationToken);
+        GetMyBookingsResponse? result = await response.Content.ReadFromJsonAsync<GetMyBookingsResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         BookingSummary booking = Assert.Single(result.Bookings);
         Assert.Equal(bookingId, booking.BookingId);
@@ -155,7 +155,7 @@ public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        GetMyBookingsResponse? result = await response.Content.ReadFromJsonAsync<GetMyBookingsResponse>(TestContext.Current.CancellationToken);
+        GetMyBookingsResponse? result = await response.Content.ReadFromJsonAsync<GetMyBookingsResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.Empty(result.Bookings);
     }
