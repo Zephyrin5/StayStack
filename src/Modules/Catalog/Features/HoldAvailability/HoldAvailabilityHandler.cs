@@ -1,5 +1,5 @@
 using Ardalis.GuardClauses;
-using BuildingBlocks.Exceptions;
+using Catalog.Exceptions;
 using Dapper;
 using Mediator;
 using Microsoft.EntityFrameworkCore;

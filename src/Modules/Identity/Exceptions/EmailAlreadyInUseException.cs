@@ -1,5 +1,6 @@
+using BuildingBlocks.Exceptions;
 using System.Net;
-namespace BuildingBlocks.Exceptions;
+namespace Identity.Exceptions;
 
 /// <summary>
 ///     A registration attempt used an email address that already has an

@@ -1,6 +1,6 @@
-﻿using BuildingBlocks.Exceptions;
-using Identity.Configurations;
+﻿using Identity.Configurations;
 using Identity.Entities;
+using Identity.Exceptions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;

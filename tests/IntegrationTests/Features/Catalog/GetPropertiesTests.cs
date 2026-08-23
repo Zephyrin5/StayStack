@@ -1,4 +1,5 @@
 using Bogus;
+using Catalog.Enums;
 using Catalog.Features.CreateProperty;
 using Catalog.Features.CreateUnit;
 using Catalog.Features.GetProperties;
@@ -184,13 +185,22 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     }
 
     [Fact]
-    public async Task GetProperties_ShouldFilterByHostId_ForAnonymousCaller()
+    public async Task GetProperties_ShouldReturnPropertiesFromEveryHost_HostIdQueryParamIsNoLongerSupported()
     {
+        // GetPropertiesRequest no longer has a HostId field - it used to,
+        // shared with GetMyPropertiesEndpoint, but that made "list
+        // properties for host X" reachable by any anonymous caller who
+        // guessed a host id, not just derived from an authenticated
+        // caller's own token. An unrecognized ?HostId= query param is
+        // simply ignored by binding, not an error - this asserts the
+        // filter genuinely doesn't apply anymore, not just that the
+        // request 400s. See GetMyProperties_ShouldReturnOnlyTheCallersOwnProperties
+        // for the (correct, auth-derived) host-scoped equivalent.
         // Arrange
         (string firstHostToken, Guid firstHostId) = await SeedHostUserAsync();
         (string secondHostToken, _) = await SeedHostUserAsync();
         Guid firstHostPropertyId = await CreatePropertyAsync(firstHostToken, "Kuwait City");
-        await CreatePropertyAsync(secondHostToken, "Kuwait City");
+        Guid secondHostPropertyId = await CreatePropertyAsync(secondHostToken, "Kuwait City");
 
         // Act
         HttpResponseMessage response = await _client.GetAsync(
@@ -200,8 +210,8 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         GetPropertiesResponse? result = await response.Content.ReadFromJsonAsync<GetPropertiesResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
-        Assert.All(result.Properties, p => Assert.Equal(firstHostId, p.HostId));
         Assert.Contains(result.Properties, p => p.Id == firstHostPropertyId);
+        Assert.Contains(result.Properties, p => p.Id == secondHostPropertyId);
     }
 
     [Fact]

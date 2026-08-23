@@ -1,6 +1,6 @@
-using BuildingBlocks.Exceptions;
 using SeedWork.Enums;
 using Transactions.Entities;
+using Transactions.Exceptions;
 namespace UnitTests.Entities;
 
 public class TransactionTests

@@ -1,5 +1,5 @@
+using Catalog.Enums;
 using Mediator;
-using SeedWork.Enums;
 namespace Catalog.Features.CreateProperty;
 
 // No HostId here, deliberately - this endpoint is Host-only, and HostId

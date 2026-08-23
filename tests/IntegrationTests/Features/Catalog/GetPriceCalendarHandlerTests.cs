@@ -1,10 +1,10 @@
 ﻿using Catalog;
 using Catalog.Entities;
+using Catalog.Enums;
 using Catalog.Features.GetPriceCalendar;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.DependencyInjection;
 using NpgsqlTypes;
-using SeedWork.Enums;
 using SeedWork.ValueObjects;
 namespace IntegrationTests.Features.Catalog;
 

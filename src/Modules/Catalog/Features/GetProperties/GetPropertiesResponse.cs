@@ -1,4 +1,4 @@
-using SeedWork.Enums;
+using Catalog.Enums;
 namespace Catalog.Features.GetProperties;
 
 public record GetPropertiesResponse

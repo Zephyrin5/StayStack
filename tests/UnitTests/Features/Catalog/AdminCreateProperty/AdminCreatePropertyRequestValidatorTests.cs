@@ -1,6 +1,6 @@
+using Catalog.Enums;
 using Catalog.Features.AdminCreateProperty;
 using FluentValidation.TestHelper;
-using SeedWork.Enums;
 namespace UnitTests.Features.Catalog.AdminCreateProperty;
 
 public class AdminCreatePropertyRequestValidatorTests

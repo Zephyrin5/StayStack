@@ -5,9 +5,13 @@
 
     <ItemGroup>
         <!-- SeedWork is the cross-module shared kernel (Entity, enums like
-             Currency/PropertyType, value objects) - safe for a Contracts
-             project to depend on, unlike a reference to Catalog itself,
-             which would reach into that module's own entities/DbContext. -->
+             Currency, value objects) - safe for a Contracts project to
+             depend on, unlike a reference to Catalog itself, which would
+             reach into that module's own entities/DbContext. PropertyType/
+             UnitType moved out of SeedWork into Catalog.Enums - neither is
+             referenced by this project's own DTOs (UnitSummary,
+             ConfirmedHold), so no dependency on Catalog.Enums is needed
+             here either. -->
         <ProjectReference Include="..\..\..\Core\SeedWork\SeedWork.csproj"/>
     </ItemGroup>
 

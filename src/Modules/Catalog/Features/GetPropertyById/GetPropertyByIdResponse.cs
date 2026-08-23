@@ -1,3 +1,4 @@
+using Catalog.Enums;
 using SeedWork.Enums;
 namespace Catalog.Features.GetPropertyById;
 

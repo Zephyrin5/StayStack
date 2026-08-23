@@ -1,4 +1,5 @@
 using Catalog.Entities;
+using Catalog.Enums;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 namespace UnitTests.Entities;

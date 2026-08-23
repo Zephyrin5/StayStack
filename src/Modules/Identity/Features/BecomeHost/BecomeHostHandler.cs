@@ -2,6 +2,7 @@ using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using Hosts.Contracts;
 using Identity.Entities;
+using Identity.Exceptions;
 using Identity.Features.Common;
 using Mediator;
 using Microsoft.AspNetCore.Identity;

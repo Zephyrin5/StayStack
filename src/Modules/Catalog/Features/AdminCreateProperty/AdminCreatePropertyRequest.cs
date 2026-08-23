@@ -1,6 +1,6 @@
+using Catalog.Enums;
 using Catalog.Features.CreateProperty;
 using Mediator;
-using SeedWork.Enums;
 namespace Catalog.Features.AdminCreateProperty;
 
 public record AdminCreatePropertyRequest : IRequest<CreatePropertyResponse>

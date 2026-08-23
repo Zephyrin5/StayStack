@@ -1,6 +1,8 @@
 ﻿using BuildingBlocks.Exceptions;
 using Catalog;
 using Catalog.Entities;
+using Catalog.Enums;
+using Catalog.Exceptions;
 using Catalog.Features.HoldAvailability;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

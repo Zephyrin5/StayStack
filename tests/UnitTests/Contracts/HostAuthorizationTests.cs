@@ -1,6 +1,7 @@
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using Hosts.Contracts;
+using Hosts.Exceptions;
 using Moq;
 using System.Net;
 namespace UnitTests.Contracts;

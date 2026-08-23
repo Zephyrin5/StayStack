@@ -1,5 +1,6 @@
+using BuildingBlocks.Exceptions;
 using System.Net;
-namespace BuildingBlocks.Exceptions;
+namespace Hosts.Exceptions;
 
 /// <summary>
 ///     The caller has no linked HostId - not "not found", since this is a

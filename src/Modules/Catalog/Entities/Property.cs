@@ -1,6 +1,6 @@
 ﻿using Ardalis.GuardClauses;
+using Catalog.Enums;
 using SeedWork.Abstractions;
-using SeedWork.Enums;
 using SeedWork.ValueObjects;
 namespace Catalog.Entities;
 

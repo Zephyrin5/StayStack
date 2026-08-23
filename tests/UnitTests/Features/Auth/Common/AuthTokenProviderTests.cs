@@ -1,6 +1,6 @@
-﻿using BuildingBlocks.Exceptions;
-using Identity;
+﻿using Identity;
 using Identity.Configurations;
+using Identity.Exceptions;
 using Identity.Features.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;

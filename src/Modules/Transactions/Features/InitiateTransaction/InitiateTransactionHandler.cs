@@ -4,6 +4,7 @@ using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Transactions.Entities;
+using Transactions.Exceptions;
 namespace Transactions.Features.InitiateTransaction;
 
 public class InitiateTransactionHandler(

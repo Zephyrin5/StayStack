@@ -1,8 +1,8 @@
 using Ardalis.GuardClauses;
-using BuildingBlocks.Exceptions;
 using SeedWork.Abstractions;
 using SeedWork.Enums;
 using SeedWork.Interfaces;
+using Transactions.Exceptions;
 namespace Transactions.Entities;
 
 public sealed class Transaction : Entity, IAggregateRoot

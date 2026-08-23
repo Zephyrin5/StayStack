@@ -1,6 +1,7 @@
 using Bogus;
 using Catalog;
 using Catalog.Entities;
+using Catalog.Enums;
 using Catalog.Features.AdminCreateProperty;
 using Catalog.Features.CreateProperty;
 using Catalog.Features.CreateUnit;

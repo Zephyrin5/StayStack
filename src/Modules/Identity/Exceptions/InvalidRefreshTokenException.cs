@@ -1,5 +1,6 @@
-﻿using System.Net;
-namespace BuildingBlocks.Exceptions;
+using BuildingBlocks.Exceptions;
+using System.Net;
+namespace Identity.Exceptions;
 
 /// <summary>
 ///     Invalid refresh token

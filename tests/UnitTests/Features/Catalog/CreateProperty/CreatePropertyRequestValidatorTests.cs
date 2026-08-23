@@ -1,6 +1,6 @@
+using Catalog.Enums;
 using Catalog.Features.CreateProperty;
 using FluentValidation.TestHelper;
-using SeedWork.Enums;
 namespace UnitTests.Features.Catalog.CreateProperty;
 
 public class CreatePropertyRequestValidatorTests

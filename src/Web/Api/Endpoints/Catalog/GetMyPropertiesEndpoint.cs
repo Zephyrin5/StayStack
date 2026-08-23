@@ -1,14 +1,14 @@
 using BuildingBlocks.Identity;
+using Catalog.Features.GetMyProperties;
 using Catalog.Features.GetProperties;
 using FastEndpoints;
-using Hosts.Contracts;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
 namespace Api.Endpoints.Catalog;
 
-public class GetMyPropertiesEndpoint(IMediator mediator, IHostAuthorization hostAuthorization)
+public class GetMyPropertiesEndpoint(IMediator mediator)
     : EndpointWithoutRequest<GetPropertiesResponse>
 {
     public override void Configure()
@@ -29,8 +29,7 @@ public class GetMyPropertiesEndpoint(IMediator mediator, IHostAuthorization host
 
     public override async Task HandleAsync(CancellationToken ct)
     {
-        Guid hostId = hostAuthorization.RequireHostId();
-        GetPropertiesResponse result = await mediator.Send(new GetPropertiesRequest { HostId = hostId }, ct);
+        GetPropertiesResponse result = await mediator.Send(new GetMyPropertiesRequest(), ct);
         await Send.OkAsync(result, ct);
     }
 }

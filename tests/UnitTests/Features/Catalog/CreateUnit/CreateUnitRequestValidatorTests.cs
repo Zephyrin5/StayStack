@@ -1,3 +1,4 @@
+using Catalog.Enums;
 using Catalog.Features.CreateUnit;
 using FluentValidation.TestHelper;
 using SeedWork.Enums;

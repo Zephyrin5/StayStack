@@ -4,6 +4,7 @@ using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
 using Catalog;
 using Catalog.Entities;
+using Catalog.Enums;
 using Catalog.Features.HoldAvailability;
 using Identity.Entities;
 using Identity.Features.SignIn;

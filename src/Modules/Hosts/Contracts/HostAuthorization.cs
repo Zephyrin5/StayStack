@@ -1,5 +1,6 @@
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
+using Hosts.Exceptions;
 namespace Hosts.Contracts;
 
 // internal, same reasoning as HostRegistrar - Catalog/Identity should only

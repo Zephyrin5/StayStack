@@ -1,3 +1,4 @@
+using Catalog.Enums;
 using Mediator;
 using SeedWork.Enums;
 namespace Catalog.Features.CreateUnit;

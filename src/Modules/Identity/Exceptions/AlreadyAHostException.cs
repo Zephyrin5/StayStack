@@ -1,5 +1,6 @@
+using BuildingBlocks.Exceptions;
 using System.Net;
-namespace BuildingBlocks.Exceptions;
+namespace Identity.Exceptions;
 
 /// <summary>
 ///     BecomeHost called on an account that already has a linked HostId.

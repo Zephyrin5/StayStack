@@ -1,5 +1,5 @@
-﻿using BuildingBlocks.Exceptions;
-using Identity.Entities;
+﻿using Identity.Entities;
+using Identity.Exceptions;
 using Identity.Features.Common;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
