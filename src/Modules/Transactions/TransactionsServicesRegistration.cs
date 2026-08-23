@@ -1,15 +1,14 @@
-using Bookings.Contracts;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Persistence;
 using Persistence.Interceptors;
-namespace Bookings;
+namespace Transactions;
 
-public static class BookingsServicesRegistration
+public static class TransactionsServicesRegistration
 {
-    public static IServiceCollection ConfigureBookingsServices(
+    public static IServiceCollection ConfigureTransactionsServices(
         this IServiceCollection services,
         IConfiguration configuration,
         IWebHostEnvironment? environment = null)
@@ -25,22 +24,19 @@ public static class BookingsServicesRegistration
         // than being newed up by hand.
         services.AddScoped<AuditableEntitySaveChangesInterceptor>();
 
-        services.AddDbContext<AppBookingsDbContext>((serviceProvider, options) =>
+        services.AddDbContext<AppTransactionsDbContext>((serviceProvider, options) =>
         {
             string connectionString = configuration.GetConnectionString("AppConnection")
                                       ?? throw new InvalidOperationException(
-                                          "Connection string for AppBookingsDbContext not found.");
+                                          "Connection string for AppTransactionsDbContext not found.");
 
             options.ConfigureStayStackDefaults(
                 connectionString,
-                "bookings",
+                "transactions",
                 environment is not null && environment.IsDevelopment());
 
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
-
-        services.AddScoped<IBookingLookup, BookingLookup>();
-        services.AddScoped<IBookingPaymentConfirmation, BookingPaymentConfirmation>();
 
         return services;
     }

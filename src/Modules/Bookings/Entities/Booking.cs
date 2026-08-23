@@ -1,4 +1,5 @@
 using Ardalis.GuardClauses;
+using BuildingBlocks.Exceptions;
 using SeedWork.Abstractions;
 using SeedWork.Enums;
 using SeedWork.Interfaces;
@@ -108,5 +109,26 @@ public sealed class Booking : Entity, IAggregateRoot
         }
 
         BookingStatus = BookingStatus.Cancelled;
+    }
+
+    // Called by IBookingPaymentConfirmation once a Transaction succeeds -
+    // idempotent the same way Cancel() is (a retried webhook/handler call
+    // shouldn't fail just because the first call already landed), but
+    // throws rather than silently no-op-ing from Cancelled: a payment
+    // succeeding for a booking that was cancelled out from under it is a
+    // real inconsistency worth surfacing, not swallowing.
+    public void Confirm()
+    {
+        if (BookingStatus == BookingStatus.Confirmed)
+        {
+            return;
+        }
+
+        if (BookingStatus != BookingStatus.Pending)
+        {
+            throw new BookingNotPayableException(Id);
+        }
+
+        BookingStatus = BookingStatus.Confirmed;
     }
 }

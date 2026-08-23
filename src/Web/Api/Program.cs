@@ -9,6 +9,7 @@ using Identity;
 using Microsoft.AspNetCore.Mvc;
 using Persistence;
 using Scalar.AspNetCore;
+using Transactions;
 WebApplicationBuilder builder = WebApplication.CreateSlimBuilder(args);
 builder.WebHost.UseKestrelHttpsConfiguration();
 
@@ -31,6 +32,7 @@ builder.Services.ConfigureApiServices(builder.Configuration);
 builder.Services.ConfigureCatalogServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureHostsServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureBookingsServices(builder.Configuration, builder.Environment);
+builder.Services.ConfigureTransactionsServices(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHealthChecks();
 

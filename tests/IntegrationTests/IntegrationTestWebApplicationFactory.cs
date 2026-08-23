@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Persistence;
 using Testcontainers.PostgreSql;
+using Transactions;
 namespace IntegrationTests;
 
 // ReSharper disable once ClassNeverInstantiated.Global
@@ -73,8 +74,12 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             services.AddDbContext<AppBookingsDbContext>(options =>
                 options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "bookings", false));
 
+            services.RemoveAll<DbContextOptions<AppTransactionsDbContext>>();
+            services.AddDbContext<AppTransactionsDbContext>(options =>
+                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "transactions", false));
+
             // Build a temporary provider just to apply each module's real
-            // migrations before any test runs. All four share one physical
+            // migrations before any test runs. All five share one physical
             // database in this container, which Migrate() handles safely
             // regardless of call order - each module tracks its own applied
             // migrations in its own history table (see
@@ -86,6 +91,7 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppHostsDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Database.Migrate();
+            scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>().Database.Migrate();
         });
     }
 }

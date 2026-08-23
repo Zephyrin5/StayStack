@@ -1,4 +1,5 @@
 using Bookings.Entities;
+using BuildingBlocks.Exceptions;
 using SeedWork.Enums;
 namespace UnitTests.Entities;
 
@@ -139,5 +140,36 @@ public class BookingTests
 
         Assert.Null(exception);
         Assert.Equal(BookingStatus.Cancelled, booking.BookingStatus);
+    }
+
+    [Fact]
+    public void Confirm_ShouldSetStatusToConfirmed()
+    {
+        Booking booking = CreateValidBooking();
+
+        booking.Confirm();
+
+        Assert.Equal(BookingStatus.Confirmed, booking.BookingStatus);
+    }
+
+    [Fact]
+    public void Confirm_ShouldBeIdempotent_WhenCalledTwice()
+    {
+        Booking booking = CreateValidBooking();
+
+        booking.Confirm();
+        Exception? exception = Record.Exception(booking.Confirm);
+
+        Assert.Null(exception);
+        Assert.Equal(BookingStatus.Confirmed, booking.BookingStatus);
+    }
+
+    [Fact]
+    public void Confirm_ShouldThrow_WhenBookingIsCancelled()
+    {
+        Booking booking = CreateValidBooking();
+        booking.Cancel();
+
+        Assert.Throws<BookingNotPayableException>(booking.Confirm);
     }
 }

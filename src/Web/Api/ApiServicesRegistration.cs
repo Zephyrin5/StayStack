@@ -13,6 +13,7 @@ using BookingsDiscoveredTypes = Bookings.DiscoveredTypes;
 using CatalogDiscoveredTypes = Catalog.DiscoveredTypes;
 using HostsDiscoveredTypes = Hosts.DiscoveredTypes;
 using IdentityDiscoveredTypes = Identity.DiscoveredTypes;
+using TransactionsDiscoveredTypes = Transactions.DiscoveredTypes;
 
 public static class ApiServicesRegistration
 {
@@ -78,6 +79,7 @@ public static class ApiServicesRegistration
             CatalogDiscoveredTypes.All,
             HostsDiscoveredTypes.All,
             BookingsDiscoveredTypes.All,
+            TransactionsDiscoveredTypes.All,
             DiscoveredTypes.All);
         // The combined source-generated resolver (each module's own DTOs
         // plus a reflection fallback) is wired onto Config.Serializer.Options

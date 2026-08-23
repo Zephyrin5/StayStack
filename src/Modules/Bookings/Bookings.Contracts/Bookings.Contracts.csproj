@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- SeedWork is the cross-module shared kernel (Entity, enums like
+             Currency, value objects) - safe for a Contracts project to
+             depend on, unlike a reference to Bookings itself, which would
+             reach into that module's own entities/DbContext. -->
+        <ProjectReference Include="..\..\..\Core\SeedWork\SeedWork.csproj"/>
+    </ItemGroup>
+
+</Project>
