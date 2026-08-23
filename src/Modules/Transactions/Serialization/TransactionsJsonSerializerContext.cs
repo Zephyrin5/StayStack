@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Transactions.Features.GetTransactions;
 using Transactions.Features.InitiateTransaction;
 using Transactions.Features.MarkTransactionFailed;
 using Transactions.Features.MarkTransactionSucceeded;
@@ -11,4 +12,6 @@ namespace Transactions.Serialization;
 [JsonSerializable(typeof(MarkTransactionSucceededResponse))]
 [JsonSerializable(typeof(MarkTransactionFailedRequest))]
 [JsonSerializable(typeof(MarkTransactionFailedResponse))]
+[JsonSerializable(typeof(GetTransactionsRequest))]
+[JsonSerializable(typeof(GetTransactionsResponse))]
 public partial class TransactionsJsonSerializerContext : JsonSerializerContext;

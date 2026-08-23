@@ -15,6 +15,7 @@ using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Transactions.Features.GetTransactions;
 using Transactions.Features.InitiateTransaction;
 using Transactions.Features.MarkTransactionFailed;
 namespace IntegrationTests.Features.Transactions;
@@ -118,6 +119,13 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
             request.Content = JsonContent.Create(body);
         }
 
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        return request;
+    }
+
+    private static HttpRequestMessage AuthorizedGet(string path, string accessToken)
+    {
+        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return request;
     }
@@ -243,5 +251,57 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         AppBookingsDbContext bookingsDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
         Booking booking = await bookingsDb.Bookings.SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
         Assert.Equal(BookingStatus.Pending, booking.BookingStatus);
+    }
+
+    [Fact]
+    public async Task GetTransactions_ShouldReturnCreatedTransaction_AndSupportStatusFilter_ForAdministrator()
+    {
+        // Arrange
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        Guid bookingId = await HoldAndConfirmBookingAsync(unit.Id);
+        string adminToken = await SignInAsAdministratorAsync();
+
+        HttpResponseMessage initiateResponse = await _client.PostAsJsonAsync(
+            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, TestContext.Current.CancellationToken);
+        InitiateTransactionResponse? initiated =
+            await initiateResponse.Content.ReadFromJsonAsync<InitiateTransactionResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(initiated);
+
+        // Act - unfiltered
+        HttpResponseMessage allResponse = await _client.SendAsync(
+            AuthorizedGet("/api/transactions", adminToken), TestContext.Current.CancellationToken);
+
+        // Assert - unfiltered
+        Assert.Equal(HttpStatusCode.OK, allResponse.StatusCode);
+        GetTransactionsResponse? all =
+            await allResponse.Content.ReadFromJsonAsync<GetTransactionsResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(all);
+        Assert.Contains(all.Transactions, t => t.TransactionId == initiated.TransactionId);
+
+        // Act - filtered to a status the seeded transaction doesn't have
+        HttpResponseMessage filteredResponse = await _client.SendAsync(
+            AuthorizedGet("/api/transactions?Status=Succeeded", adminToken), TestContext.Current.CancellationToken);
+
+        // Assert - filtered
+        Assert.Equal(HttpStatusCode.OK, filteredResponse.StatusCode);
+        GetTransactionsResponse? filtered =
+            await filteredResponse.Content.ReadFromJsonAsync<GetTransactionsResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(filtered);
+        Assert.DoesNotContain(filtered.Transactions, t => t.TransactionId == initiated.TransactionId);
+    }
+
+    [Fact]
+    public async Task GetTransactions_ShouldReturn403_ForNonAdministratorCaller()
+    {
+        // Arrange
+        string nonAdminToken = await SignInAsNonAdministratorAsync();
+
+        // Act
+        HttpResponseMessage response = await _client.SendAsync(
+            AuthorizedGet("/api/transactions", nonAdminToken), TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 }
