@@ -28,7 +28,6 @@ public class GetPropertyByIdHandler(AppCatalogDbContext dbContext) : IRequestHan
                 .. units.Select(u => new UnitSummary
                 {
                     Id = u.Id,
-                    UnitType = u.UnitType,
                     Name = new Dictionary<string, string>(u.Name.Values),
                     MaxOccupancy = u.MaxOccupancy,
                     BasePrice = u.BasePrice,

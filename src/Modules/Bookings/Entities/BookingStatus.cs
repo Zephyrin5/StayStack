@@ -1,8 +1,8 @@
 namespace Bookings.Entities;
 
 // Lives here, not SeedWork - nothing outside Bookings needs this yet,
-// unlike PropertyType/UnitType which are already part of other modules'
-// public request/response DTOs.
+// unlike PropertyType which is already part of another module's public
+// request/response DTOs.
 public enum BookingStatus
 {
     // No code path reaches Confirmed yet - myFatoorah payment integration

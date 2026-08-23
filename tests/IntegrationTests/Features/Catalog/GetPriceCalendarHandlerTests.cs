@@ -1,6 +1,5 @@
 ﻿using Catalog;
 using Catalog.Entities;
-using Catalog.Enums;
 using Catalog.Features.GetPriceCalendar;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,7 +23,6 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
     {
         return Unit.Create(
             Guid.CreateVersion7(),
-            UnitType.Room,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Ocean View Suite" } }, "en"),
             2,
             basePrice);

@@ -15,7 +15,6 @@ public record GetPropertyByIdResponse
 public record UnitSummary
 {
     public Guid Id { get; init; }
-    public UnitType UnitType { get; init; }
     public Dictionary<string, string> Name { get; init; } = new Dictionary<string, string>();
     public int MaxOccupancy { get; init; }
     public decimal BasePrice { get; init; }

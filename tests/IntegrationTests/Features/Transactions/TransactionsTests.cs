@@ -5,7 +5,6 @@ using Bookings.Features.ConfirmBooking;
 using BuildingBlocks.Pagination;
 using Catalog;
 using Catalog.Entities;
-using Catalog.Enums;
 using Catalog.Features.HoldAvailability;
 using Identity.Entities;
 using Identity.Features.SignIn;
@@ -36,7 +35,6 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
     {
         return Unit.Create(
             Guid.CreateVersion7(),
-            UnitType.Room,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
             2,
             basePrice);

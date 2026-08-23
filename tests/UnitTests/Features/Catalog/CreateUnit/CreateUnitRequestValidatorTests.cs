@@ -1,4 +1,3 @@
-using Catalog.Enums;
 using Catalog.Features.CreateUnit;
 using FluentValidation.TestHelper;
 using SeedWork.Enums;
@@ -13,7 +12,6 @@ public class CreateUnitRequestValidatorTests
         return new CreateUnitRequest
         {
             PropertyId = Guid.NewGuid(),
-            UnitType = UnitType.Room,
             Name = new Dictionary<string, string> { { "en", "Deluxe Room" } },
             MaxOccupancy = 2,
             BasePrice = 45.5m,
@@ -39,16 +37,6 @@ public class CreateUnitRequestValidatorTests
         var result = _sut.TestValidate(request);
 
         result.ShouldHaveValidationErrorFor(x => x.PropertyId);
-    }
-
-    [Fact]
-    public void Validate_ShouldHaveError_ForUnitType_WhenNotAValidEnumMember()
-    {
-        CreateUnitRequest request = CreateValidRequest() with { UnitType = (UnitType)99 };
-
-        var result = _sut.TestValidate(request);
-
-        result.ShouldHaveValidationErrorFor(x => x.UnitType);
     }
 
     [Fact]

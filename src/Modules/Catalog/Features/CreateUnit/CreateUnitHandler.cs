@@ -43,7 +43,6 @@ public class CreateUnitHandler(
 
         Unit unit = Unit.Create(
             request.PropertyId,
-            request.UnitType,
             name,
             request.MaxOccupancy,
             request.BasePrice,

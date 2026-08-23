@@ -171,7 +171,6 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         CreateUnitRequest request = new CreateUnitRequest
         {
             PropertyId = property.PropertyId,
-            UnitType = UnitType.Room,
             Name = new Dictionary<string, string> { { "en", "Deluxe Room" } },
             MaxOccupancy = 2,
             BasePrice = 45.5m,

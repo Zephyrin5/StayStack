@@ -1,5 +1,4 @@
 ﻿using Ardalis.GuardClauses;
-using Catalog.Enums;
 using SeedWork.Abstractions;
 using SeedWork.Enums;
 using SeedWork.Interfaces;
@@ -14,7 +13,6 @@ public sealed class Unit : Entity, IAggregateRoot
     private Unit(
         Guid id,
         Guid propertyId,
-        UnitType unitType,
         LocalizedText name,
         int maxOccupancy,
         decimal basePrice,
@@ -22,14 +20,12 @@ public sealed class Unit : Entity, IAggregateRoot
     {
         Id = id;
         PropertyId = propertyId;
-        UnitType = unitType;
         Name = name;
         MaxOccupancy = maxOccupancy;
         BasePrice = basePrice;
         Currency = currency;
     }
     public Guid PropertyId { get; private set; }
-    public UnitType UnitType { get; private set; }
     public LocalizedText Name { get; private set; }
     public int MaxOccupancy { get; private set; }
     public decimal BasePrice { get; private set; }
@@ -37,7 +33,6 @@ public sealed class Unit : Entity, IAggregateRoot
 
     public static Unit Create(
         Guid propertyId,
-        UnitType unitType,
         LocalizedText name,
         int maxOccupancy,
         decimal basePrice,
@@ -48,7 +43,7 @@ public sealed class Unit : Entity, IAggregateRoot
         Guard.Against.NegativeOrZero(maxOccupancy);
         Guard.Against.NegativeOrZero(basePrice);
 
-        return new Unit(Guid.CreateVersion7(), propertyId, unitType, name, maxOccupancy, basePrice, currency);
+        return new Unit(Guid.CreateVersion7(), propertyId, name, maxOccupancy, basePrice, currency);
     }
 
     // A real mutation with its own invariant, not just a settable property -

@@ -11,8 +11,6 @@ public class UnitConfiguration : IEntityTypeConfiguration<Unit>
         builder.Property(u => u.BasePrice).HasColumnType("numeric(10,2)").IsRequired();
         builder.Property(u => u.Currency).HasConversion<string>().HasMaxLength(3).IsFixedLength().IsRequired();
 
-        builder.Property(u => u.UnitType).HasConversion<string>().HasMaxLength(20).IsRequired();
-
         builder.Property(u => u.Name)
             .IsRequired();
 

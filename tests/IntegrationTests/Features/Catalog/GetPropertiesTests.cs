@@ -105,7 +105,6 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         request.Content = JsonContent.Create(new CreateUnitRequest
         {
             PropertyId = propertyId,
-            UnitType = UnitType.Room,
             Name = new Dictionary<string, string> { { "en", "Deluxe Room" } },
             MaxOccupancy = 2,
             BasePrice = 45.5m,

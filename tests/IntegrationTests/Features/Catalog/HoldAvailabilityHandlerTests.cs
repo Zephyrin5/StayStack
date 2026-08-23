@@ -1,7 +1,6 @@
 ﻿using BuildingBlocks.Exceptions;
 using Catalog;
 using Catalog.Entities;
-using Catalog.Enums;
 using Catalog.Exceptions;
 using Catalog.Features.HoldAvailability;
 using Microsoft.EntityFrameworkCore;
@@ -28,7 +27,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     {
         return Unit.Create(
             Guid.CreateVersion7(),
-            UnitType.Room,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
             maxCapacity,
             100);

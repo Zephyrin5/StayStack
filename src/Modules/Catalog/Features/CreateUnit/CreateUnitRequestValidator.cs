@@ -7,7 +7,6 @@ public sealed class CreateUnitRequestValidator : Validator<CreateUnitRequest>
     public CreateUnitRequestValidator()
     {
         RuleFor(x => x.PropertyId).NotEmpty();
-        RuleFor(x => x.UnitType).IsInEnum();
         RuleFor(x => x.Name).NotEmpty().WithMessage("At least one localized name value is required.");
         RuleFor(x => x.MaxOccupancy).GreaterThan(0);
         RuleFor(x => x.BasePrice).GreaterThan(0);
