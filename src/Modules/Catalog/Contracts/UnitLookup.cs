@@ -50,4 +50,12 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
                 Currency = unit.Currency
             });
     }
+
+    public async Task<IReadOnlyList<Guid>> GetUnitIdsForHostAsync(Guid hostId, CancellationToken cancellationToken)
+    {
+        return await dbContext.Units.AsNoTracking()
+            .Where(u => dbContext.Properties.Where(p => p.HostId == hostId).Select(p => p.Id).Contains(u.PropertyId))
+            .Select(u => u.Id)
+            .ToListAsync(cancellationToken);
+    }
 }

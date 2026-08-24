@@ -18,6 +18,13 @@ public interface IUnitLookup
     ///     already handle a null single GetUnitAsync result.
     /// </summary>
     Task<IReadOnlyDictionary<Guid, UnitSummary>> GetUnitsAsync(IEnumerable<Guid> unitIds, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     Every unit id across every property a host owns - what
+    ///     GetHostBookingsHandler (Bookings) filters its own bookings query
+    ///     by, since Bookings has no notion of Property/HostId itself.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> GetUnitIdsForHostAsync(Guid hostId, CancellationToken cancellationToken);
 }
 
 public record UnitSummary
