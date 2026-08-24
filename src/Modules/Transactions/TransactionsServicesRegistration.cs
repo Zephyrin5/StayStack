@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Persistence;
 using Persistence.Interceptors;
+using Transactions.Contracts;
 namespace Transactions;
 
 public static class TransactionsServicesRegistration
@@ -37,6 +38,8 @@ public static class TransactionsServicesRegistration
 
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
+
+        services.AddScoped<ITransactionReversal, TransactionReversal>();
 
         return services;
     }

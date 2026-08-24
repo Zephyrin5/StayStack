@@ -30,7 +30,19 @@ public class MarkTransactionSucceededHandler(
         transaction.MarkSucceeded();
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        await bookingPaymentConfirmation.ConfirmPaymentAsync(transaction.BookingId, cancellationToken);
+        bool confirmed = await bookingPaymentConfirmation.ConfirmPaymentAsync(transaction.BookingId, cancellationToken);
+
+        if (!confirmed)
+        {
+            // The booking was already cancelled by the time this payment
+            // resolved - money came in for something nobody wants anymore.
+            // The payment succeeding is still a fact (TransactionStatus
+            // stays Succeeded above, it isn't undone), it just immediately
+            // needs reversing rather than being left to look like ordinary
+            // completed revenue.
+            transaction.MarkRefundPending();
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
 
         return new MarkTransactionSucceededResponse
         {

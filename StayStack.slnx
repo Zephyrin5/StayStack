@@ -18,6 +18,7 @@
         <Project Path="src/Modules/Hosts/Hosts.csproj"/>
         <Project Path="src/Modules/Hosts/Hosts.Contracts/Hosts.Contracts.csproj"/>
         <Project Path="src/Modules/Transactions/Transactions.csproj"/>
+        <Project Path="src/Modules/Transactions/Transactions.Contracts/Transactions.Contracts.csproj"/>
     </Folder>
     <Folder Name="/src/Web/">
         <Project Path="src/Web/Api/Api.csproj"/>

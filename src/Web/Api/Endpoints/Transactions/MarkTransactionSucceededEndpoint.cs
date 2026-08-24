@@ -24,9 +24,13 @@ public class MarkTransactionSucceededEndpoint(IMediator mediator)
         Summary(s =>
         {
             s.Summary = "Mark a transaction succeeded and confirm its booking (admin-only stand-in for a gateway webhook)";
-            s.Response<MarkTransactionSucceededResponse>(200, "Transaction succeeded; booking confirmed.");
+            s.Description = "If the booking was cancelled while this payment was still in flight, it isn't " +
+                            "re-confirmed - the transaction goes straight to RefundPending instead, since the " +
+                            "payment succeeding is being reported as a fact that already happened, not a " +
+                            "request that can be rejected just because the booking moved on.";
+            s.Response<MarkTransactionSucceededResponse>(200, "Transaction succeeded; booking confirmed, or a refund started if it was already cancelled.");
             s.Response<ProblemDetails>(404, "Transaction not found.");
-            s.Response<ProblemDetails>(409, "Transaction already finalized, or its booking is no longer payable.");
+            s.Response<ProblemDetails>(409, "Transaction already finalized.");
         });
     }
 

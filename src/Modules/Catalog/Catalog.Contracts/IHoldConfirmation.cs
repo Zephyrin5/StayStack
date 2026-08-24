@@ -18,12 +18,13 @@ public interface IHoldConfirmation
     Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken);
 
     /// <summary>
-    ///     Compensating action for a ConfirmHoldAsync that succeeded but
-    ///     whose corresponding Booking write then failed - reverts 'booked'
-    ///     back to 'held' so the hold isn't permanently stuck occupying
-    ///     inventory nobody ever got a Booking for. Best-effort/idempotent:
-    ///     a no-op if the hold is no longer 'booked' (already released, or
-    ///     never existed).
+    ///     Reverts 'booked' back to 'held' with hold_expires_at reset to
+    ///     now - used both as ConfirmBookingHandler's compensating action
+    ///     when its Booking write fails, and by CancelBookingHandler to
+    ///     free the range back up immediately rather than leaving it
+    ///     blocked for whatever was left on the hold's original 15-minute
+    ///     window. Best-effort/idempotent: a no-op if the hold is no longer
+    ///     'booked' (already released, or never existed).
     /// </summary>
     Task ReleaseHoldAsync(Guid holdId, CancellationToken cancellationToken);
 }

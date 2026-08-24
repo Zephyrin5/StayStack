@@ -7,6 +7,17 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <!-- Transactions.Contracts is nested inside this project's folder;
+             without this, SDK-default globbing would compile its files into
+             both projects (the same CS0436 gotcha Catalog.csproj/Hosts.csproj/
+             Bookings.csproj already document for their own nested Contracts
+             projects). -->
+        <Compile Remove="Transactions.Contracts\**"/>
+        <EmbeddedResource Remove="Transactions.Contracts\**"/>
+        <None Remove="Transactions.Contracts\**"/>
+    </ItemGroup>
+
+    <ItemGroup>
         <PackageReference Include="FastEndpoints"/>
         <PackageReference Include="FastEndpoints.Generator"/>
         <PackageReference Include="Mediator.Abstractions"/>
@@ -18,6 +29,7 @@
         <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
         <ProjectReference Include="..\..\Infrastructure\Persistence\Persistence.csproj"/>
         <ProjectReference Include="..\Bookings\Bookings.Contracts\Bookings.Contracts.csproj"/>
+        <ProjectReference Include="Transactions.Contracts\Transactions.Contracts.csproj"/>
     </ItemGroup>
 
 </Project>

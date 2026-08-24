@@ -74,9 +74,18 @@ internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmati
             await dbContext.Database.OpenConnectionAsync(cancellationToken);
         }
 
+        // hold_expires_at reset to now(), not left at its original value -
+        // otherwise a release that happens well within the original 15-
+        // minute hold window (an immediate cancellation, or a
+        // ConfirmBookingHandler rollback moments after the hold was made)
+        // would leave the range still blocking new holds for however long
+        // was left on that original timer, even though the caller just
+        // explicitly gave the range back. Resetting it makes the row
+        // immediately eligible for both HoldAvailabilityHandler's per-unit
+        // cleanup and ExpiredHoldsSweepJob, instead of waiting it out.
         const string sql = """
                            UPDATE unit_availability_holds
-                           SET status = 'held'
+                           SET status = 'held', hold_expires_at = now()
                            WHERE id = @HoldId AND status = 'booked';
                            """;
 

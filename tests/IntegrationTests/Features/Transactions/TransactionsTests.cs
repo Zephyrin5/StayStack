@@ -17,6 +17,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Transactions;
+using Transactions.Entities;
 using Transactions.Features.GetTransactions;
 using Transactions.Features.InitiateTransaction;
 using Transactions.Features.MarkTransactionFailed;
@@ -336,5 +337,124 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    private async Task<(Guid BookingId, Guid TransactionId)> CreateSucceededTransactionAsync(string adminToken)
+    {
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        Guid bookingId = await HoldAndConfirmBookingAsync(unit.Id);
+
+        HttpResponseMessage initiateResponse = await _client.PostAsJsonAsync(
+            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, TestContext.Current.CancellationToken);
+        InitiateTransactionResponse? initiated =
+            await initiateResponse.Content.ReadFromJsonAsync<InitiateTransactionResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(initiated);
+
+        HttpResponseMessage succeedResponse = await _client.SendAsync(
+            AuthorizedPost($"/api/transactions/{initiated.TransactionId}/succeed", null, adminToken),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, succeedResponse.StatusCode);
+
+        return (bookingId, initiated.TransactionId);
+    }
+
+    private async Task<Guid> CreateRefundPendingTransactionAsync(string adminToken)
+    {
+        (Guid bookingId, Guid transactionId) = await CreateSucceededTransactionAsync(adminToken);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppBookingsDbContext bookingsDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        Booking booking = await bookingsDb.Bookings.SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
+        booking.Cancel();
+        await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        // Drives the same reversal CancelBookingEndpoint would - seeded
+        // directly here rather than through the endpoint since ownership
+        // (CustomerId) isn't this test file's concern; CancelBookingTests
+        // already covers that path end-to-end.
+        AppTransactionsDbContext transactionsDb = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        Transaction transaction = await transactionsDb.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
+        transaction.MarkRefundPending();
+        await transactionsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        return transactionId;
+    }
+
+    [Fact]
+    public async Task Refund_ShouldSetStatusToRefunded_WhenRefundPending()
+    {
+        // Arrange
+        string adminToken = await SignInAsAdministratorAsync();
+        Guid transactionId = await CreateRefundPendingTransactionAsync(adminToken);
+
+        // Act
+        HttpResponseMessage response = await _client.SendAsync(
+            AuthorizedPost($"/api/transactions/{transactionId}/refund", null, adminToken),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppTransactionsDbContext transactionsDb = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        Transaction transaction = await transactionsDb.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
+        Assert.Equal(TransactionStatus.Refunded, transaction.TransactionStatus);
+    }
+
+    [Fact]
+    public async Task Refund_ShouldReturn409_WhenTransactionIsNotAwaitingRefund()
+    {
+        // Arrange
+        string adminToken = await SignInAsAdministratorAsync();
+        (_, Guid transactionId) = await CreateSucceededTransactionAsync(adminToken);
+
+        // Act - Succeeded, not RefundPending
+        HttpResponseMessage response = await _client.SendAsync(
+            AuthorizedPost($"/api/transactions/{transactionId}/refund", null, adminToken),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Refund_ShouldReturn403_ForNonAdministratorCaller()
+    {
+        // Arrange
+        string adminToken = await SignInAsAdministratorAsync();
+        Guid transactionId = await CreateRefundPendingTransactionAsync(adminToken);
+        string nonAdminToken = await SignInAsNonAdministratorAsync();
+
+        // Act
+        HttpResponseMessage response = await _client.SendAsync(
+            AuthorizedPost($"/api/transactions/{transactionId}/refund", null, nonAdminToken),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RefundFail_ShouldSetStatusToRefundFailedAndRecordReason_WhenRefundPending()
+    {
+        // Arrange
+        string adminToken = await SignInAsAdministratorAsync();
+        Guid transactionId = await CreateRefundPendingTransactionAsync(adminToken);
+
+        // Act
+        HttpResponseMessage response = await _client.SendAsync(
+            AuthorizedPost($"/api/transactions/{transactionId}/refund-fail",
+                new { Reason = "Original card closed" }, adminToken),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppTransactionsDbContext transactionsDb = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        Transaction transaction = await transactionsDb.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
+        Assert.Equal(TransactionStatus.RefundFailed, transaction.TransactionStatus);
+        Assert.Equal("Original card closed", transaction.FailureReason);
     }
 }

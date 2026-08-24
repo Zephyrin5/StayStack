@@ -86,4 +86,75 @@ public class TransactionTests
 
         Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkFailed("Card declined"));
     }
+
+    [Fact]
+    public void MarkRefundPending_ShouldSetStatusToRefundPending_WhenSucceeded()
+    {
+        Transaction transaction = CreateValidTransaction();
+        transaction.MarkSucceeded();
+
+        transaction.MarkRefundPending();
+
+        Assert.Equal(TransactionStatus.RefundPending, transaction.TransactionStatus);
+    }
+
+    [Fact]
+    public void MarkRefundPending_ShouldThrow_WhenStillPending()
+    {
+        Transaction transaction = CreateValidTransaction();
+
+        Assert.Throws<TransactionAlreadyFinalizedException>(transaction.MarkRefundPending);
+    }
+
+    [Fact]
+    public void MarkRefundPending_ShouldThrow_WhenAlreadyFailed()
+    {
+        Transaction transaction = CreateValidTransaction();
+        transaction.MarkFailed("Card declined");
+
+        Assert.Throws<TransactionAlreadyFinalizedException>(transaction.MarkRefundPending);
+    }
+
+    [Fact]
+    public void MarkRefunded_ShouldSetStatusToRefunded_WhenRefundPending()
+    {
+        Transaction transaction = CreateValidTransaction();
+        transaction.MarkSucceeded();
+        transaction.MarkRefundPending();
+
+        transaction.MarkRefunded();
+
+        Assert.Equal(TransactionStatus.Refunded, transaction.TransactionStatus);
+    }
+
+    [Fact]
+    public void MarkRefunded_ShouldThrow_WhenStillSucceeded()
+    {
+        Transaction transaction = CreateValidTransaction();
+        transaction.MarkSucceeded();
+
+        Assert.Throws<TransactionAlreadyFinalizedException>(transaction.MarkRefunded);
+    }
+
+    [Fact]
+    public void MarkRefundFailed_ShouldSetStatusToRefundFailedAndRecordReason_WhenRefundPending()
+    {
+        Transaction transaction = CreateValidTransaction();
+        transaction.MarkSucceeded();
+        transaction.MarkRefundPending();
+
+        transaction.MarkRefundFailed("Original card closed");
+
+        Assert.Equal(TransactionStatus.RefundFailed, transaction.TransactionStatus);
+        Assert.Equal("Original card closed", transaction.FailureReason);
+    }
+
+    [Fact]
+    public void MarkRefundFailed_ShouldThrow_WhenStillSucceeded()
+    {
+        Transaction transaction = CreateValidTransaction();
+        transaction.MarkSucceeded();
+
+        Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkRefundFailed("Original card closed"));
+    }
 }

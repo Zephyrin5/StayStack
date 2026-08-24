@@ -21,15 +21,24 @@ public class InitiateTransactionHandler(
             throw new BookingNotPayableException(request.BookingId);
         }
 
-        // A Pending or already-Succeeded transaction blocks a new one -
-        // only a Failed transaction leaves room for a retry. This check is
-        // just a fast-path/friendly-error optimization: it's not what
-        // actually prevents double-charging under concurrent requests (two
-        // callers can both pass it before either inserts) - the partial
-        // unique index in the migration is the real authority, enforced
-        // below via the DbUpdateException catch.
+        // A Pending or Succeeded transaction blocks a new one - Failed
+        // leaves room for a retry, and Refunded/RefundPending/RefundFailed
+        // are moot anyway since a booking only ever reaches those via
+        // cancellation, which already fails the IsPending check above.
+        // Spelled out as the exact active set, not "!= Failed" - the latter
+        // would also match the refund states above by accident, relying on
+        // the IsPending check above to make that harmless rather than
+        // saying what's actually meant. This check is just a fast-path/
+        // friendly-error optimization: it's not what actually prevents
+        // double-charging under concurrent requests (two callers can both
+        // pass it before either inserts) - the partial unique index in the
+        // migration is the real authority, enforced below via the
+        // DbUpdateException catch.
         bool hasTransactionInProgress = await dbContext.Transactions
-            .AnyAsync(t => t.BookingId == request.BookingId && t.TransactionStatus != TransactionStatus.Failed, cancellationToken);
+            .AnyAsync(
+                t => t.BookingId == request.BookingId
+                     && (t.TransactionStatus == TransactionStatus.Pending || t.TransactionStatus == TransactionStatus.Succeeded),
+                cancellationToken);
 
         if (hasTransactionInProgress)
         {

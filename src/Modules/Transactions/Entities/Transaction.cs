@@ -77,4 +77,42 @@ public sealed class Transaction : Entity, IAggregateRoot
         TransactionStatus = TransactionStatus.Failed;
         FailureReason = reason;
     }
+
+    // The refund sub-lifecycle - only reachable from Succeeded, mirroring
+    // MarkSucceeded/MarkFailed's own "one-shot, guard the starting state"
+    // shape. Driven by CancelBookingHandler (via Transactions.Contracts.
+    // ITransactionReversal) when a booking with a paid transaction is
+    // cancelled, and resolved by the same kind of admin stand-in endpoint
+    // MarkTransactionSucceeded/MarkTransactionFailed already use in place
+    // of a real gateway webhook.
+    public void MarkRefundPending()
+    {
+        if (TransactionStatus != TransactionStatus.Succeeded)
+        {
+            throw new TransactionAlreadyFinalizedException(Id);
+        }
+
+        TransactionStatus = TransactionStatus.RefundPending;
+    }
+
+    public void MarkRefunded()
+    {
+        if (TransactionStatus != TransactionStatus.RefundPending)
+        {
+            throw new TransactionAlreadyFinalizedException(Id);
+        }
+
+        TransactionStatus = TransactionStatus.Refunded;
+    }
+
+    public void MarkRefundFailed(string? reason)
+    {
+        if (TransactionStatus != TransactionStatus.RefundPending)
+        {
+            throw new TransactionAlreadyFinalizedException(Id);
+        }
+
+        TransactionStatus = TransactionStatus.RefundFailed;
+        FailureReason = reason;
+    }
 }
