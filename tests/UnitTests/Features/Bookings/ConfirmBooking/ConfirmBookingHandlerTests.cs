@@ -80,4 +80,55 @@ public class ConfirmBookingHandlerTests : IDisposable
         holdConfirmationMock.Verify(
             x => x.ReleaseHoldAsync(holdId, It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public async Task Handle_WhenBookingSaveFailsAndReleaseHoldAlsoFails_ThrowsAggregateExceptionContainingBoth()
+    {
+        // Arrange - the more interesting failure than the single-write
+        // case above: compensation itself fails too. A bare `throw;` in
+        // that inner catch would only ever surface whichever exception
+        // happened to be thrown last, silently losing the other -
+        // specifically, losing *why the booking save failed in the first
+        // place*, the one piece of information most needed to diagnose a
+        // hold that's now stuck 'booked' with nothing left to release it.
+        Guid holdId = Guid.NewGuid();
+        ConfirmedHold hold = new ConfirmedHold
+        {
+            UnitId = Guid.NewGuid(),
+            CheckIn = DateOnly.FromDateTime(DateTime.UtcNow),
+            CheckOut = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(2),
+            GuestCount = 2,
+            TotalPrice = 200m,
+            Currency = Currency.KWD
+        };
+
+        Mock<IHoldConfirmation> holdConfirmationMock = new Mock<IHoldConfirmation>();
+        holdConfirmationMock.Setup(x => x.ConfirmHoldAsync(holdId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(hold);
+
+        InvalidOperationException releaseFailure = new InvalidOperationException("Catalog is unreachable.");
+        holdConfirmationMock.Setup(x => x.ReleaseHoldAsync(holdId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(releaseFailure);
+
+        Mock<ICurrentUserProvider> currentUserProviderMock = new Mock<ICurrentUserProvider>();
+        currentUserProviderMock.Setup(x => x.UserId).Returns((Guid?)null);
+
+        ConfirmBookingHandler handler = new ConfirmBookingHandler(
+            _dbContext, holdConfirmationMock.Object, currentUserProviderMock.Object);
+
+        ConfirmBookingRequest request = new ConfirmBookingRequest
+        {
+            HoldId = holdId,
+            GuestName = "Jane Guest",
+            GuestEmail = "jane@example.com"
+        };
+
+        // Act & Assert - both failures come out together, neither dropped.
+        AggregateException aggregate = await Assert.ThrowsAsync<AggregateException>(() =>
+            handler.Handle(request, CancellationToken.None).AsTask());
+
+        Assert.Equal(2, aggregate.InnerExceptions.Count);
+        Assert.Contains(aggregate.InnerExceptions, ex => ex is DbUpdateException);
+        Assert.Contains(releaseFailure, aggregate.InnerExceptions);
+    }
 }

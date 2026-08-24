@@ -43,13 +43,32 @@ public class ConfirmBookingHandler(
             dbContext.Bookings.Add(booking);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch
+        catch (Exception bookingSaveException)
         {
             // Best-effort compensation: revert the hold back to 'held' so
             // it isn't permanently stuck occupying inventory nobody ever
             // got a Booking for. Same idiom as BecomeHostHandler's
             // rollback on its second write failing.
-            await holdConfirmation.ReleaseHoldAsync(request.HoldId, cancellationToken);
+            try
+            {
+                await holdConfirmation.ReleaseHoldAsync(request.HoldId, cancellationToken);
+            }
+            catch (Exception releaseException)
+            {
+                // The compensation itself failed - the hold is now stuck
+                // 'booked' with nothing left to release it (until
+                // ExpiredHoldsSweepJob eventually notices, once its own
+                // hold_expires_at has passed). A bare `throw;` here would
+                // only ever surface whichever exception happened to fire
+                // last, silently losing the other - specifically, losing
+                // *why the booking save failed in the first place*, which
+                // is the one piece of information most needed to diagnose
+                // a hold that's now stuck. Neither is dropped.
+                throw new AggregateException(
+                    "Booking save failed, and compensating hold release also failed.",
+                    bookingSaveException, releaseException);
+            }
+
             throw;
         }
 
