@@ -8,11 +8,7 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
 {
     public async Task<UnitSummary?> GetUnitAsync(Guid unitId, CancellationToken cancellationToken)
     {
-        // Materialize first, map after - Name is a LocalizedText (a
-        // value-converted jsonb column via StayStackDbContext's global
-        // convention), and EF Core can't translate .Values access on a
-        // converted CLR type into SQL inside a server-side .Select(). Same
-        // constraint GetPropertyByIdHandler (Catalog) already documents.
+        // Materialize first, map after - see docs/adr/0006.
         Unit? unit = await dbContext.Units.AsNoTracking()
             .SingleOrDefaultAsync(u => u.Id == unitId, cancellationToken);
 
@@ -32,9 +28,7 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
     {
         List<Guid> ids = [.. unitIds];
 
-        // Same materialize-first-map-after constraint as GetUnitAsync
-        // above - Name is a value-converted jsonb column, so .Values can't
-        // be part of the server-side .Select().
+        // Same materialize-first-map-after constraint as GetUnitAsync above.
         List<Unit> units = await dbContext.Units.AsNoTracking()
             .Where(u => ids.Contains(u.Id))
             .ToListAsync(cancellationToken);

@@ -31,11 +31,10 @@ public class BecomeHostHandler(
             throw new AlreadyAHostException();
         }
 
-        // Two separate DbContexts (AppHostsDbContext, AppIdentityDbContext),
-        // no shared transaction across them - see chat notes on why
-        // TransactionScope wasn't chosen here. Sequential writes with an
-        // explicit compensating rollback instead: narrow failure window,
-        // and a partially-failed BecomeHost leaves the caller as a fully
+        // Cross-module write (AppHostsDbContext + AppIdentityDbContext,
+        // no shared transaction) - see docs/adr/0003 for why this is a
+        // compensating rollback rather than a distributed transaction. A
+        // partially-failed BecomeHost leaves the caller as a fully
         // functional Customer either way, never in a broken state.
         Guid hostId = await hostRegistrar.RegisterHostAsync(
             request.BusinessName,

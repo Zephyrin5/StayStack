@@ -15,10 +15,7 @@ public class GetTransactionsHandler(AppTransactionsDbContext dbContext) : IReque
             query = query.Where(t => t.TransactionStatus == request.Status);
         }
 
-        // Id as a tiebreaker, not a sort criterion - CreatedAt alone isn't
-        // a total order (two transactions can share a timestamp), so
-        // pagination needs it appended to keep page boundaries
-        // deterministic. See GetPropertiesHandler's identical reasoning.
+        // Id as a tiebreaker, not a sort criterion - see docs/adr/0008.
         (List<Transaction> transactions, int totalCount) = await query
             .OrderByDescending(t => t.CreatedAt).ThenBy(t => t.Id)
             .ToPagedListAsync(request.Page, request.PageSize, cancellationToken);

@@ -12,8 +12,8 @@ internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmati
 {
     // Raw shape of the RETURNING row - Currency comes back as its
     // character(3) column text, mapped to the enum after materializing
-    // rather than asking Dapper to convert it, same "materialize first, map
-    // after" reasoning UnitLookup already documents for its jsonb column.
+    // rather than asking Dapper to convert it. Same materialize-first-map-
+    // after shape as docs/adr/0006, applied here to Dapper rather than EF.
     private sealed record ConfirmedHoldRow
     {
         public Guid UnitId { get; init; }
@@ -33,13 +33,12 @@ internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmati
         }
 
         // A single atomic UPDATE...RETURNING, not a transaction spanning
-        // this and the Booking insert that follows in Bookings - those are
-        // two separate DbContexts/connections. Same "sequential writes,
-        // narrow failure window, no distributed transaction" tradeoff
-        // BecomeHostHandler already documents and accepts, not a new one.
-        // The status/expiry check in the WHERE clause is what makes this
-        // safe to call exactly once per hold: a second call (already-booked
-        // or expired hold) returns no row.
+        // this and the Booking insert that follows in Bookings - see
+        // docs/adr/0003 for why this is a cross-module compensating write,
+        // not a distributed transaction. The status/expiry check in the
+        // WHERE clause is what makes this safe to call exactly once per
+        // hold: a second call (already-booked or expired hold) returns no
+        // row.
         const string sql = """
                            UPDATE unit_availability_holds
                            SET status = 'booked'

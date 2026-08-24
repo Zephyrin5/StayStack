@@ -4,20 +4,13 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- SeedWork is the cross-module shared kernel (Entity, enums like
-             Currency, value objects) - safe for a Contracts project to
-             depend on, unlike a reference to Bookings itself, which would
-             reach into that module's own entities/DbContext.
-             BuildingBlocks is here only for AppException (BookingNotPayableException's
-             base) - it carries no module-specific knowledge itself (no
-             reference to Bookings/Catalog/etc.), so depending on it doesn't
-             reach into another module's internals the way depending on
-             Bookings itself would. The heavier packages BuildingBlocks
-             happens to carry for its other residents (EF Core for
-             PaginationExtensions, Mediator for TelemetryPipelineBehavior)
-             come along transitively, but that's a packaging cost, not a
-             boundary violation - see the chat notes on why this didn't
-             justify carving AppException into its own project instead. -->
+        <!-- See docs/adr/0004 for why Contracts projects (not Bookings
+             itself) are what other modules depend on, and why a domain
+             exception thrown from more than one module (BookingNotPayableException)
+             belongs here rather than the shared kernel. BuildingBlocks is
+             only for AppException - the heavier packages it happens to
+             carry for its other residents come along transitively, which
+             is a packaging cost, not a boundary violation. -->
         <ProjectReference Include="..\..\..\Core\SeedWork\SeedWork.csproj"/>
         <ProjectReference Include="..\..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
     </ItemGroup>

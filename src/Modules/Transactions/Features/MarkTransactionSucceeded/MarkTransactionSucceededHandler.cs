@@ -23,10 +23,9 @@ public class MarkTransactionSucceededHandler(
         // write below fails, nothing is lost: the transaction stays
         // Succeeded and BookingPaymentConfirmation can be retried, unlike
         // the reverse order which could leave a Confirmed booking behind
-        // a transaction that was never actually recorded as paid. Same
-        // "sequential writes across two DbContexts, no distributed
-        // transaction" tradeoff ConfirmBookingHandler/BecomeHostHandler
-        // already document and accept.
+        // a transaction that was never actually recorded as paid. See
+        // docs/adr/0003 for the authoritative-write-first ordering this
+        // follows.
         transaction.MarkSucceeded();
         await dbContext.SaveChangesAsync(cancellationToken);
 

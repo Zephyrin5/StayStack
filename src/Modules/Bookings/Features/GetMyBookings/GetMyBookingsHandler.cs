@@ -13,14 +13,10 @@ public class GetMyBookingsHandler(
 {
     public async ValueTask<PagedResponse<BookingSummary>> Handle(GetMyBookingsRequest request, CancellationToken cancellationToken)
     {
-        // OrderByDescending(CreatedAt) alone isn't a total order - two
-        // bookings can share a timestamp - so it's not safe to paginate on
-        // by itself: without a tiebreaker, Skip/Take isn't guaranteed to
-        // draw the same page boundary on two requests, which can duplicate
-        // or skip a row. Id is the tiebreaker convention (see
-        // GetPropertiesHandler's equivalent comment), not the sort
-        // criteria - keep it appended if CreatedAt is ever replaced with a
-        // different primary sort.
+        // Id as a tiebreaker, not the sort criterion - see docs/adr/0008.
+        // CreatedAt alone isn't a total order (two bookings can share a
+        // timestamp), so keep the tiebreaker appended if CreatedAt is ever
+        // replaced with a different primary sort.
         (List<Booking> bookings, int totalCount) = await dbContext.Bookings.AsNoTracking()
             .Where(b => b.CustomerId == currentUserProvider.UserId)
             .OrderByDescending(b => b.CreatedAt).ThenBy(b => b.Id)

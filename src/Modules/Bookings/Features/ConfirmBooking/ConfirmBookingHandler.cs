@@ -13,11 +13,10 @@ public class ConfirmBookingHandler(
     {
         // Confirms the hold first (marks it 'booked' in Catalog) - if this
         // throws (missing/already-consumed/expired), nothing in Bookings
-        // has been touched yet. Two separate DbContexts/connections here,
-        // same "sequential writes, narrow failure window, no distributed
-        // transaction" tradeoff BecomeHostHandler already documents. Unlike
-        // that handler's own two writes, though, this one now has an
-        // explicit compensating rollback below if the second write fails.
+        // has been touched yet. Cross-module write, no shared transaction -
+        // see docs/adr/0003. Unlike BecomeHostHandler's own two writes,
+        // though, this one has an explicit compensating rollback below if
+        // the second write fails.
         //
         // Price/currency come from the hold's own snapshot (taken at
         // HoldAvailabilityHandler time), not a fresh unit lookup - the

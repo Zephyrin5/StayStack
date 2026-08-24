@@ -12,8 +12,8 @@ public class SignUpHandler(
 {
     // Matches the literal Name seeded in RoleConfiguration - every
     // self-registered account starts here. Becoming a Host is a separate,
-    // later action on an existing account (see chat notes), not a
-    // registration-time choice - Airbnb's own model does the same.
+    // later action on the same account, not a registration-time choice -
+    // see docs/adr/0005.
     private const string CustomerRoleName = "Customer";
 
     public async ValueTask<SignUpResponse> Handle(SignUpRequest request, CancellationToken cancellationToken)

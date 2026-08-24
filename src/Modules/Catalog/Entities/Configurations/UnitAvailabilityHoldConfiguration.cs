@@ -27,10 +27,8 @@ public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAv
             .HasFilter("status = 'held'");
 
         // NOTE: the actual double-booking guard - the exclusion constraint
-        // on (unit_id, stay_range) - is NOT configured here. Confirmed by
-        // checking current Npgsql EF Core provider docs: there is no
-        // fluent API for EXCLUDE USING gist constraints, only an open
-        // feature request. It's added via migrationBuilder.Sql(...) in the
-        // Initial migration's Up() method instead.
+        // on (unit_id, stay_range) - is NOT configured here, since Npgsql's
+        // EF Core provider has no fluent API for EXCLUDE USING gist
+        // constraints. See docs/adr/0010 and docs/adr/0011.
     }
 }

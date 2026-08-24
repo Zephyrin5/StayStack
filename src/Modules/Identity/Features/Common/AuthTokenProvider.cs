@@ -10,6 +10,9 @@ using System.Security.Cryptography;
 using System.Text;
 namespace Identity.Features.Common;
 
+// See docs/adr/0009 for the full rotation/family/reuse-detection design
+// this implements - the comments below cover each piece's local "why",
+// the ADR ties them together into the one coherent picture.
 public class AuthTokenProvider(
     AppIdentityDbContext dbContext,
     IOptions<AuthTokenConfiguration> jwtSettings,

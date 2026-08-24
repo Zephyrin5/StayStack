@@ -1,0 +1,30 @@
+# 0010 - Postgres exclusion constraint for double-booking prevention
+
+**Status:** Accepted
+
+## Context
+
+Preventing two overlapping bookings for the same unit is the one invariant this application cannot get wrong. The naive approaches - checking for an overlap in application code before inserting, or an application-level lock - both have the same fatal flaw under real concurrency: a check-then-insert has a window between the check and the write where a second concurrent request can pass the same check before either commits, and an application-level lock only works if every code path that could conflict goes through the same lock, in the same process, forever.
+
+## Decision
+
+The actual guarantee is a Postgres **GIST exclusion constraint** on `unit_availability_holds (unit_id, stay_range)`, added via hand-written SQL in a migration (`EXCLUDE USING gist (unit_id WITH =, stay_range WITH &&)`) - not expressed through EF Core's fluent API, because there isn't one: confirmed against a real, still-open, ~5-year-stale upstream feature request ([npgsql/efcore.pg#1975](https://github.com/npgsql/efcore.pg/issues/1975)) with no signal it's coming soon.
+
+`HoldAvailabilityHandler` doesn't check for overlap itself - it just attempts the insert and catches the exclusion-violation error the database raises. No rows-affected check, no manual locking: the constraint is what actually makes double-booking impossible, and the application code's job is only to translate the database's rejection into a clean `UnitUnavailableException`.
+
+Two related, load-bearing details:
+
+- **A stale `held` row doesn't self-expire from the constraint's perspective.** The constraint has no `WHERE` clause - it applies to every row regardless of status or expiry. An abandoned hold that nobody ever confirmed or retried would block that range forever unless something actively deletes it. `HoldAvailabilityHandler` deletes this unit's own stale rows right before the insert that would otherwise be blocked by them; `ExpiredHoldsSweepJob` ([ADR-0002](0002-tickerq-for-background-jobs.md)) is the backstop for ranges nobody ever retries. The read path (`GetPriceCalendarHandler`) separately treats an expired `held` row as available for *display* purposes without needing it deleted first - the constraint and the calendar display are two different concerns with two different fixes.
+- **A manually-started transaction bypasses EF's connection-retry policy.** `HoldAvailabilityHandler` wraps its explicit `BeginTransactionAsync` block in `CreateExecutionStrategy().ExecuteAsync(...)` and the app's retry policy explicitly includes Postgres deadlocks (`40P01`) - confirmed necessary by `HoldAvailabilityConcurrencyTests` reproducing a real deadlock under genuine concurrent contention on the same range (two transactions can each be waiting on the other while the exclusion constraint checks their not-yet-committed rows against each other).
+
+## Alternatives considered
+
+- **Check-for-overlap-then-insert in application code.** Rejected outright: this is exactly the race the constraint exists to close, not an alternative to it.
+- **`SELECT ... FOR UPDATE` / advisory locks scoped to the unit.** Would work, but requires every write path to remember to take the lock, in the right order, forever - a discipline requirement instead of a database-enforced invariant. The exclusion constraint can't be forgotten by a future contributor the way a manual locking convention can.
+- **Application-level distributed lock (Redis, etc.).** Adds real infrastructure for a guarantee Postgres already provides natively, with a weaker failure mode (the lock provider itself becoming unavailable) than a database constraint has.
+
+## Consequences
+
+- The double-booking guarantee lives in a migration's raw SQL, not in the C# model - anyone regenerating migrations from scratch (a squash, a fresh `Initial`) would silently lose it, since nothing in the EF model represents it for the diff engine to reproduce. `SchemaInvariantsTests` exists specifically as the safety net for this: it asserts the constraint exists in the live schema, so losing it in a future squash fails CI immediately instead of silently reopening this bug.
+- `HoldAvailabilityConcurrencyTests` is the highest-value test in the system for this reason - it's the only test that actually exercises genuine concurrent writes against the constraint, rather than asserting behavior a single-threaded test can't disprove.
+- Revisit the Npgsql/EF Core fluent-API gap periodically ([npgsql/efcore.pg#1975](https://github.com/npgsql/efcore.pg/issues/1975)) - if it's ever implemented, moving the constraint into the model would close the squash-loses-the-constraint risk above, the same way [ADR-0011](0011-prefer-model-config-over-migration-sql.md) already did for the transactions partial unique index.

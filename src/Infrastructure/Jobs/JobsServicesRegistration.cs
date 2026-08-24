@@ -11,15 +11,13 @@ using TickerQ.EntityFrameworkCore.DependencyInjection;
 namespace Jobs;
 
 /// <summary>
-///     Wires up TickerQ as this app's background job scheduler - chosen over
-///     Hangfire specifically because its source-generated [TickerFunction]
-///     dispatch (see Catalog's ExpiredHoldsSweepJob, Identity's
-///     ExpiredRefreshTokensSweepJob) has no runtime reflection in the job
-///     invocation path, unlike Hangfire's serialize-a-method-call-then-
-///     MethodInfo.Invoke-it model - the one option that didn't directly
-///     conflict with IsAotCompatible already being true across this whole
-///     solution (see Directory.Build.props and ci.yml's advisory
-///     PublishAot/PublishTrimmed check).
+///     Wires up TickerQ as this app's background job scheduler - see
+///     docs/adr/0002 for why TickerQ over Hangfire/Quartz, and
+///     docs/adr/0001 for the Native AOT constraint that decision follows
+///     from. Jobs themselves (Catalog's ExpiredHoldsSweepJob, Identity's
+///     ExpiredRefreshTokensSweepJob) live in their owning module, not here -
+///     this project only owns scheduler registration, the operational
+///     store, and the dashboard.
 /// </summary>
 public static class JobsServicesRegistration
 {

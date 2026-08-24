@@ -20,8 +20,7 @@ public class GetHostBookingsHandler(
         // to be resolved cross-module before bookings can even be filtered.
         IReadOnlyList<Guid> unitIds = await unitLookup.GetUnitIdsForHostAsync(hostId, cancellationToken);
 
-        // Id as a tiebreaker, not deliberate sort criteria - same
-        // pagination-stability reasoning as GetMyBookingsHandler.
+        // Id as a tiebreaker, not deliberate sort criteria - see docs/adr/0008.
         (List<Booking> bookings, int totalCount) = await dbContext.Bookings.AsNoTracking()
             .Where(b => unitIds.Contains(b.UnitId))
             .OrderByDescending(b => b.CreatedAt).ThenBy(b => b.Id)
