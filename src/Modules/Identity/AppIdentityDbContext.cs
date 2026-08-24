@@ -29,6 +29,13 @@ public class AppIdentityDbContext(DbContextOptions<AppIdentityDbContext> options
 
             // RevokeFamilyAsync's WHERE FamilyId == ... AND !IsRevoked scan.
             entity.HasIndex(e => e.FamilyId);
+
+            // ExpiredRefreshTokensSweepJob's WHERE ExpiresAt < now() scan -
+            // not partial on IsRevoked, since the sweep deliberately
+            // ignores it too (a revoked-but-unexpired token still has
+            // reuse-detection value, so only ExpiresAt determines whether
+            // a row is a cleanup target).
+            entity.HasIndex(e => e.ExpiresAt);
         });
 
         builder.ApplyConfiguration(new RoleConfiguration());

@@ -29,7 +29,19 @@ public static class NpgsqlDbContextOptionsExtensions
             // than a project this solution owns, so it has to name its
             // migrations assembly explicitly instead.
             npgsql.MigrationsHistoryTable($"__ef_migrations_history_{moduleName}");
-            npgsql.EnableRetryOnFailure();
+
+            // Npgsql's own transient-error classification doesn't include
+            // 40P01 (deadlock_detected) by default - confirmed against a
+            // real deadlock HoldAvailabilityConcurrencyTests reproduced
+            // under genuine 10-way concurrent contention on the same
+            // range, which this alone doesn't fix (see
+            // HoldAvailabilityHandler's own CreateExecutionStrategy wrap
+            // for the other half: this only makes the error retriable,
+            // something still has to actually invoke the retry loop).
+            npgsql.EnableRetryOnFailure(
+                maxRetryCount: 6,
+                maxRetryDelay: TimeSpan.FromSeconds(30),
+                errorCodesToAdd: ["40P01"]);
 
             if (migrationsAssembly is not null)
             {
