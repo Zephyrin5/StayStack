@@ -61,4 +61,19 @@ public sealed class Unit : Entity, IAggregateRoot
         Guard.Against.Null(name);
         Name = name;
     }
+
+    public void SetMaxOccupancy(int maxOccupancy)
+    {
+        Guard.Against.NegativeOrZero(maxOccupancy);
+        MaxOccupancy = maxOccupancy;
+    }
+
+    // Only ever changes what a unit is listed at going forward - existing
+    // holds/bookings already snapshotted their own TotalPrice/Currency at
+    // hold-creation time (see HoldAvailabilityHandler), so this can't
+    // retroactively change what a guest already locked in.
+    public void SetCurrency(Currency currency)
+    {
+        Currency = currency;
+    }
 }

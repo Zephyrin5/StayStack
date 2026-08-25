@@ -45,4 +45,14 @@ public sealed class Property : Entity
         Guard.Against.Null(name);
         Name = name;
     }
+
+    public void SetCity(string? city)
+    {
+        City = city;
+    }
+
+    public void SetPropertyType(PropertyType propertyType)
+    {
+        PropertyType = propertyType;
+    }
 }
