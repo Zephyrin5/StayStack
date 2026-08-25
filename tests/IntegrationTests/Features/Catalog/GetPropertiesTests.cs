@@ -1,5 +1,7 @@
 using Bogus;
 using BuildingBlocks.Pagination;
+using Catalog;
+using Catalog.Entities;
 using Catalog.Enums;
 using Catalog.Features.CreateProperty;
 using Catalog.Features.CreateUnit;
@@ -10,6 +12,7 @@ using Identity.Features.BecomeHost;
 using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
+using NpgsqlTypes;
 using SeedWork.Enums;
 using System.Net;
 using System.Net.Http.Headers;
@@ -99,14 +102,14 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         return result.PropertyId;
     }
 
-    private async Task<Guid> CreateUnitAsync(string accessToken, Guid propertyId)
+    private async Task<Guid> CreateUnitAsync(string accessToken, Guid propertyId, int maxOccupancy = 2)
     {
         using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/catalog/units");
         request.Content = JsonContent.Create(new CreateUnitRequest
         {
             PropertyId = propertyId,
             Name = new Dictionary<string, string> { { "en", "Deluxe Room" } },
-            MaxOccupancy = 2,
+            MaxOccupancy = maxOccupancy,
             BasePrice = 45.5m,
             Currency = Currency.KWD
         });
@@ -115,6 +118,30 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         CreateUnitResponse? result = await response.Content.ReadFromJsonAsync<CreateUnitResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         return result.UnitId;
+    }
+
+    // Seeded directly through the DbContext, not via HoldAvailabilityEndpoint -
+    // these tests care about GetPropertiesHandler's read-side filtering, not
+    // the hold-creation flow itself, so a direct insert of the row shape it
+    // reads is more direct than going through a 15-minute-expiry hold and
+    // racing the clock.
+    private async Task SeedHoldAsync(Guid unitId, DateOnly checkIn, DateOnly checkOut, string status = "booked")
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+
+        context.UnitAvailabilityHolds.Add(new UnitAvailabilityHold
+        {
+            Id = Guid.CreateVersion7(),
+            UnitId = unitId,
+            StayRange = new NpgsqlRange<DateOnly>(checkIn, true, checkOut, false),
+            Status = status,
+            GuestCount = 2,
+            CreatedAt = DateTimeOffset.UtcNow,
+            TotalPrice = 100m,
+            Currency = Currency.KWD
+        });
+        await context.SaveChangesAsync();
     }
 
     [Fact]
@@ -306,5 +333,187 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         HttpResponseMessage response = await _client.GetAsync("/api/catalog/properties/mine", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetProperties_ShouldExcludeProperty_WhenItsOnlyUnitIsBookedForRequestedDates()
+    {
+        // Arrange
+        (string hostAccessToken, _) = await SeedHostUserAsync();
+        string uniqueCity = $"City-{Guid.NewGuid():N}";
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken, uniqueCity);
+        Guid unitId = await CreateUnitAsync(hostAccessToken, propertyId);
+
+        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(10));
+        DateOnly checkOut = checkIn.AddDays(3);
+        await SeedHoldAsync(unitId, checkIn, checkOut);
+
+        // Act
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/catalog/properties?City={Uri.EscapeDataString(uniqueCity)}&CheckIn={checkIn:yyyy-MM-dd}&CheckOut={checkOut:yyyy-MM-dd}",
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.DoesNotContain(result.Items, p => p.Id == propertyId);
+    }
+
+    [Fact]
+    public async Task GetProperties_ShouldIncludeProperty_WhenRequestedDatesDoNotOverlapExistingHold()
+    {
+        // Arrange
+        (string hostAccessToken, _) = await SeedHostUserAsync();
+        string uniqueCity = $"City-{Guid.NewGuid():N}";
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken, uniqueCity);
+        Guid unitId = await CreateUnitAsync(hostAccessToken, propertyId);
+
+        DateOnly heldCheckIn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(10));
+        DateOnly heldCheckOut = heldCheckIn.AddDays(3);
+        await SeedHoldAsync(unitId, heldCheckIn, heldCheckOut);
+
+        // Requested range starts exactly when the hold ends - half-open
+        // ranges mean these do NOT overlap.
+        DateOnly requestedCheckIn = heldCheckOut;
+        DateOnly requestedCheckOut = requestedCheckIn.AddDays(2);
+
+        // Act
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/catalog/properties?City={Uri.EscapeDataString(uniqueCity)}&CheckIn={requestedCheckIn:yyyy-MM-dd}&CheckOut={requestedCheckOut:yyyy-MM-dd}",
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.Contains(result.Items, p => p.Id == propertyId);
+    }
+
+    [Fact]
+    public async Task GetProperties_ShouldExcludeProperty_WhenNoUnitMeetsGuestCount()
+    {
+        // Arrange
+        (string hostAccessToken, _) = await SeedHostUserAsync();
+        string uniqueCity = $"City-{Guid.NewGuid():N}";
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken, uniqueCity);
+        await CreateUnitAsync(hostAccessToken, propertyId, maxOccupancy: 2);
+
+        // Act
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/catalog/properties?City={Uri.EscapeDataString(uniqueCity)}&Guests=5", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.DoesNotContain(result.Items, p => p.Id == propertyId);
+    }
+
+    [Fact]
+    public async Task GetProperties_ShouldIncludeProperty_WhenAUnitMeetsGuestCount()
+    {
+        // Arrange
+        (string hostAccessToken, _) = await SeedHostUserAsync();
+        string uniqueCity = $"City-{Guid.NewGuid():N}";
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken, uniqueCity);
+        await CreateUnitAsync(hostAccessToken, propertyId, maxOccupancy: 6);
+
+        // Act
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/catalog/properties?City={Uri.EscapeDataString(uniqueCity)}&Guests=5", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.Contains(result.Items, p => p.Id == propertyId);
+    }
+
+    [Fact]
+    public async Task GetProperties_ShouldExcludeProperty_WhenNoSingleUnitSatisfiesBothGuestsAndDates()
+    {
+        // Guards the composed-subquery shape in GetPropertiesHandler:
+        // capacity and availability must both hold for the SAME unit. The
+        // large unit is booked for the requested dates; the only unit
+        // that's free doesn't fit the guest count - so no unit satisfies
+        // both, and the property must not match even though each
+        // condition is independently satisfiable by some unit.
+        // Arrange
+        (string hostAccessToken, _) = await SeedHostUserAsync();
+        string uniqueCity = $"City-{Guid.NewGuid():N}";
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken, uniqueCity);
+        Guid largeUnitId = await CreateUnitAsync(hostAccessToken, propertyId, maxOccupancy: 6);
+        await CreateUnitAsync(hostAccessToken, propertyId, maxOccupancy: 2);
+
+        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(20));
+        DateOnly checkOut = checkIn.AddDays(3);
+        await SeedHoldAsync(largeUnitId, checkIn, checkOut);
+
+        // Act
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/catalog/properties?City={Uri.EscapeDataString(uniqueCity)}&Guests=5&CheckIn={checkIn:yyyy-MM-dd}&CheckOut={checkOut:yyyy-MM-dd}",
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.DoesNotContain(result.Items, p => p.Id == propertyId);
+    }
+
+    [Fact]
+    public async Task GetProperties_ShouldMatchCity_CaseInsensitivelyAndPartially()
+    {
+        // Arrange
+        (string hostAccessToken, _) = await SeedHostUserAsync();
+        string uniqueCity = $"Kuwait-City-{Guid.NewGuid():N}";
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken, uniqueCity);
+
+        // Act - wrong case, and only a substring of the real value.
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/catalog/properties?City={Uri.EscapeDataString(uniqueCity.ToUpperInvariant()[..10])}",
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.Contains(result.Items, p => p.Id == propertyId);
+    }
+
+    [Fact]
+    public async Task GetProperties_ShouldTreatPercentAndUnderscore_AsLiteralCharacters_NotWildcards()
+    {
+        // Guards EscapeLikePattern - without escaping, a search term
+        // containing '%' would match any city (it's the ILIKE wildcard for
+        // "anything"), silently returning every property instead of just
+        // ones actually containing a literal '%'.
+        // Arrange
+        (string hostAccessToken, _) = await SeedHostUserAsync();
+        string cityWithLiteralWildcardChars = $"100%_{Guid.NewGuid():N}";
+        Guid matchingPropertyId = await CreatePropertyAsync(hostAccessToken, cityWithLiteralWildcardChars);
+        Guid otherPropertyId = await CreatePropertyAsync(hostAccessToken, $"Unrelated-{Guid.NewGuid():N}");
+
+        // Act
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/catalog/properties?City={Uri.EscapeDataString(cityWithLiteralWildcardChars)}",
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.Contains(result.Items, p => p.Id == matchingPropertyId);
+        Assert.DoesNotContain(result.Items, p => p.Id == otherPropertyId);
+    }
+
+    [Fact]
+    public async Task GetProperties_ShouldReturn400_WhenOnlyCheckInIsProvided()
+    {
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/catalog/properties?CheckIn={DateOnly.FromDateTime(DateTime.UtcNow):yyyy-MM-dd}", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 }

@@ -15,6 +15,15 @@ public record GetPropertiesRequest : IRequest<PagedResponse<PropertySummary>>
 {
     public string? City { get; init; }
     public PropertyType? PropertyType { get; init; }
+
+    // A pair, not two independent filters - both or neither. See the
+    // validator for why, and GetPropertiesHandler for why capacity and
+    // availability are both resolved against the same candidate unit
+    // rather than as separate property-level checks.
+    public DateOnly? CheckIn { get; init; }
+    public DateOnly? CheckOut { get; init; }
+    public int? Guests { get; init; }
+
     public int Page { get; init; } = 1;
     public int PageSize { get; init; } = PaginationExtensions.DefaultPageSize;
 }

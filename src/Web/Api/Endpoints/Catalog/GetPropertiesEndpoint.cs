@@ -14,8 +14,10 @@ public class GetPropertiesEndpoint(IMediator mediator) : Endpoint<GetPropertiesR
 
         Summary(s =>
         {
-            s.Summary = "List properties, optionally filtered by city and/or property type";
+            s.Summary = "List properties, optionally filtered by city, property type, date range and/or guest count";
             s.Description = "Public - this is the browsing entry point, no authentication required. " +
+                            "CheckIn/CheckOut must be provided together; a property matches only if it has " +
+                            "at least one unit that satisfies both the guest count and the date range. " +
                             "Paginated - defaults to page 1, 20 per page.";
             s.Response<PagedResponse<PropertySummary>>(200, "Properties returned.");
         });
