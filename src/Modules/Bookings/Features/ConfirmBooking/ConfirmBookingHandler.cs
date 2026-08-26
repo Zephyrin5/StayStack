@@ -1,4 +1,5 @@
 using Bookings.Entities;
+using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using Catalog.Contracts;
 using Mediator;
@@ -7,6 +8,7 @@ namespace Bookings.Features.ConfirmBooking;
 public class ConfirmBookingHandler(
     AppBookingsDbContext dbContext,
     IHoldConfirmation holdConfirmation,
+    IPromotionRedemption promotionRedemption,
     ICurrentUserProvider currentUserProvider) : IRequestHandler<ConfirmBookingRequest, ConfirmBookingResponse>
 {
     public async ValueTask<ConfirmBookingResponse> Handle(ConfirmBookingRequest request, CancellationToken cancellationToken)
@@ -16,7 +18,7 @@ public class ConfirmBookingHandler(
         // has been touched yet. Cross-module write, no shared transaction -
         // see docs/adr/0003. Unlike BecomeHostHandler's own two writes,
         // though, this one has an explicit compensating rollback below if
-        // the second write fails.
+        // a later step fails.
         //
         // Price/currency come from the hold's own snapshot (taken at
         // HoldAvailabilityHandler time), not a fresh unit lookup - the
@@ -24,7 +26,65 @@ public class ConfirmBookingHandler(
         // they get, even if the unit's base price changed since.
         ConfirmedHold hold = await holdConfirmation.ConfirmHoldAsync(request.HoldId, cancellationToken);
 
+        // Chosen up front, not left to Booking.Create - a redeemed promo
+        // code needs this booking's id to write its PromotionRedemption row
+        // before the Booking itself is ever saved.
+        Guid bookingId = Guid.CreateVersion7();
+
+        decimal totalPrice = hold.TotalPrice;
+        decimal? redeemedDiscountAmount = null;
+
+        if (!string.IsNullOrWhiteSpace(request.PromoCode))
+        {
+            // A redeemed code is exclusive of the length-of-stay discount
+            // rather than stacking with it - the coupon applies against the
+            // rate-adjusted subtotal (override/multiplier already baked in,
+            // LOS discount undone) rather than the LOS-discounted total. See
+            // docs on StayPriceBreakdown/PricingCalculator for why this is
+            // the one PricingRule type a coupon competes with rather than
+            // compounds.
+            decimal couponBase = hold.LengthOfStayDiscountAmount is not null
+                ? hold.TotalPrice + hold.LengthOfStayDiscountAmount.Value
+                : hold.TotalPrice;
+
+            try
+            {
+                PromotionRedemptionResult redemption = await promotionRedemption.RedeemAsync(
+                    request.PromoCode, hold.UnitId, request.GuestEmail, couponBase, hold.Currency,
+                    bookingId, cancellationToken);
+
+                redeemedDiscountAmount = redemption.DiscountAmount;
+                totalPrice = couponBase - redemption.DiscountAmount;
+            }
+            catch (Exception redemptionException)
+            {
+                // The hold is already 'booked' at this point and nothing
+                // else will ever confirm it into a real Booking - same
+                // orphaned-inventory risk ConfirmBookingHandler's own
+                // booking-save failure below compensates for, just one step
+                // earlier.
+                try
+                {
+                    await holdConfirmation.ReleaseHoldAsync(request.HoldId, cancellationToken);
+                }
+                catch (Exception releaseException)
+                {
+                    throw new AggregateException(
+                        "Promo code redemption failed, and compensating hold release also failed.",
+                        redemptionException, releaseException);
+                }
+
+                if (redemptionException is PromotionInvalidException promotionInvalidException)
+                {
+                    throw new ValidationException(nameof(request.PromoCode), promotionInvalidException.Message);
+                }
+
+                throw;
+            }
+        }
+
         Booking booking = Booking.Create(
+            bookingId,
             hold.UnitId,
             request.HoldId,
             currentUserProvider.UserId,
@@ -34,7 +94,7 @@ public class ConfirmBookingHandler(
             hold.CheckIn,
             hold.CheckOut,
             hold.GuestCount,
-            hold.TotalPrice,
+            totalPrice,
             hold.Currency);
 
         try
@@ -44,28 +104,43 @@ public class ConfirmBookingHandler(
         }
         catch (Exception bookingSaveException)
         {
-            // Best-effort compensation: revert the hold back to 'held' so
-            // it isn't permanently stuck occupying inventory nobody ever
-            // got a Booking for. Same idiom as BecomeHostHandler's
-            // rollback on its second write failing.
+            // Best-effort compensation: revert the hold back to 'held', and
+            // give back the redeemed code (if any), so neither is left
+            // permanently consumed by a Booking that was never actually
+            // created. Same idiom as BecomeHostHandler's rollback on its
+            // second write failing, generalized to N compensating actions
+            // instead of just one - a bare `throw;` after only the first
+            // failure would silently lose why the booking save failed in
+            // the first place, the one piece of information most needed to
+            // diagnose stuck state.
+            List<Exception> compensationFailures = [];
+
             try
             {
                 await holdConfirmation.ReleaseHoldAsync(request.HoldId, cancellationToken);
             }
             catch (Exception releaseException)
             {
-                // The compensation itself failed - the hold is now stuck
-                // 'booked' with nothing left to release it (until
-                // ExpiredHoldsSweepJob eventually notices, once its own
-                // hold_expires_at has passed). A bare `throw;` here would
-                // only ever surface whichever exception happened to fire
-                // last, silently losing the other - specifically, losing
-                // *why the booking save failed in the first place*, which
-                // is the one piece of information most needed to diagnose
-                // a hold that's now stuck. Neither is dropped.
+                compensationFailures.Add(releaseException);
+            }
+
+            if (redeemedDiscountAmount is not null)
+            {
+                try
+                {
+                    await promotionRedemption.ReverseRedemptionAsync(bookingId, cancellationToken);
+                }
+                catch (Exception reverseRedemptionException)
+                {
+                    compensationFailures.Add(reverseRedemptionException);
+                }
+            }
+
+            if (compensationFailures.Count > 0)
+            {
                 throw new AggregateException(
-                    "Booking save failed, and compensating hold release also failed.",
-                    bookingSaveException, releaseException);
+                    "Booking save failed, and compensating action(s) also failed.",
+                    [bookingSaveException, .. compensationFailures]);
             }
 
             throw;

@@ -67,7 +67,13 @@ public sealed class Booking : Entity, IAggregateRoot
     // different axis entirely from this business lifecycle state.
     public BookingStatus BookingStatus { get; private set; }
 
+    // Takes its id rather than generating one internally - a redeemed promo
+    // code needs the booking's id up front, to write the PromotionRedemption
+    // row before the Booking itself is ever saved (see ConfirmBookingHandler),
+    // so the caller decides the id and this stays a plain assignment rather
+    // than the two disagreeing.
     public static Booking Create(
+        Guid id,
         Guid unitId,
         Guid holdId,
         Guid? customerId,
@@ -80,6 +86,7 @@ public sealed class Booking : Entity, IAggregateRoot
         decimal totalPrice,
         Currency currency)
     {
+        Guard.Against.Default(id);
         Guard.Against.Default(unitId);
         Guard.Against.Default(holdId);
         Guard.Against.NullOrWhiteSpace(guestName);
@@ -92,7 +99,7 @@ public sealed class Booking : Entity, IAggregateRoot
         Guard.Against.Negative(totalPrice);
 
         return new Booking(
-            Guid.CreateVersion7(), unitId, holdId, customerId, guestName, guestEmail, guestPhone,
+            id, unitId, holdId, customerId, guestName, guestEmail, guestPhone,
             checkIn, checkOut, guestCount, totalPrice, currency, BookingStatus.Pending);
     }
 

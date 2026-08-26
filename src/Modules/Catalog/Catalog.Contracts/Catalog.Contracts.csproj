@@ -13,6 +13,15 @@
              ConfirmedHold), so no dependency on Catalog.Enums is needed
              here either. -->
         <ProjectReference Include="..\..\..\Core\SeedWork\SeedWork.csproj"/>
+
+        <!-- For AppException, which PromotionInvalidException derives from
+             - PromotionInvalidException lives in this project specifically
+             so Bookings can catch it (see its own doc comment), which means
+             its base class needs to be reachable here too. BuildingBlocks
+             is the same Core-tier, reference-free leaf project SeedWork is
+             (no risk of a cycle back into Catalog), and Bookings already
+             references it directly alongside Catalog.Contracts. -->
+        <ProjectReference Include="..\..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
     </ItemGroup>
 
 </Project>

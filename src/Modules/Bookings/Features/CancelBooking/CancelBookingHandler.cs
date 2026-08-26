@@ -10,6 +10,7 @@ namespace Bookings.Features.CancelBooking;
 public class CancelBookingHandler(
     AppBookingsDbContext dbContext,
     IHoldConfirmation holdConfirmation,
+    IPromotionRedemption promotionRedemption,
     ITransactionReversal transactionReversal,
     ICurrentUserProvider currentUserProvider) : IRequestHandler<CancelBookingRequest, CancelBookingResponse>
 {
@@ -34,17 +35,20 @@ public class CancelBookingHandler(
         booking.Cancel();
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        // Both released/resolved after the booking's own cancellation is
-        // durable, not before - if either fails, the booking is still
+        // Released/resolved/reversed after the booking's own cancellation is
+        // durable, not before - if any fails, the booking is still
         // correctly cancelled; the hold just sits 'booked' a bit longer
-        // than ideal (cleaned up eventually by ExpiredHoldsSweepJob), and a
+        // than ideal (cleaned up eventually by ExpiredHoldsSweepJob), a
         // transaction stays wherever it was (resolvable later, or safe as
-        // a known residual - see ITransactionReversal's own doc comment).
+        // a known residual - see ITransactionReversal's own doc comment),
+        // and a redeemed code stays consumed a bit longer than ideal.
         // Nothing to compensate here, unlike ConfirmBookingHandler's
         // forward path: there's no second write whose failure could leave
-        // the booking itself in a bad state.
+        // the booking itself in a bad state. ReverseRedemptionAsync is a
+        // no-op if this booking never redeemed a code.
         await holdConfirmation.ReleaseHoldAsync(booking.HoldId, cancellationToken);
         await transactionReversal.ReverseTransactionAsync(booking.Id, cancellationToken);
+        await promotionRedemption.ReverseRedemptionAsync(booking.Id, cancellationToken);
 
         return new CancelBookingResponse
         {

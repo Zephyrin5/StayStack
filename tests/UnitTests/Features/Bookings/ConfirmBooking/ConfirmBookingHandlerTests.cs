@@ -62,8 +62,10 @@ public class ConfirmBookingHandlerTests : IDisposable
         Mock<ICurrentUserProvider> currentUserProviderMock = new Mock<ICurrentUserProvider>();
         currentUserProviderMock.Setup(x => x.UserId).Returns((Guid?)null);
 
+        Mock<IPromotionRedemption> promotionRedemptionMock = new Mock<IPromotionRedemption>();
+
         ConfirmBookingHandler handler = new ConfirmBookingHandler(
-            _dbContext, holdConfirmationMock.Object, currentUserProviderMock.Object);
+            _dbContext, holdConfirmationMock.Object, promotionRedemptionMock.Object, currentUserProviderMock.Object);
 
         ConfirmBookingRequest request = new ConfirmBookingRequest
         {
@@ -113,8 +115,10 @@ public class ConfirmBookingHandlerTests : IDisposable
         Mock<ICurrentUserProvider> currentUserProviderMock = new Mock<ICurrentUserProvider>();
         currentUserProviderMock.Setup(x => x.UserId).Returns((Guid?)null);
 
+        Mock<IPromotionRedemption> promotionRedemptionMock = new Mock<IPromotionRedemption>();
+
         ConfirmBookingHandler handler = new ConfirmBookingHandler(
-            _dbContext, holdConfirmationMock.Object, currentUserProviderMock.Object);
+            _dbContext, holdConfirmationMock.Object, promotionRedemptionMock.Object, currentUserProviderMock.Object);
 
         ConfirmBookingRequest request = new ConfirmBookingRequest
         {
