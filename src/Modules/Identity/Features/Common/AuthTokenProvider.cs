@@ -1,4 +1,5 @@
-﻿using Identity.Configurations;
+﻿using BuildingBlocks.Security;
+using Identity.Configurations;
 using Identity.Entities;
 using Identity.Exceptions;
 using Microsoft.EntityFrameworkCore;
@@ -6,7 +7,6 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
-using System.Security.Cryptography;
 using System.Text;
 namespace Identity.Features.Common;
 
@@ -61,12 +61,8 @@ public class AuthTokenProvider(
 
     public async Task<string> GenerateRefreshToken(Guid userId, Guid? familyId, Guid? parentTokenId, CancellationToken cancellationToken)
     {
-        byte[] randomNumber = new byte[64];
-        using RandomNumberGenerator rng = RandomNumberGenerator.Create();
-        rng.GetBytes(randomNumber);
-        string newRefreshTokenPlain = Convert.ToBase64String(randomNumber);
-
-        string newRefreshTokenHash = HashToken(newRefreshTokenPlain);
+        string newRefreshTokenPlain = SecureToken.Generate();
+        string newRefreshTokenHash = SecureToken.Hash(newRefreshTokenPlain);
         DateTime now = timeProvider.GetUtcNow().UtcDateTime;
 
         Entities.RefreshToken newRefreshTokenEntity = new Entities.RefreshToken
@@ -95,7 +91,7 @@ public class AuthTokenProvider(
 
     public async Task<RefreshTokenValidationResult> ValidateRefreshToken(string refreshToken, CancellationToken cancellationToken)
     {
-        string incomingTokenHash = HashToken(refreshToken);
+        string incomingTokenHash = SecureToken.Hash(refreshToken);
         DateTime now = timeProvider.GetUtcNow().UtcDateTime;
 
         // A single conditional UPDATE, not a SELECT-then-check-then-UPDATE:
@@ -143,7 +139,7 @@ public class AuthTokenProvider(
 
     public async Task RevokeRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken)
     {
-        string tokenHash = HashToken(refreshToken);
+        string tokenHash = SecureToken.Hash(refreshToken);
 
         Entities.RefreshToken? storedToken = await dbContext.RefreshTokens
             .SingleOrDefaultAsync(rt => rt.TokenHash == tokenHash, cancellationToken);
@@ -156,13 +152,6 @@ public class AuthTokenProvider(
         storedToken.IsRevoked = true;
         storedToken.RevokedAt = timeProvider.GetUtcNow().UtcDateTime;
         await dbContext.SaveChangesAsync(cancellationToken);
-    }
-
-    private static string HashToken(string token)
-    {
-        byte[] bytes = Encoding.UTF8.GetBytes(token);
-        byte[] hash = SHA256.HashData(bytes);
-        return Convert.ToBase64String(hash);
     }
 
     // Reuse detection revokes only the replayed token's own family (every

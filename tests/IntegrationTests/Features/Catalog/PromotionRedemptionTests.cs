@@ -1,4 +1,5 @@
 using Bogus;
+using Bookings.Features.CancelBooking;
 using Bookings.Features.ConfirmBooking;
 using Catalog;
 using Catalog.Entities;
@@ -417,7 +418,10 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         Guid firstHoldId = await HoldUnitAsync(unitId, today, today.AddDays(2));
         ConfirmBookingResponse firstBooking = await ConfirmBookingAsync(firstHoldId, "guest@example.com", code, customerToken);
 
-        using HttpRequestMessage cancelRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/bookings/{firstBooking.BookingId}/cancel");
+        using HttpRequestMessage cancelRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/bookings/{firstBooking.BookingId}/cancel")
+        {
+            Content = JsonContent.Create(new CancelBookingRequest { BookingId = firstBooking.BookingId })
+        };
         cancelRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", customerToken);
         HttpResponseMessage cancelResponse = await _client.SendAsync(cancelRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, cancelResponse.StatusCode);

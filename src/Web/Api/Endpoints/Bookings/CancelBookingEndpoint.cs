@@ -11,14 +11,18 @@ public class CancelBookingEndpoint(IMediator mediator) : Endpoint<CancelBookingR
     public override void Configure()
     {
         Post("{BookingId}/cancel");
+        AllowAnonymous();
         Group<BookingsGroup>();
 
         Summary(s =>
         {
             s.Summary = "Cancel the caller's own booking";
-            s.Description = "Requires authentication - a booking that belongs to someone else (or a guest-" +
-                            "checkout booking, which has no account to authenticate as) returns 404, not 403, " +
-                            "same as every other ownership check in this API. Idempotent: cancelling an " +
+            s.Description = "Public - proves ownership one of two ways: an authenticated caller whose " +
+                            "CustomerId matches, or a guest-checkout caller supplying the ManagementToken " +
+                            "returned once at confirm time (see ConfirmBookingEndpoint). A booking that " +
+                            "belongs to someone else, or a missing/wrong token, returns 404, not 403 or 401, " +
+                            "same as every other ownership check in this API - existence and ownership " +
+                            "mismatches must look identical from the outside. Idempotent: cancelling an " +
                             "already-cancelled booking succeeds without error. Releases the underlying hold " +
                             "back to available inventory. If the booking already has a Succeeded transaction, " +
                             "starts a refund; a still-Pending one is left alone, since its outcome isn't known " +
@@ -26,8 +30,7 @@ public class CancelBookingEndpoint(IMediator mediator) : Endpoint<CancelBookingR
                             "already-cancelled booking is handled.";
             s.Response<CancelBookingResponse>(200, "Booking cancelled.");
             s.Response<ValidationProblemDetails>(400, "Validation failed.");
-            s.Response<ProblemDetails>(401, "Not authenticated.");
-            s.Response<ProblemDetails>(404, "Booking not found, or belongs to someone else.");
+            s.Response<ProblemDetails>(404, "Booking not found, belongs to someone else, or the token is missing/wrong.");
         });
     }
 

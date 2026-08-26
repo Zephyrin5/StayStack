@@ -1,6 +1,7 @@
 using Bookings.Entities;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
+using BuildingBlocks.Security;
 using Catalog.Contracts;
 using Mediator;
 using System.Text.Json;
@@ -10,7 +11,8 @@ public class ConfirmBookingHandler(
     AppBookingsDbContext dbContext,
     IHoldConfirmation holdConfirmation,
     IPromotionRedemption promotionRedemption,
-    ICurrentUserProvider currentUserProvider) : IRequestHandler<ConfirmBookingRequest, ConfirmBookingResponse>
+    ICurrentUserProvider currentUserProvider,
+    TimeProvider timeProvider) : IRequestHandler<ConfirmBookingRequest, ConfirmBookingResponse>
 {
     public async ValueTask<ConfirmBookingResponse> Handle(ConfirmBookingRequest request, CancellationToken cancellationToken)
     {
@@ -109,9 +111,28 @@ public class ConfirmBookingHandler(
             totalPrice,
             hold.Currency);
 
+        // Only a guest-checkout booking gets one - an authenticated
+        // caller's account is already proof of ownership, and issuing a
+        // token nobody will ever use would just be a second, redundant way
+        // to access the same booking. Raw value returned exactly once, in
+        // the response below - only its hash is ever persisted.
+        string? managementToken = currentUserProvider.UserId is null ? SecureToken.Generate() : null;
+
         try
         {
             dbContext.Bookings.Add(booking);
+
+            if (managementToken is not null)
+            {
+                dbContext.BookingManagementTokens.Add(new BookingManagementToken
+                {
+                    Id = Guid.CreateVersion7(),
+                    BookingId = bookingId,
+                    TokenHash = SecureToken.Hash(managementToken),
+                    CreatedAt = timeProvider.GetUtcNow()
+                });
+            }
+
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (Exception bookingSaveException)
@@ -165,7 +186,8 @@ public class ConfirmBookingHandler(
             CheckIn = booking.CheckIn,
             CheckOut = booking.CheckOut,
             TotalPrice = booking.TotalPrice,
-            Currency = booking.Currency
+            Currency = booking.Currency,
+            ManagementToken = managementToken
         };
     }
 }

@@ -104,9 +104,34 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         return result.BookingId;
     }
 
-    private async Task<HttpResponseMessage> CancelBookingAsync(Guid bookingId, string? accessToken)
+    private async Task<ConfirmBookingResponse> ConfirmBookingAsGuestAsync(Guid holdId)
     {
-        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, $"/api/bookings/{bookingId}/cancel");
+        // No Authorization header - guest checkout, the only path that
+        // gets a ManagementToken back.
+        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/bookings", new ConfirmBookingRequest
+        {
+            HoldId = holdId,
+            GuestName = _faker.Name.FullName(),
+            GuestEmail = _faker.Internet.Email()
+        }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        ConfirmBookingResponse? result = await response.Content.ReadFromJsonAsync<ConfirmBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        return result;
+    }
+
+    private async Task<HttpResponseMessage> CancelBookingAsync(Guid bookingId, string? accessToken, string? managementToken = null)
+    {
+        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, $"/api/bookings/{bookingId}/cancel")
+        {
+            // CancelBookingRequest carries a real body-bindable field
+            // (ManagementToken) now, not just the route-bound BookingId -
+            // the endpoint expects a JSON body the same as any other POST
+            // request with fields, matching how a real client (openapi-fetch)
+            // always sends one.
+            Content = JsonContent.Create(new CancelBookingRequest { BookingId = bookingId, ManagementToken = managementToken })
+        };
         if (accessToken is not null)
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
@@ -320,12 +345,85 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
     }
 
     [Fact]
-    public async Task CancelBooking_ShouldReturn401_WhenNotAuthenticated()
+    public async Task CancelBooking_ShouldReturn404_WhenNotAuthenticatedAndNoToken()
     {
-        // Act
+        // The endpoint is public (AllowAnonymous) now - a guest-checkout
+        // caller with no account has to be able to reach it at all, using a
+        // ManagementToken instead of a session. An anonymous caller with
+        // neither an account nor a token gets the same 404 every other
+        // ownership mismatch gets, not 401 - see CancelBookingEndpoint's
+        // own doc comment for why this changed from the old
+        // authentication-required behavior.
         HttpResponseMessage response = await CancelBookingAsync(Guid.NewGuid(), null);
 
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CancelBooking_ShouldSucceed_ForGuestCheckoutWithCorrectManagementToken()
+    {
+        // Arrange
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
+        ConfirmBookingResponse booking = await ConfirmBookingAsGuestAsync(holdId);
+        Assert.NotNull(booking.ManagementToken);
+
+        // Act
+        HttpResponseMessage response = await CancelBookingAsync(booking.BookingId, accessToken: null, booking.ManagementToken);
+
         // Assert
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        CancelBookingResponse? result = await response.Content.ReadFromJsonAsync<CancelBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.Equal(BookingStatus.Cancelled, result.BookingStatus);
+    }
+
+    [Fact]
+    public async Task CancelBooking_ShouldReturn404_ForGuestCheckoutWithWrongManagementToken()
+    {
+        // Arrange
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
+        ConfirmBookingResponse booking = await ConfirmBookingAsGuestAsync(holdId);
+
+        // Act
+        HttpResponseMessage response = await CancelBookingAsync(booking.BookingId, accessToken: null, managementToken: "not-the-real-token");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ConfirmBooking_ShouldNotReturnManagementToken_ForAnAuthenticatedCustomer()
+    {
+        // An authenticated caller's own session is already proof of
+        // ownership - issuing a token nobody will ever need would just be a
+        // second, redundant way to access the same booking.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        string customerToken = await SeedSignedInCustomerAsync();
+        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
+
+        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/bookings")
+        {
+            Content = JsonContent.Create(new ConfirmBookingRequest
+            {
+                HoldId = holdId,
+                GuestName = _faker.Name.FullName(),
+                GuestEmail = _faker.Internet.Email()
+            })
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", customerToken);
+        HttpResponseMessage response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        ConfirmBookingResponse? result = await response.Content.ReadFromJsonAsync<ConfirmBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.Null(result.ManagementToken);
     }
 }

@@ -34,4 +34,10 @@ public record UnitSummary
     public int MaxOccupancy { get; init; }
     public decimal BasePrice { get; init; }
     public Currency Currency { get; init; }
+
+    // Added for Reviews - resolving "which property/host does this review
+    // belong to" from a unit id, once at review-creation time, without a
+    // second lookup interface.
+    public Guid PropertyId { get; init; }
+    public Guid HostId { get; init; }
 }

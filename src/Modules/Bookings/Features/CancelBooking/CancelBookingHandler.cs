@@ -1,9 +1,9 @@
 using Bookings.Entities;
+using Bookings.Features.Common;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using Catalog.Contracts;
 using Mediator;
-using Microsoft.EntityFrameworkCore;
 using Transactions.Contracts;
 namespace Bookings.Features.CancelBooking;
 
@@ -16,21 +16,14 @@ public class CancelBookingHandler(
 {
     public async ValueTask<CancelBookingResponse> Handle(CancelBookingRequest request, CancellationToken cancellationToken)
     {
-        Booking booking = await dbContext.Bookings
-                              .SingleOrDefaultAsync(b => b.Id == request.BookingId, cancellationToken)
+        // Doesn't distinguish "doesn't exist" from "isn't yours" - same
+        // reasoning as IHostAuthorization.RequireOwnership, now covering
+        // two proof-of-ownership paths instead of one: a matching
+        // CustomerId (authenticated) or a matching management token
+        // (guest checkout) - see BookingAccessChecker's own doc comment.
+        Booking booking = await BookingAccessChecker.ResolveAsync(
+                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken, cancellationToken)
                           ?? throw new NotFoundException(nameof(Booking), request.BookingId);
-
-        // Deliberately NotFoundException, not a 403, for a mismatched
-        // CustomerId - same "doesn't exist and exists-but-isn't-yours must
-        // look identical" reasoning as IHostAuthorization.RequireOwnership.
-        // A null CustomerId (guest checkout) can never equal an
-        // authenticated caller's UserId, so guest-checkout bookings
-        // correctly never show up as cancellable here either - consistent
-        // with GetMyBookings never listing them for anyone.
-        if (booking.CustomerId != currentUserProvider.UserId)
-        {
-            throw new NotFoundException(nameof(Booking), request.BookingId);
-        }
 
         booking.Cancel();
         await dbContext.SaveChangesAsync(cancellationToken);

@@ -65,7 +65,8 @@ public class ConfirmBookingHandlerTests : IDisposable
         Mock<IPromotionRedemption> promotionRedemptionMock = new Mock<IPromotionRedemption>();
 
         ConfirmBookingHandler handler = new ConfirmBookingHandler(
-            _dbContext, holdConfirmationMock.Object, promotionRedemptionMock.Object, currentUserProviderMock.Object);
+            _dbContext, holdConfirmationMock.Object, promotionRedemptionMock.Object, currentUserProviderMock.Object,
+            TimeProvider.System);
 
         ConfirmBookingRequest request = new ConfirmBookingRequest
         {
@@ -118,7 +119,8 @@ public class ConfirmBookingHandlerTests : IDisposable
         Mock<IPromotionRedemption> promotionRedemptionMock = new Mock<IPromotionRedemption>();
 
         ConfirmBookingHandler handler = new ConfirmBookingHandler(
-            _dbContext, holdConfirmationMock.Object, promotionRedemptionMock.Object, currentUserProviderMock.Object);
+            _dbContext, holdConfirmationMock.Object, promotionRedemptionMock.Object, currentUserProviderMock.Object,
+            TimeProvider.System);
 
         ConfirmBookingRequest request = new ConfirmBookingRequest
         {

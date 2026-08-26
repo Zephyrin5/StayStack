@@ -8,19 +8,35 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
 {
     public async Task<UnitSummary?> GetUnitAsync(Guid unitId, CancellationToken cancellationToken)
     {
-        // Materialize first, map after - see docs/adr/0006.
-        Unit? unit = await dbContext.Units.AsNoTracking()
-            .SingleOrDefaultAsync(u => u.Id == unitId, cancellationToken);
+        // Materialize first, map after - see docs/adr/0006. Left-joined
+        // with Properties (not an inner join) - a handful of integration
+        // tests elsewhere in this codebase seed a bare Unit against a
+        // throwaway PropertyId with no matching Property row, a shortcut
+        // that predates PropertyId/HostId existing on UnitSummary at all.
+        // An inner join would silently drop those units out of every
+        // result here; HostId just comes back default (Guid.Empty) for
+        // that synthetic case instead - never a real production state
+        // (CreateUnitHandler always targets a real Property), so it's not
+        // a case any real caller of this lookup needs to handle specially.
+        var row = await (
+            from unit in dbContext.Units.AsNoTracking()
+            where unit.Id == unitId
+            join property in dbContext.Properties.AsNoTracking() on unit.PropertyId equals property.Id into properties
+            from property in properties.DefaultIfEmpty()
+            select new { unit, HostId = property != null ? property.HostId : default }
+        ).SingleOrDefaultAsync(cancellationToken);
 
-        return unit is null
+        return row is null
             ? null
             : new UnitSummary
             {
-                Id = unit.Id,
-                Name = new Dictionary<string, string>(unit.Name.Values),
-                MaxOccupancy = unit.MaxOccupancy,
-                BasePrice = unit.BasePrice,
-                Currency = unit.Currency
+                Id = row.unit.Id,
+                Name = new Dictionary<string, string>(row.unit.Name.Values),
+                MaxOccupancy = row.unit.MaxOccupancy,
+                BasePrice = row.unit.BasePrice,
+                Currency = row.unit.Currency,
+                PropertyId = row.unit.PropertyId,
+                HostId = row.HostId
             };
     }
 
@@ -28,20 +44,27 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
     {
         List<Guid> ids = [.. unitIds];
 
-        // Same materialize-first-map-after constraint as GetUnitAsync above.
-        List<Unit> units = await dbContext.Units.AsNoTracking()
-            .Where(u => ids.Contains(u.Id))
-            .ToListAsync(cancellationToken);
+        // Same materialize-first-map-after constraint, and same left-join
+        // reasoning, as GetUnitAsync above.
+        var rows = await (
+            from unit in dbContext.Units.AsNoTracking()
+            where ids.Contains(unit.Id)
+            join property in dbContext.Properties.AsNoTracking() on unit.PropertyId equals property.Id into properties
+            from property in properties.DefaultIfEmpty()
+            select new { unit, HostId = property != null ? property.HostId : default }
+        ).ToListAsync(cancellationToken);
 
-        return units.ToDictionary(
-            unit => unit.Id,
-            unit => new UnitSummary
+        return rows.ToDictionary(
+            row => row.unit.Id,
+            row => new UnitSummary
             {
-                Id = unit.Id,
-                Name = new Dictionary<string, string>(unit.Name.Values),
-                MaxOccupancy = unit.MaxOccupancy,
-                BasePrice = unit.BasePrice,
-                Currency = unit.Currency
+                Id = row.unit.Id,
+                Name = new Dictionary<string, string>(row.unit.Name.Values),
+                MaxOccupancy = row.unit.MaxOccupancy,
+                BasePrice = row.unit.BasePrice,
+                Currency = row.unit.Currency,
+                PropertyId = row.unit.PropertyId,
+                HostId = row.HostId
             });
     }
 

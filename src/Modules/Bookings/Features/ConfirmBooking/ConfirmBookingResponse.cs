@@ -10,4 +10,11 @@ public record ConfirmBookingResponse
     public DateOnly CheckOut { get; init; }
     public decimal TotalPrice { get; init; }
     public Currency Currency { get; init; }
+
+    // Set only for a guest-checkout booking (no authenticated account) -
+    // the raw booking-management token, returned exactly this once. Lets
+    // the client build a "manage your booking" link (view/cancel, and once
+    // eligible, leave a review) with no account required. Null for an
+    // authenticated caller, whose own session already proves ownership.
+    public string? ManagementToken { get; init; }
 }
