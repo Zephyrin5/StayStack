@@ -192,6 +192,92 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
     }
 
     [Fact]
+    public async Task Handle_ActiveDateRangeOverride_ShowsOverridePriceOnCoveredDays()
+    {
+        // Arrange
+        Unit unit = CreateTestUnit(100m);
+        DateOnly from = new DateOnly(2026, 9, 1);
+        DateOnly to = new DateOnly(2026, 9, 5); // Sept 1, 2, 3, 4
+
+        PricingRule overrideRule = PricingRule.CreateDateRangeOverride(
+            unit.Id, new DateOnly(2026, 9, 2), new DateOnly(2026, 9, 4), 400m);
+
+        await SeedDatabaseAsync(unit, overrideRule);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        HybridCache cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
+        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache);
+
+        GetPriceCalendarRequest request = new GetPriceCalendarRequest { UnitId = unit.Id, From = from, To = to };
+
+        // Act
+        GetPriceCalendarResponse response = await handler.Handle(request, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(100m, response.Days.First(d => d.Date == new DateOnly(2026, 9, 1)).Price);
+        Assert.Equal(400m, response.Days.First(d => d.Date == new DateOnly(2026, 9, 2)).Price);
+        Assert.Equal(400m, response.Days.First(d => d.Date == new DateOnly(2026, 9, 3)).Price);
+        Assert.Equal(100m, response.Days.First(d => d.Date == new DateOnly(2026, 9, 4)).Price);
+    }
+
+    [Fact]
+    public async Task Handle_ActiveDayOfWeekMultiplier_ShowsMultipliedPriceOnMatchingWeekdays()
+    {
+        // Arrange - Sept 4 2026 is a Friday.
+        Unit unit = CreateTestUnit(100m);
+        DateOnly from = new DateOnly(2026, 9, 3);
+        DateOnly to = new DateOnly(2026, 9, 5); // Sept 3 (Thu), Sept 4 (Fri)
+
+        PricingRule multiplierRule = PricingRule.CreateDayOfWeekMultiplier(unit.Id, [(int)DayOfWeek.Friday], 2m);
+
+        await SeedDatabaseAsync(unit, multiplierRule);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        HybridCache cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
+        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache);
+
+        GetPriceCalendarRequest request = new GetPriceCalendarRequest { UnitId = unit.Id, From = from, To = to };
+
+        // Act
+        GetPriceCalendarResponse response = await handler.Handle(request, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(100m, response.Days.First(d => d.Date == new DateOnly(2026, 9, 3)).Price);
+        Assert.Equal(200m, response.Days.First(d => d.Date == new DateOnly(2026, 9, 4)).Price);
+    }
+
+    [Fact]
+    public async Task Handle_ActiveLengthOfStayDiscount_IsNeverAppliedToCalendarPrices()
+    {
+        // The calendar shows a single day's price at a time - length-of-stay
+        // discount is a whole-stay concept it can't express, even when the
+        // queried range's day-count would otherwise qualify.
+        // Arrange
+        Unit unit = CreateTestUnit(100m);
+        DateOnly from = new DateOnly(2026, 9, 1);
+        DateOnly to = new DateOnly(2026, 9, 8); // 7 days - meets a MinNights=7 threshold
+
+        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(unit.Id, 7, 10m);
+
+        await SeedDatabaseAsync(unit, discountRule);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        HybridCache cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
+        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache);
+
+        GetPriceCalendarRequest request = new GetPriceCalendarRequest { UnitId = unit.Id, From = from, To = to };
+
+        // Act
+        GetPriceCalendarResponse response = await handler.Handle(request, CancellationToken.None);
+
+        // Assert
+        Assert.All(response.Days, day => Assert.Equal(100m, day.Price));
+    }
+
+    [Fact]
     public async Task Handle_UnitDoesNotExist_ReturnsEmptyDaysList()
     {
         // Arrange

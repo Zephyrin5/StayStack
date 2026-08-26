@@ -1,3 +1,5 @@
+using Catalog.Domain;
+using Catalog.Entities;
 using Dapper;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
@@ -47,12 +49,14 @@ public class GetPriceCalendarHandler(
             await dbContext.Database.OpenConnectionAsync(cancellationToken);
         }
 
-        // Pure indexed read, no per-request pricing computation - once
-        // PricingRule exists, its resolved price gets materialized onto
-        // this row (or a dedicated calendar table) rather than computed
-        // here. For now base_price stands in as the only price source.
+        // Availability stays a pure SQL/indexed concern - no reason to
+        // duplicate that logic anywhere else. Pricing resolution, though,
+        // happens in C# via PricingCalculator (the same one
+        // HoldAvailabilityHandler calls) rather than re-implemented here in
+        // SQL, so the calendar preview and the actual charged price can
+        // never structurally drift apart. See docs/adr/0012.
         //
-        // Column aliases are cased to match PriceCalendarDay's property
+        // Column aliases are cased to match PriceCalendarDayRow's property
         // names exactly (Dapper matches case-insensitively but does NOT
         // strip underscores) - a deliberate per-query choice rather than
         // introducing a project-wide snake_case type map for this first
@@ -60,7 +64,7 @@ public class GetPriceCalendarHandler(
         const string sql = """
                            SELECT
                                d::date AS "Date",
-                               u.base_price AS "Price",
+                               u.base_price AS "BasePrice",
                                NOT EXISTS (
                                    SELECT 1 FROM unit_availability_holds h
                                    WHERE h.unit_id = @UnitId
@@ -79,7 +83,29 @@ public class GetPriceCalendarHandler(
         CommandDefinition command = new CommandDefinition(
             sql, new { request.UnitId, request.From, request.To }, cancellationToken: cancellationToken);
 
-        var rows = await connection.QueryAsync<PriceCalendarDay>(command);
-        return [.. rows];
+        var rows = await connection.QueryAsync<PriceCalendarDayRow>(command);
+
+        // Small, low-cardinality reference data - one extra EF round trip
+        // per uncached request is an acceptable cost for correctness here,
+        // absorbed by this handler's own 30s HybridCache wrapper above.
+        List<PricingRule> rules = await dbContext.PricingRules
+            .Where(r => r.UnitId == request.UnitId)
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .Select(row => new PriceCalendarDay
+            {
+                Date = row.Date,
+                Price = PricingCalculator.ResolveNightlyPrice(row.BasePrice, row.Date, rules),
+                IsAvailable = row.IsAvailable
+            })
+            .ToList();
+    }
+
+    private sealed record PriceCalendarDayRow
+    {
+        public DateOnly Date { get; init; }
+        public decimal BasePrice { get; init; }
+        public bool IsAvailable { get; init; }
     }
 }

@@ -1,4 +1,6 @@
 using Ardalis.GuardClauses;
+using Catalog.Domain;
+using Catalog.Entities;
 using Catalog.Exceptions;
 using Dapper;
 using Mediator;
@@ -25,6 +27,10 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
                         .SingleOrDefaultAsync(u => u.Id == request.UnitId, cancellationToken)
                     ?? throw new NotFoundException(nameof(Unit), request.UnitId);
 
+        List<PricingRule> rules = await dbContext.PricingRules
+            .Where(r => r.UnitId == unit.Id)
+            .ToListAsync(cancellationToken);
+
         // Guard clauses for invariants that depend on THIS unit's data -
         // the request validator already confirmed CheckOut > CheckIn and
         // GuestCount > 0 as pure shape rules; these need the loaded Unit.
@@ -40,7 +46,8 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
             "Check-in date cannot be in the past.");
 
         int nights = request.CheckOut.DayNumber - request.CheckIn.DayNumber;
-        decimal totalPrice = unit.BasePrice * nights;
+        decimal totalPrice = PricingCalculator.ResolveStayTotal(
+            unit.BasePrice, request.CheckIn, request.CheckOut, rules);
 
         // Wrapped in the execution strategy, not called bare - a manually
         // started transaction bypasses EF's own per-operation retry

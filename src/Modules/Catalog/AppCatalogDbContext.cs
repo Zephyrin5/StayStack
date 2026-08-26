@@ -16,6 +16,11 @@ public class AppCatalogDbContext(DbContextOptions<AppCatalogDbContext> options) 
     // comment for why.
     public DbSet<UnitAvailabilityHold> UnitAvailabilityHolds => Set<UnitAvailabilityHold>();
 
+    // Unlike UnitAvailabilityHolds, reads/writes to this table go through
+    // EF change tracking normally - rule-authoring is a low-frequency
+    // admin action, not a hot concurrent-write path. See docs/adr/0012.
+    public DbSet<PricingRule> PricingRules => Set<PricingRule>();
+
     // Note: named OnStayStackModelCreating, not OnModelCreating - the base
     // class seals OnModelCreating so the soft-delete filter it applies
     // afterward can never be skipped. See StayStackDbContext.
@@ -24,5 +29,6 @@ public class AppCatalogDbContext(DbContextOptions<AppCatalogDbContext> options) 
         modelBuilder.ApplyConfiguration(new PropertyConfiguration());
         modelBuilder.ApplyConfiguration(new UnitConfiguration());
         modelBuilder.ApplyConfiguration(new UnitAvailabilityHoldConfiguration());
+        modelBuilder.ApplyConfiguration(new PricingRuleConfiguration());
     }
 }

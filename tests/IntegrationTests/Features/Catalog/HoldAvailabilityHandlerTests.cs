@@ -215,6 +215,106 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     }
 
     [Fact]
+    public async Task Handle_ActiveDateRangeOverride_ChargesOverridePriceForCoveredNights()
+    {
+        // Arrange - 3-night stay, the middle night is date-range overridden.
+        Unit unit = CreateTestUnit();
+        DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
+        DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
+
+        PricingRule overrideRule = PricingRule.CreateDateRangeOverride(
+            unit.Id, today.AddDays(1), today.AddDays(2), 500m);
+
+        await SeedDatabaseAsync(unit, overrideRule);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(fixedInstant);
+        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+
+        HoldAvailabilityRequest command = new HoldAvailabilityRequest
+        {
+            UnitId = unit.Id,
+            CheckIn = today,
+            CheckOut = today.AddDays(3),
+            GuestCount = 2
+        };
+
+        // Act
+        HoldAvailabilityResponse result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert - 100 (day 1) + 500 (overridden day 2) + 100 (day 3) = 700
+        Assert.Equal(700m, result.TotalPrice);
+    }
+
+    [Fact]
+    public async Task Handle_ActiveDayOfWeekMultiplier_ChargesMultipliedPriceForMatchingNights()
+    {
+        // Arrange - Aug 20 2026 is a Thursday; Aug 21 is a Friday.
+        Unit unit = CreateTestUnit();
+        DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
+        DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
+
+        PricingRule multiplierRule = PricingRule.CreateDayOfWeekMultiplier(unit.Id, [(int)DayOfWeek.Friday], 2m);
+
+        await SeedDatabaseAsync(unit, multiplierRule);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(fixedInstant);
+        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+
+        HoldAvailabilityRequest command = new HoldAvailabilityRequest
+        {
+            UnitId = unit.Id,
+            CheckIn = today,
+            CheckOut = today.AddDays(2), // Thu, Fri
+            GuestCount = 2
+        };
+
+        // Act
+        HoldAvailabilityResponse result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert - 100 (Thu) + 200 (Fri, multiplied) = 300
+        Assert.Equal(300m, result.TotalPrice);
+    }
+
+    [Fact]
+    public async Task Handle_ActiveLengthOfStayDiscount_AppliesDiscountToSubtotal_WhenThresholdMet()
+    {
+        // Arrange
+        Unit unit = CreateTestUnit();
+        DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
+        DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
+
+        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(unit.Id, 7, 10m);
+
+        await SeedDatabaseAsync(unit, discountRule);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(fixedInstant);
+        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+
+        HoldAvailabilityRequest command = new HoldAvailabilityRequest
+        {
+            UnitId = unit.Id,
+            CheckIn = today,
+            CheckOut = today.AddDays(7),
+            GuestCount = 2
+        };
+
+        // Act
+        HoldAvailabilityResponse result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert - 700 subtotal * 0.9 = 630
+        Assert.Equal(630m, result.TotalPrice);
+    }
+
+    [Fact]
     public async Task Handle_UnitDoesNotExist_ThrowsNotFoundException()
     {
         // Arrange

@@ -1,7 +1,9 @@
 using BuildingBlocks.Pagination;
 using Catalog.Features.AdminCreateProperty;
+using Catalog.Features.CreatePricingRule;
 using Catalog.Features.CreateProperty;
 using Catalog.Features.CreateUnit;
+using Catalog.Features.DeletePricingRule;
 using Catalog.Features.DeleteProperty;
 using Catalog.Features.DeleteUnit;
 using Catalog.Features.GetMyProperties;
@@ -9,6 +11,8 @@ using Catalog.Features.GetPriceCalendar;
 using Catalog.Features.GetProperties;
 using Catalog.Features.GetPropertyById;
 using Catalog.Features.HoldAvailability;
+using Catalog.Features.ListPricingRules;
+using Catalog.Features.UpdatePricingRule;
 using Catalog.Features.UpdateProperty;
 using Catalog.Features.UpdateUnit;
 using System.Text.Json.Serialization;
@@ -37,4 +41,12 @@ namespace Catalog.Serialization;
 [JsonSerializable(typeof(UpdateUnitResponse))]
 [JsonSerializable(typeof(DeleteUnitRequest))]
 [JsonSerializable(typeof(DeleteUnitResponse))]
+[JsonSerializable(typeof(CreatePricingRuleRequest))]
+[JsonSerializable(typeof(CreatePricingRuleResponse))]
+[JsonSerializable(typeof(UpdatePricingRuleRequest))]
+[JsonSerializable(typeof(UpdatePricingRuleResponse))]
+[JsonSerializable(typeof(DeletePricingRuleRequest))]
+[JsonSerializable(typeof(DeletePricingRuleResponse))]
+[JsonSerializable(typeof(ListPricingRulesRequest))]
+[JsonSerializable(typeof(ListPricingRulesResponse))]
 public partial class CatalogJsonSerializerContext : JsonSerializerContext;
