@@ -20,9 +20,11 @@ public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAv
         // now(), no unit_id) and, in combination with the UnitId index
         // above, HoldAvailabilityHandler's own per-unit cleanup. Partial on
         // status = 'held' since a 'booked' row is never a cleanup target -
-        // matches the exact WHERE clause both DELETEs already use, so
-        // Postgres can satisfy either with an index-only range scan
-        // instead of a growing full-table scan.
+        // matches the exact WHERE clause both DELETEs already use, letting
+        // Postgres locate cleanup candidates through this partial index
+        // rather than scanning the entire table (the DELETE itself still
+        // has to visit the matching heap tuples - this isn't an index-only
+        // scan, just an indexed one).
         builder.HasIndex(h => h.HoldExpiresAt)
             .HasFilter("status = 'held'");
 

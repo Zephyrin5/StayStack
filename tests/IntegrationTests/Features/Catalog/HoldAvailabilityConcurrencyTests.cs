@@ -116,4 +116,63 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         int holdCount = await context.UnitAvailabilityHolds.CountAsync(h => h.UnitId == unit.Id, TestContext.Current.CancellationToken);
         Assert.Equal(1, holdCount);
     }
+
+    [Fact]
+    public async Task Hold_ConcurrentRequestsForAdjacentNonOverlappingRanges_BothSucceed()
+    {
+        // The other two tests prove contention is resolved correctly; this
+        // one proves the opposite - that two ranges which only touch at
+        // the [CheckIn, CheckOut) boundary (see HoldAvailabilityHandler's
+        // own half-open comment) are never treated as conflicting, even
+        // when the exclusion constraint is genuinely evaluating concurrent,
+        // not-yet-committed inserts against each other at the database
+        // level. A single-threaded/sequential version of this assertion
+        // wouldn't exercise anything the constraint's own && operator
+        // doesn't already trivially get right - the concurrent race is
+        // what actually tests whether GIST's own visibility handling holds
+        // up under real contention, not just the operator's boundary math.
+        Unit unit = await SeedUnitAsync();
+        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly boundary = today.AddDays(5);
+
+        HoldAvailabilityRequest rangeA = new HoldAvailabilityRequest
+        {
+            UnitId = unit.Id,
+            CheckIn = today,
+            CheckOut = boundary,
+            GuestCount = 2
+        };
+        HoldAvailabilityRequest rangeB = new HoldAvailabilityRequest
+        {
+            UnitId = unit.Id,
+            CheckIn = boundary,
+            CheckOut = boundary.AddDays(5),
+            GuestCount = 2
+        };
+
+        // Act: several concurrent requests for EACH range, interleaved in
+        // one batch - both proves the two ranges never conflict with each
+        // other, and (same as the other tests) that only one request per
+        // range actually wins its own range.
+        const int concurrentRequestsPerRange = 5;
+        Task<HttpResponseMessage>[] tasks =
+        [
+            .. Enumerable.Range(0, concurrentRequestsPerRange)
+                .Select(_ => factory.CreateClient().PostAsJsonAsync("/api/catalog/holds", rangeA, TestContext.Current.CancellationToken)),
+            .. Enumerable.Range(0, concurrentRequestsPerRange)
+                .Select(_ => factory.CreateClient().PostAsJsonAsync("/api/catalog/holds", rangeB, TestContext.Current.CancellationToken))
+        ];
+
+        HttpResponseMessage[] responses = await Task.WhenAll(tasks);
+
+        // Assert: exactly one winner per range - two successes total, not
+        // one and not zero.
+        Assert.Equal(2, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
+        Assert.Equal(2 * concurrentRequestsPerRange - 2, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        int holdCount = await context.UnitAvailabilityHolds.CountAsync(h => h.UnitId == unit.Id, TestContext.Current.CancellationToken);
+        Assert.Equal(2, holdCount);
+    }
 }

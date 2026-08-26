@@ -51,16 +51,10 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
 
         // Wrapped in the execution strategy, not called bare - a manually
         // started transaction bypasses EF's own per-operation retry
-        // wrapping entirely, so without this, a transient failure would
-        // surface as an unhandled 500 instead of being retried the way
-        // EnableRetryOnFailure already promises everywhere else. This
-        // isn't theoretical: HoldAvailabilityConcurrencyTests reproduced a
-        // real Postgres deadlock (40P01) here under genuine 10-way
-        // concurrent contention on the same range - two transactions can
-        // each be waiting on the other while checking the exclusion
-        // constraint against the other's not-yet-committed row. The whole
-        // transaction is re-run from scratch on retry, not just the one
-        // failed statement - that's what "retriable unit" means.
+        // wrapping, which would otherwise surface a deadlock (40P01) as an
+        // unhandled 500 instead of retrying the whole transaction from
+        // scratch. See docs/adr/0010 for why this actually happens under
+        // concurrent contention on the same range, not just in theory.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
         (Guid HoldId, DateTimeOffset HoldExpiresAt) result = await strategy.ExecuteAsync(async () =>
