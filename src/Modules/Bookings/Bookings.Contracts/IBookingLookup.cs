@@ -22,6 +22,28 @@ public interface IBookingLookup
     /// </summary>
     Task<BookingAccessResult?> VerifyBookingAccessAsync(
         Guid bookingId, Guid? customerId, string? managementToken, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     Every Confirmed booking belonging to this customer - what
+    ///     ListMyReviewableBookingsHandler (Reviews) filters by
+    ///     checkout-passed and not-yet-reviewed, since Reviews has no
+    ///     notion of Booking/CustomerId itself. Same "give me every X
+    ///     owned by Y" shape as IUnitLookup.GetUnitIdsForHostAsync.
+    ///     Unfiltered by checkout date - the caller decides what "past"
+    ///     means for its own purposes.
+    /// </summary>
+    Task<IReadOnlyList<BookingAccessResult>> GetConfirmedBookingsForCustomerAsync(
+        Guid customerId, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     A raw lookup, no ownership check - what CreateGuestReviewHandler
+    ///     (Reviews) uses, since a host reviewing a guest is authorized by
+    ///     owning the booking's unit (via Catalog.Contracts.IUnitLookup),
+    ///     not by a customerId/managementToken match the way
+    ///     VerifyBookingAccessAsync's two paths are. Null if the booking
+    ///     doesn't exist.
+    /// </summary>
+    Task<BookingAccessResult?> GetBookingDetailsAsync(Guid bookingId, CancellationToken cancellationToken);
 }
 
 public record BookingSummary
@@ -42,6 +64,7 @@ public record BookingAccessResult
 {
     public Guid BookingId { get; init; }
     public Guid UnitId { get; init; }
+    public DateOnly CheckIn { get; init; }
     public DateOnly CheckOut { get; init; }
 
     // Same bool-not-enum reasoning as BookingSummary.IsPending - Reviews

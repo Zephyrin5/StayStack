@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="FastEndpoints"/>
+        <PackageReference Include="FastEndpoints.Generator"/>
+        <PackageReference Include="Mediator.Abstractions"/>
+        <PackageReference Include="Microsoft.EntityFrameworkCore"/>
+    </ItemGroup>
+
+    <!-- No nested Reviews.Contracts project - nothing else needs to call
+         into Reviews yet (property listings don't sort/filter by rating in
+         this increment; the client fetches Catalog's property data and
+         Reviews' rating summary as two independent calls). Reviews only
+         ever calls out, into Bookings.Contracts and Catalog.Contracts. See
+         docs/adr/0004 - add one the same way every other module did, if a
+         genuine need for something else to depend on Reviews shows up. -->
+    <ItemGroup>
+        <ProjectReference Include="..\..\Core\SeedWork\SeedWork.csproj"/>
+        <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
+        <ProjectReference Include="..\..\Infrastructure\Persistence\Persistence.csproj"/>
+        <ProjectReference Include="..\Bookings\Bookings.Contracts\Bookings.Contracts.csproj"/>
+        <ProjectReference Include="..\Catalog\Catalog.Contracts\Catalog.Contracts.csproj"/>
+        <ProjectReference Include="..\Hosts\Hosts.Contracts\Hosts.Contracts.csproj"/>
+    </ItemGroup>
+
+</Project>

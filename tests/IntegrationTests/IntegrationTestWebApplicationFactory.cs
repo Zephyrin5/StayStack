@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Persistence;
+using Reviews;
 using Testcontainers.PostgreSql;
 using TickerQ.EntityFrameworkCore.DbContextFactory;
 using Transactions;
@@ -100,6 +101,10 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             services.AddDbContext<AppTransactionsDbContext>(options =>
                 options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "transactions", false));
 
+            services.RemoveAll<DbContextOptions<AppReviewsDbContext>>();
+            services.AddDbContext<AppReviewsDbContext>(options =>
+                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "reviews", false));
+
             // Build a temporary provider just to apply each module's real
             // migrations before any test runs. All five share one physical
             // database in this container, which Migrate() handles safely
@@ -114,6 +119,7 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             scope.ServiceProvider.GetRequiredService<AppHostsDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>().Database.Migrate();
+            scope.ServiceProvider.GetRequiredService<AppReviewsDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<TickerQDbContext>().Database.Migrate();
         });
     }

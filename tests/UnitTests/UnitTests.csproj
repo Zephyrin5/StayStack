@@ -24,6 +24,7 @@
         <ProjectReference Include="..\..\src\Modules\Catalog\Catalog.csproj"/>
         <ProjectReference Include="..\..\src\Modules\Hosts\Hosts.csproj"/>
         <ProjectReference Include="..\..\src\Modules\Identity\Identity.csproj" />
+        <ProjectReference Include="..\..\src\Modules\Reviews\Reviews.csproj"/>
         <ProjectReference Include="..\..\src\Modules\Transactions\Transactions.csproj"/>
     </ItemGroup>
 

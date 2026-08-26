@@ -11,6 +11,7 @@ using BookingsDiscoveredTypes = Bookings.DiscoveredTypes;
 using CatalogDiscoveredTypes = Catalog.DiscoveredTypes;
 using HostsDiscoveredTypes = Hosts.DiscoveredTypes;
 using IdentityDiscoveredTypes = Identity.DiscoveredTypes;
+using ReviewsDiscoveredTypes = Reviews.DiscoveredTypes;
 using TransactionsDiscoveredTypes = Transactions.DiscoveredTypes;
 
 namespace Api;
@@ -80,6 +81,7 @@ public static class ApiServicesRegistration
             CatalogDiscoveredTypes.All,
             HostsDiscoveredTypes.All,
             BookingsDiscoveredTypes.All,
+            ReviewsDiscoveredTypes.All,
             TransactionsDiscoveredTypes.All,
             DiscoveredTypes.All);
         // The combined source-generated resolver (each module's own DTOs
