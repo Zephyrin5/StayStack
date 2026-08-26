@@ -38,8 +38,13 @@ public class MarkTransactionSucceededHandler(
             // The payment succeeding is still a fact (TransactionStatus
             // stays Succeeded above, it isn't undone), it just immediately
             // needs reversing rather than being left to look like ordinary
-            // completed revenue.
-            transaction.MarkRefundPending();
+            // completed revenue. Full refund, not a cancellation-policy-
+            // graduated one: unlike CancelBookingHandler's own reversal,
+            // nothing was actually being held against this payment by the
+            // time it cleared - the booking's inventory was already
+            // released, so there's no "compensation for holding it" left
+            // to justify keeping any portion.
+            transaction.MarkRefundPending(transaction.Amount);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 

@@ -11,6 +11,7 @@ public class ConfirmBookingHandler(
     AppBookingsDbContext dbContext,
     IHoldConfirmation holdConfirmation,
     IPromotionRedemption promotionRedemption,
+    IUnitLookup unitLookup,
     ICurrentUserProvider currentUserProvider,
     TimeProvider timeProvider) : IRequestHandler<ConfirmBookingRequest, ConfirmBookingResponse>
 {
@@ -97,20 +98,6 @@ public class ConfirmBookingHandler(
             }
         }
 
-        Booking booking = Booking.Create(
-            bookingId,
-            hold.UnitId,
-            request.HoldId,
-            currentUserProvider.UserId,
-            request.GuestName,
-            request.GuestEmail,
-            request.GuestPhone,
-            hold.CheckIn,
-            hold.CheckOut,
-            hold.GuestCount,
-            totalPrice,
-            hold.Currency);
-
         // Only a guest-checkout booking gets one - an authenticated
         // caller's account is already proof of ownership, and issuing a
         // token nobody will ever use would just be a second, redundant way
@@ -118,8 +105,42 @@ public class ConfirmBookingHandler(
         // the response below - only its hash is ever persisted.
         string? managementToken = currentUserProvider.UserId is null ? SecureToken.Generate() : null;
 
+        Booking booking;
+
         try
         {
+            // The unit's *current* cancellation policy, snapshotted onto
+            // the booking now rather than re-resolved at cancel time - see
+            // Booking.CancellationPolicy's own doc comment. Not sourced
+            // from the hold's own snapshot (unlike price/currency): the
+            // hold only ever carries what HoldAvailabilityHandler wrote
+            // into unit_availability_holds via raw SQL, and a cancellation
+            // policy has no bearing on the double-booking/exclusion-
+            // constraint machinery that record exists for - one extra
+            // Catalog round trip here, the same "extra unit lookup when
+            // needed" pattern CreateStayReviewHandler already established.
+            // Inside this try, not before it: a failure here (the unit
+            // vanishing between hold and confirm - narrow, but real) needs
+            // the exact same hold-release/redemption-reversal compensation
+            // as a failed Bookings.Add below, not a bare unhandled throw.
+            UnitSummary unit = await unitLookup.GetUnitAsync(hold.UnitId, cancellationToken)
+                                ?? throw new NotFoundException("Unit", hold.UnitId);
+
+            booking = Booking.Create(
+                bookingId,
+                hold.UnitId,
+                request.HoldId,
+                currentUserProvider.UserId,
+                request.GuestName,
+                request.GuestEmail,
+                request.GuestPhone,
+                hold.CheckIn,
+                hold.CheckOut,
+                hold.GuestCount,
+                totalPrice,
+                hold.Currency,
+                unit.CancellationPolicy);
+
             dbContext.Bookings.Add(booking);
 
             if (managementToken is not null)

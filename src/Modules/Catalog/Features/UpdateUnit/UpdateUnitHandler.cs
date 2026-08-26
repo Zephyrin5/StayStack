@@ -48,6 +48,7 @@ public class UpdateUnitHandler(
         unit.SetMaxOccupancy(request.MaxOccupancy);
         unit.SetBasePrice(request.BasePrice);
         unit.SetCurrency(request.Currency);
+        unit.SetCancellationPolicy(CancellationPolicy.Create(request.CancellationTiers));
 
         await dbContext.SaveChangesAsync(cancellationToken);
 

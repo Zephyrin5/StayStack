@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SeedWork.Enums;
+using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -191,5 +192,103 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         Unit unit = await db.Units.SingleAsync(u => u.Id == result.UnitId, TestContext.Current.CancellationToken);
         Assert.Equal(property.PropertyId, unit.PropertyId);
+    }
+
+    private async Task<Guid> CreatePropertyAsync(string accessToken)
+    {
+        HttpResponseMessage response = await _client.SendAsync(
+            AuthorizedPost("/api/catalog/properties", new CreatePropertyRequest
+            {
+                PropertyType = PropertyType.Hotel,
+                Name = new Dictionary<string, string> { { "en", "Test Property" } }
+            }, accessToken),
+            TestContext.Current.CancellationToken);
+        CreatePropertyResponse? result =
+            await response.Content.ReadFromJsonAsync<CreatePropertyResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        return result.PropertyId;
+    }
+
+    [Fact]
+    public async Task CreateUnit_ShouldApplyTheModerateDefaultCancellationPolicy_WhenTiersAreOmitted()
+    {
+        // Arrange
+        string hostAccessToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken);
+
+        // Act
+        HttpResponseMessage response = await _client.SendAsync(
+            AuthorizedPost("/api/catalog/units", new CreateUnitRequest
+            {
+                PropertyId = propertyId,
+                Name = new Dictionary<string, string> { { "en", "Standard Room" } },
+                MaxOccupancy = 2,
+                BasePrice = 50m
+            }, hostAccessToken),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        CreateUnitResponse? result = await response.Content.ReadFromJsonAsync<CreateUnitResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        Unit unit = await db.Units.SingleAsync(u => u.Id == result.UnitId, TestContext.Current.CancellationToken);
+        Assert.Equal(CancellationPolicy.CreateDefault(), unit.CancellationPolicy);
+    }
+
+    [Fact]
+    public async Task CreateUnit_ShouldPersistCustomCancellationTiers_WhenProvided()
+    {
+        // Arrange
+        string hostAccessToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken);
+        List<CancellationTier> tiers = [new CancellationTier(14, 100m), new CancellationTier(0, 0m)];
+
+        // Act
+        HttpResponseMessage response = await _client.SendAsync(
+            AuthorizedPost("/api/catalog/units", new CreateUnitRequest
+            {
+                PropertyId = propertyId,
+                Name = new Dictionary<string, string> { { "en", "Suite" } },
+                MaxOccupancy = 2,
+                BasePrice = 50m,
+                CancellationTiers = tiers
+            }, hostAccessToken),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        CreateUnitResponse? result = await response.Content.ReadFromJsonAsync<CreateUnitResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        Unit unit = await db.Units.SingleAsync(u => u.Id == result.UnitId, TestContext.Current.CancellationToken);
+        Assert.Equal(CancellationPolicy.Create(tiers), unit.CancellationPolicy);
+    }
+
+    [Fact]
+    public async Task CreateUnit_ShouldReturn400_ForATierListWithNoZeroFloorTier()
+    {
+        // Arrange
+        string hostAccessToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken);
+
+        // Act
+        HttpResponseMessage response = await _client.SendAsync(
+            AuthorizedPost("/api/catalog/units", new CreateUnitRequest
+            {
+                PropertyId = propertyId,
+                Name = new Dictionary<string, string> { { "en", "Bad Policy Room" } },
+                MaxOccupancy = 2,
+                BasePrice = 50m,
+                CancellationTiers = [new CancellationTier(5, 100m)]
+            }, hostAccessToken),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 }

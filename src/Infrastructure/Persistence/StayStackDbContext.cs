@@ -36,6 +36,10 @@ public abstract class StayStackDbContext(DbContextOptions options) : DbContext(o
         configurationBuilder.Properties<LocalizedText>()
             .HaveConversion<LocalizedTextConverter, LocalizedTextComparer>()
             .HaveColumnType("jsonb");
+
+        configurationBuilder.Properties<CancellationPolicy>()
+            .HaveConversion<CancellationPolicyConverter, CancellationPolicyComparer>()
+            .HaveColumnType("jsonb");
     }
 
     protected abstract void OnStayStackModelCreating(ModelBuilder modelBuilder);

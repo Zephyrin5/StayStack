@@ -31,7 +31,8 @@ public class GetPropertyByIdHandler(AppCatalogDbContext dbContext) : IRequestHan
                     Name = new Dictionary<string, string>(u.Name.Values),
                     MaxOccupancy = u.MaxOccupancy,
                     BasePrice = u.BasePrice,
-                    Currency = u.Currency
+                    Currency = u.Currency,
+                    CancellationTiers = [.. u.CancellationPolicy.Tiers]
                 })
             ]
         };

@@ -36,7 +36,8 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
                 BasePrice = row.unit.BasePrice,
                 Currency = row.unit.Currency,
                 PropertyId = row.unit.PropertyId,
-                HostId = row.HostId
+                HostId = row.HostId,
+                CancellationPolicy = row.unit.CancellationPolicy
             };
     }
 
@@ -64,7 +65,8 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
                 BasePrice = row.unit.BasePrice,
                 Currency = row.unit.Currency,
                 PropertyId = row.unit.PropertyId,
-                HostId = row.HostId
+                HostId = row.HostId,
+                CancellationPolicy = row.unit.CancellationPolicy
             });
     }
 

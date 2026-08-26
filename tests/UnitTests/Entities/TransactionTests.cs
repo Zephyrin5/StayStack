@@ -88,14 +88,55 @@ public class TransactionTests
     }
 
     [Fact]
-    public void MarkRefundPending_ShouldSetStatusToRefundPending_WhenSucceeded()
+    public void MarkRefundPending_ShouldSetStatusToRefundPendingAndRecordAmount_WhenSucceeded()
     {
         Transaction transaction = CreateValidTransaction();
         transaction.MarkSucceeded();
 
-        transaction.MarkRefundPending();
+        transaction.MarkRefundPending(60m);
 
         Assert.Equal(TransactionStatus.RefundPending, transaction.TransactionStatus);
+        Assert.Equal(60m, transaction.RefundAmount);
+    }
+
+    [Fact]
+    public void MarkRefundPending_ShouldAllowAZeroRefund_WhenSucceeded()
+    {
+        Transaction transaction = CreateValidTransaction();
+        transaction.MarkSucceeded();
+
+        transaction.MarkRefundPending(0m);
+
+        Assert.Equal(0m, transaction.RefundAmount);
+    }
+
+    [Fact]
+    public void MarkRefundPending_ShouldAllowARefundEqualToTheFullAmount_WhenSucceeded()
+    {
+        Transaction transaction = CreateValidTransaction();
+        transaction.MarkSucceeded();
+
+        transaction.MarkRefundPending(transaction.Amount);
+
+        Assert.Equal(transaction.Amount, transaction.RefundAmount);
+    }
+
+    [Fact]
+    public void MarkRefundPending_ShouldThrow_WhenRefundAmountExceedsTheOriginalAmount()
+    {
+        Transaction transaction = CreateValidTransaction();
+        transaction.MarkSucceeded();
+
+        Assert.ThrowsAny<ArgumentException>(() => transaction.MarkRefundPending(transaction.Amount + 1m));
+    }
+
+    [Fact]
+    public void MarkRefundPending_ShouldThrow_WhenRefundAmountIsNegative()
+    {
+        Transaction transaction = CreateValidTransaction();
+        transaction.MarkSucceeded();
+
+        Assert.ThrowsAny<ArgumentException>(() => transaction.MarkRefundPending(-1m));
     }
 
     [Fact]
@@ -103,7 +144,7 @@ public class TransactionTests
     {
         Transaction transaction = CreateValidTransaction();
 
-        Assert.Throws<TransactionAlreadyFinalizedException>(transaction.MarkRefundPending);
+        Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkRefundPending(50m));
     }
 
     [Fact]
@@ -112,7 +153,7 @@ public class TransactionTests
         Transaction transaction = CreateValidTransaction();
         transaction.MarkFailed("Card declined");
 
-        Assert.Throws<TransactionAlreadyFinalizedException>(transaction.MarkRefundPending);
+        Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkRefundPending(50m));
     }
 
     [Fact]
@@ -120,7 +161,7 @@ public class TransactionTests
     {
         Transaction transaction = CreateValidTransaction();
         transaction.MarkSucceeded();
-        transaction.MarkRefundPending();
+        transaction.MarkRefundPending(50m);
 
         transaction.MarkRefunded();
 
@@ -141,7 +182,7 @@ public class TransactionTests
     {
         Transaction transaction = CreateValidTransaction();
         transaction.MarkSucceeded();
-        transaction.MarkRefundPending();
+        transaction.MarkRefundPending(50m);
 
         transaction.MarkRefundFailed("Original card closed");
 

@@ -10,6 +10,7 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
         builder.HasKey(t => t.Id);
 
         builder.Property(t => t.Amount).HasColumnType("numeric(10,2)").IsRequired();
+        builder.Property(t => t.RefundAmount).HasColumnType("numeric(10,2)");
         builder.Property(t => t.Currency).HasConversion<string>().HasMaxLength(3).IsFixedLength().IsRequired();
 
         // Stored as text, not the integer enum value - same reasoning as

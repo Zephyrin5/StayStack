@@ -181,6 +181,14 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         return transaction.TransactionStatus;
     }
 
+    private async Task<decimal?> GetTransactionRefundAmountAsync(Guid transactionId)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppTransactionsDbContext context = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        Transaction transaction = await context.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
+        return transaction.RefundAmount;
+    }
+
     [Fact]
     public async Task CancelBooking_ShouldMoveSucceededTransactionToRefundPending()
     {
@@ -201,6 +209,72 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(TransactionStatus.RefundPending, await GetTransactionStatusAsync(transactionId));
+    }
+
+    // Exercises every tier of the Moderate default policy (see
+    // CancellationPolicy.CreateDefault: 100% at 5+ days out, 50% inside
+    // that window, 0% on check-in day itself) entirely through the real
+    // Hold->Confirm->Cancel HTTP flow - no direct-DB seeding needed, since
+    // HoldAvailabilityHandler only requires CheckIn >= today, no upper
+    // bound, so "cancel today" against a far-future CheckIn already is
+    // "cancel N days before check-in" for whatever N the test picks.
+    [Theory]
+    [InlineData(10, 100)] // 10 days out - the 5-day-or-more tier
+    [InlineData(5, 100)] // exactly the 5-day boundary - still the 100% tier
+    [InlineData(4, 50)] // just inside the 5-day boundary - the 50% tier
+    [InlineData(1, 50)] // exactly the 1-day boundary - still the 50% tier
+    [InlineData(0, 0)] // check-in day itself - the 0% floor tier
+    public async Task CancelBooking_ShouldRefundAccordingToTheModeratePolicyTier_BasedOnDaysBeforeCheckIn(
+        int daysUntilCheckIn, int expectedRefundPercent)
+    {
+        // Arrange
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        string customerToken = await SeedSignedInCustomerAsync();
+        string adminToken = await SignInAsAdministratorAsync();
+        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(daysUntilCheckIn);
+        Guid holdId = await HoldUnitAsync(unit.Id, checkIn, checkIn.AddDays(3)); // 300 KWD (3 nights @ 100)
+        Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
+        Guid transactionId = await InitiateTransactionAsync(bookingId);
+        await MarkTransactionSucceededAsync(transactionId, adminToken);
+
+        // Act
+        HttpResponseMessage response = await CancelBookingAsync(bookingId, customerToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        CancelBookingResponse? result = await response.Content.ReadFromJsonAsync<CancelBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+
+        decimal expectedRefundAmount = 300m * expectedRefundPercent / 100m;
+        Assert.Equal(expectedRefundPercent, result.RefundPercent);
+        Assert.Equal(expectedRefundAmount, result.RefundAmount);
+        Assert.Equal(expectedRefundAmount, await GetTransactionRefundAmountAsync(transactionId));
+        Assert.Equal(TransactionStatus.RefundPending, await GetTransactionStatusAsync(transactionId));
+    }
+
+    [Fact]
+    public async Task CancelBooking_ShouldReturnNullRefundFields_WhenTherWasNeverASucceededTransaction()
+    {
+        // Arrange - no InitiateTransaction/MarkTransactionSucceeded at all,
+        // so there is genuinely nothing to refund; a policy percent with no
+        // money behind it would be misleading to surface.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        string customerToken = await SeedSignedInCustomerAsync();
+        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        Guid holdId = await HoldUnitAsync(unit.Id, today.AddDays(10), today.AddDays(13));
+        Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
+
+        // Act
+        HttpResponseMessage response = await CancelBookingAsync(bookingId, customerToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        CancelBookingResponse? result = await response.Content.ReadFromJsonAsync<CancelBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.Null(result.RefundAmount);
+        Assert.Null(result.RefundPercent);
     }
 
     [Fact]

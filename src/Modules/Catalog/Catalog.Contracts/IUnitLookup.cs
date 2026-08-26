@@ -1,4 +1,5 @@
 using SeedWork.Enums;
+using SeedWork.ValueObjects;
 namespace Catalog.Contracts;
 
 /// <summary>
@@ -40,4 +41,10 @@ public record UnitSummary
     // second lookup interface.
     public Guid PropertyId { get; init; }
     public Guid HostId { get; init; }
+
+    // Added for cancellation policies - lets ConfirmBookingHandler
+    // snapshot the unit's *current* policy onto the Booking at confirm
+    // time, same "the terms they saw are the terms they get" reasoning as
+    // TotalPrice/Currency.
+    public required CancellationPolicy CancellationPolicy { get; init; }
 }

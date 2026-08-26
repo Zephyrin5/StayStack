@@ -3,6 +3,7 @@ using Bookings.Contracts;
 using SeedWork.Abstractions;
 using SeedWork.Enums;
 using SeedWork.Interfaces;
+using SeedWork.ValueObjects;
 namespace Bookings.Entities;
 
 public sealed class Booking : Entity, IAggregateRoot
@@ -22,7 +23,8 @@ public sealed class Booking : Entity, IAggregateRoot
         int guestCount,
         decimal totalPrice,
         Currency currency,
-        BookingStatus bookingStatus)
+        BookingStatus bookingStatus,
+        CancellationPolicy cancellationPolicy)
     {
         Id = id;
         UnitId = unitId;
@@ -37,6 +39,7 @@ public sealed class Booking : Entity, IAggregateRoot
         TotalPrice = totalPrice;
         Currency = currency;
         BookingStatus = bookingStatus;
+        CancellationPolicy = cancellationPolicy;
     }
 
     // Cross-module references, plain Guid rather than a real FK - same
@@ -67,6 +70,17 @@ public sealed class Booking : Entity, IAggregateRoot
     // different axis entirely from this business lifecycle state.
     public BookingStatus BookingStatus { get; private set; }
 
+    // Snapshotted from the unit's *current* policy at confirm time (see
+    // ConfirmBookingHandler), same "the terms they saw are the terms they
+    // get" reasoning as TotalPrice/Currency - a host tightening their
+    // policy afterward can't retroactively worsen an already-confirmed
+    // guest's terms. Nullable only because a Booking confirmed before this
+    // feature existed has no snapshot to read back - never null for
+    // anything created through Create() below. CancelBookingHandler falls
+    // back to CancellationPolicy.CreateDefault() for that historical case
+    // rather than fabricating a specific retroactive claim.
+    public CancellationPolicy? CancellationPolicy { get; private set; }
+
     // Takes its id rather than generating one internally - a redeemed promo
     // code needs the booking's id up front, to write the PromotionRedemption
     // row before the Booking itself is ever saved (see ConfirmBookingHandler),
@@ -84,7 +98,8 @@ public sealed class Booking : Entity, IAggregateRoot
         DateOnly checkOut,
         int guestCount,
         decimal totalPrice,
-        Currency currency)
+        Currency currency,
+        CancellationPolicy cancellationPolicy)
     {
         Guard.Against.Default(id);
         Guard.Against.Default(unitId);
@@ -97,10 +112,11 @@ public sealed class Booking : Entity, IAggregateRoot
             c => c > checkIn, "Check-out must be after check-in.");
         Guard.Against.NegativeOrZero(guestCount);
         Guard.Against.Negative(totalPrice);
+        Guard.Against.Null(cancellationPolicy);
 
         return new Booking(
             id, unitId, holdId, customerId, guestName, guestEmail, guestPhone,
-            checkIn, checkOut, guestCount, totalPrice, currency, BookingStatus.Pending);
+            checkIn, checkOut, guestCount, totalPrice, currency, BookingStatus.Pending, cancellationPolicy);
     }
 
     // A real mutation with its own invariant (can't cancel twice, can't

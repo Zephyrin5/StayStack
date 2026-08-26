@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SeedWork.Enums;
+using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -242,7 +243,8 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
                 Name = new Dictionary<string, string> { { "en", "Renamed Unit" } },
                 MaxOccupancy = 4,
                 BasePrice = 99.9m,
-                Currency = Currency.SAR
+                Currency = Currency.SAR,
+                CancellationTiers = [new CancellationTier(0, 100m)]
             }),
             TestContext.Current.CancellationToken);
 
@@ -275,12 +277,69 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
                 Name = new Dictionary<string, string> { { "en", "Hijacked" } },
                 MaxOccupancy = 2,
                 BasePrice = 10m,
-                Currency = Currency.KWD
+                Currency = Currency.KWD,
+                CancellationTiers = [new CancellationTier(0, 100m)]
             }),
             TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateUnit_ShouldReplaceTheCancellationPolicy_ForOwningHost()
+    {
+        // Arrange
+        string hostAccessToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken);
+        Guid unitId = await CreateUnitAsync(hostAccessToken, propertyId);
+        List<CancellationTier> tiers = [new CancellationTier(3, 100m), new CancellationTier(0, 0m)];
+
+        // Act
+        HttpResponseMessage response = await _client.SendAsync(
+            Authorized(HttpMethod.Put, $"/api/catalog/units/{unitId}", hostAccessToken, new UpdateUnitRequest
+            {
+                UnitId = unitId,
+                Name = new Dictionary<string, string> { { "en", "Renamed Unit" } },
+                MaxOccupancy = 4,
+                BasePrice = 99.9m,
+                Currency = Currency.SAR,
+                CancellationTiers = tiers
+            }),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        Unit unit = await db.Units.SingleAsync(u => u.Id == unitId, TestContext.Current.CancellationToken);
+        Assert.Equal(CancellationPolicy.Create(tiers), unit.CancellationPolicy);
+    }
+
+    [Fact]
+    public async Task UpdateUnit_ShouldReturn400_WhenCancellationTiersAreEmpty()
+    {
+        // Arrange
+        string hostAccessToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken);
+        Guid unitId = await CreateUnitAsync(hostAccessToken, propertyId);
+
+        // Act
+        HttpResponseMessage response = await _client.SendAsync(
+            Authorized(HttpMethod.Put, $"/api/catalog/units/{unitId}", hostAccessToken, new UpdateUnitRequest
+            {
+                UnitId = unitId,
+                Name = new Dictionary<string, string> { { "en", "Renamed Unit" } },
+                MaxOccupancy = 4,
+                BasePrice = 99.9m,
+                Currency = Currency.SAR,
+                CancellationTiers = []
+            }),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]

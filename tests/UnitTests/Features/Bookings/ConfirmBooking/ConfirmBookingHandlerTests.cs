@@ -6,6 +6,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Moq;
 using SeedWork.Enums;
+using SeedWork.ValueObjects;
 namespace UnitTests.Features.Bookings.ConfirmBooking;
 
 // Proves the compensating-rollback fix: if the Bookings-side write fails
@@ -64,9 +65,22 @@ public class ConfirmBookingHandlerTests : IDisposable
 
         Mock<IPromotionRedemption> promotionRedemptionMock = new Mock<IPromotionRedemption>();
 
+        Mock<IUnitLookup> unitLookupMock = new Mock<IUnitLookup>();
+        unitLookupMock.Setup(x => x.GetUnitAsync(hold.UnitId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new UnitSummary
+            {
+                Id = hold.UnitId,
+                MaxOccupancy = hold.GuestCount,
+                BasePrice = hold.TotalPrice,
+                Currency = hold.Currency,
+                PropertyId = Guid.NewGuid(),
+                HostId = Guid.NewGuid(),
+                CancellationPolicy = CancellationPolicy.CreateDefault()
+            });
+
         ConfirmBookingHandler handler = new ConfirmBookingHandler(
-            _dbContext, holdConfirmationMock.Object, promotionRedemptionMock.Object, currentUserProviderMock.Object,
-            TimeProvider.System);
+            _dbContext, holdConfirmationMock.Object, promotionRedemptionMock.Object, unitLookupMock.Object,
+            currentUserProviderMock.Object, TimeProvider.System);
 
         ConfirmBookingRequest request = new ConfirmBookingRequest
         {
@@ -118,9 +132,22 @@ public class ConfirmBookingHandlerTests : IDisposable
 
         Mock<IPromotionRedemption> promotionRedemptionMock = new Mock<IPromotionRedemption>();
 
+        Mock<IUnitLookup> unitLookupMock = new Mock<IUnitLookup>();
+        unitLookupMock.Setup(x => x.GetUnitAsync(hold.UnitId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new UnitSummary
+            {
+                Id = hold.UnitId,
+                MaxOccupancy = hold.GuestCount,
+                BasePrice = hold.TotalPrice,
+                Currency = hold.Currency,
+                PropertyId = Guid.NewGuid(),
+                HostId = Guid.NewGuid(),
+                CancellationPolicy = CancellationPolicy.CreateDefault()
+            });
+
         ConfirmBookingHandler handler = new ConfirmBookingHandler(
-            _dbContext, holdConfirmationMock.Object, promotionRedemptionMock.Object, currentUserProviderMock.Object,
-            TimeProvider.System);
+            _dbContext, holdConfirmationMock.Object, promotionRedemptionMock.Object, unitLookupMock.Object,
+            currentUserProviderMock.Object, TimeProvider.System);
 
         ConfirmBookingRequest request = new ConfirmBookingRequest
         {

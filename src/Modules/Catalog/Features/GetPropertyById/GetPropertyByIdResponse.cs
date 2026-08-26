@@ -1,5 +1,6 @@
 using Catalog.Enums;
 using SeedWork.Enums;
+using SeedWork.ValueObjects;
 namespace Catalog.Features.GetPropertyById;
 
 public record GetPropertyByIdResponse
@@ -19,4 +20,9 @@ public record UnitSummary
     public int MaxOccupancy { get; init; }
     public decimal BasePrice { get; init; }
     public Currency Currency { get; init; }
+
+    // The unit's current cancellation terms - shown to a guest on the
+    // property detail page and at the booking-confirm step, before they
+    // ever commit to a stay.
+    public List<CancellationTier> CancellationTiers { get; init; } = [];
 }

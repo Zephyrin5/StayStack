@@ -19,6 +19,7 @@ using Reviews.Features.GetPropertyReviews;
 using Reviews.Features.ListMyReviewableBookings;
 using Reviews.Features.ReplyToStayReview;
 using SeedWork.Enums;
+using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -157,7 +158,8 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
     {
         Booking booking = Booking.Create(
             Guid.CreateVersion7(), unitId, Guid.NewGuid(), customerId,
-            _faker.Name.FullName(), _faker.Internet.Email(), null, checkIn, checkOut, 2, 300m, Currency.KWD);
+            _faker.Name.FullName(), _faker.Internet.Email(), null, checkIn, checkOut, 2, 300m, Currency.KWD,
+            CancellationPolicy.CreateDefault());
         if (confirmed)
         {
             booking.Confirm();

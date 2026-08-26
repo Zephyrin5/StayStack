@@ -41,12 +41,19 @@ public class CreateUnitHandler(
 
         LocalizedText name = LocalizedText.Create(request.Name, localizationSettings.Value.DefaultCulture);
 
+        // null (omitted) means "use Unit.Create's own default" - only build
+        // one from the request when tiers were actually provided.
+        CancellationPolicy? cancellationPolicy = request.CancellationTiers is not null
+            ? CancellationPolicy.Create(request.CancellationTiers)
+            : null;
+
         Unit unit = Unit.Create(
             request.PropertyId,
             name,
             request.MaxOccupancy,
             request.BasePrice,
-            request.Currency);
+            request.Currency,
+            cancellationPolicy);
 
         dbContext.Units.Add(unit);
         await dbContext.SaveChangesAsync(cancellationToken);

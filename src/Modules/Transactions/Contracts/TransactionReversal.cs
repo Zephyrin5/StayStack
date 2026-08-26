@@ -7,7 +7,7 @@ namespace Transactions.Contracts;
 // should only ever reach this through ITransactionReversal, resolved via DI.
 internal class TransactionReversal(AppTransactionsDbContext dbContext) : ITransactionReversal
 {
-    public async Task ReverseTransactionAsync(Guid bookingId, CancellationToken cancellationToken)
+    public async Task<decimal?> ReverseTransactionAsync(Guid bookingId, decimal refundAmount, CancellationToken cancellationToken)
     {
         // Only a Succeeded transaction needs anything done here - money
         // was actually collected, so it needs reversing. A Pending one is
@@ -22,13 +22,14 @@ internal class TransactionReversal(AppTransactionsDbContext dbContext) : ITransa
 
         if (transaction is null)
         {
-            return;
+            return null;
         }
 
         try
         {
-            transaction.MarkRefundPending();
+            transaction.MarkRefundPending(refundAmount);
             await dbContext.SaveChangesAsync(cancellationToken);
+            return refundAmount;
         }
         catch (TransactionAlreadyFinalizedException)
         {
@@ -36,6 +37,7 @@ internal class TransactionReversal(AppTransactionsDbContext dbContext) : ITransa
             // MarkTransactionSucceededHandler reaching the same
             // conclusion from its own side at the same moment) - whichever
             // side won is already correct, nothing left to do here.
+            return null;
         }
     }
 }

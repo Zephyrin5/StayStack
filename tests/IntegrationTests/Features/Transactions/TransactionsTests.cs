@@ -375,7 +375,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         // already covers that path end-to-end.
         AppTransactionsDbContext transactionsDb = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
         Transaction transaction = await transactionsDb.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
-        transaction.MarkRefundPending();
+        transaction.MarkRefundPending(transaction.Amount);
         await transactionsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         return transactionId;

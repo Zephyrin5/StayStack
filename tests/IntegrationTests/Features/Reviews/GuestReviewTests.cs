@@ -15,6 +15,7 @@ using Reviews;
 using Reviews.Entities;
 using Reviews.Features.CreateGuestReview;
 using SeedWork.Enums;
+using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -127,7 +128,8 @@ public class GuestReviewTests(IntegrationTestWebApplicationFactory factory)
     {
         Booking booking = Booking.Create(
             Guid.CreateVersion7(), unitId, Guid.NewGuid(), null,
-            _faker.Name.FullName(), _faker.Internet.Email(), null, checkIn, checkOut, 2, 300m, Currency.KWD);
+            _faker.Name.FullName(), _faker.Internet.Email(), null, checkIn, checkOut, 2, 300m, Currency.KWD,
+            CancellationPolicy.CreateDefault());
         booking.Confirm();
 
         using IServiceScope scope = factory.Services.CreateScope();

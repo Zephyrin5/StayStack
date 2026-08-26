@@ -16,7 +16,8 @@ public sealed class Unit : Entity, IAggregateRoot
         LocalizedText name,
         int maxOccupancy,
         decimal basePrice,
-        Currency currency)
+        Currency currency,
+        CancellationPolicy cancellationPolicy)
     {
         Id = id;
         PropertyId = propertyId;
@@ -24,6 +25,7 @@ public sealed class Unit : Entity, IAggregateRoot
         MaxOccupancy = maxOccupancy;
         BasePrice = basePrice;
         Currency = currency;
+        CancellationPolicy = cancellationPolicy;
     }
     public Guid PropertyId { get; private set; }
     public LocalizedText Name { get; private set; }
@@ -31,19 +33,28 @@ public sealed class Unit : Entity, IAggregateRoot
     public decimal BasePrice { get; private set; }
     public Currency Currency { get; private set; }
 
+    // One current value, like BasePrice/Currency - not a variable set of
+    // co-existing host-authored rows the way PricingRule is, so it's
+    // replaced wholesale via SetCancellationPolicy rather than a separate
+    // create/delete-able sub-resource.
+    public CancellationPolicy CancellationPolicy { get; private set; }
+
     public static Unit Create(
         Guid propertyId,
         LocalizedText name,
         int maxOccupancy,
         decimal basePrice,
-        Currency currency = Currency.KWD)
+        Currency currency = Currency.KWD,
+        CancellationPolicy? cancellationPolicy = null)
     {
         Guard.Against.Default(propertyId);
         Guard.Against.Null(name);
         Guard.Against.NegativeOrZero(maxOccupancy);
         Guard.Against.NegativeOrZero(basePrice);
 
-        return new Unit(Guid.CreateVersion7(), propertyId, name, maxOccupancy, basePrice, currency);
+        return new Unit(
+            Guid.CreateVersion7(), propertyId, name, maxOccupancy, basePrice, currency,
+            cancellationPolicy ?? CancellationPolicy.CreateDefault());
     }
 
     // A real mutation with its own invariant, not just a settable property -
@@ -75,5 +86,15 @@ public sealed class Unit : Entity, IAggregateRoot
     public void SetCurrency(Currency currency)
     {
         Currency = currency;
+    }
+
+    // Only governs bookings confirmed after this call - an existing
+    // Booking already snapshotted its own CancellationPolicy at confirm
+    // time (see ConfirmBookingHandler), same "can't retroactively worsen
+    // terms a guest already agreed to" reasoning as SetCurrency's own note.
+    public void SetCancellationPolicy(CancellationPolicy cancellationPolicy)
+    {
+        Guard.Against.Null(cancellationPolicy);
+        CancellationPolicy = cancellationPolicy;
     }
 }

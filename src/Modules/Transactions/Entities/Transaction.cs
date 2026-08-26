@@ -42,6 +42,14 @@ public sealed class Transaction : Entity, IAggregateRoot
     public TransactionStatus TransactionStatus { get; private set; }
     public string? FailureReason { get; private set; }
 
+    // Set only once MarkRefundPending computes it - a cancellation policy's
+    // tiered percentage, applied against this transaction's own Amount by
+    // the caller (Bookings.Features.CancelBooking, via
+    // Transactions.Contracts.ITransactionReversal), not necessarily equal
+    // to Amount itself. Transactions has no notion of a cancellation
+    // policy - it just records whatever amount it was told to refund.
+    public decimal? RefundAmount { get; private set; }
+
     public static Transaction Create(Guid bookingId, decimal amount, Currency currency)
     {
         Guard.Against.Default(bookingId);
@@ -85,14 +93,17 @@ public sealed class Transaction : Entity, IAggregateRoot
     // cancelled, and resolved by the same kind of admin stand-in endpoint
     // MarkTransactionSucceeded/MarkTransactionFailed already use in place
     // of a real gateway webhook.
-    public void MarkRefundPending()
+    public void MarkRefundPending(decimal refundAmount)
     {
         if (TransactionStatus != TransactionStatus.Succeeded)
         {
             throw new TransactionAlreadyFinalizedException(Id);
         }
 
+        Guard.Against.OutOfRange(refundAmount, nameof(refundAmount), 0m, Amount);
+
         TransactionStatus = TransactionStatus.RefundPending;
+        RefundAmount = refundAmount;
     }
 
     public void MarkRefunded()
