@@ -14,6 +14,7 @@ public class CreatePricingRuleEndpoint(IMediator mediator) : Endpoint<CreatePric
         Post("units/{UnitId}/pricing-rules");
         Policies(AuthorizationPolicies.HostOrAdministrator);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Pricing Rules"));
 
         Summary(s =>
         {

@@ -14,6 +14,7 @@ public class UpdatePromotionEndpoint(IMediator mediator) : Endpoint<UpdatePromot
         Put("promotions/{PromotionId}");
         Policies(AuthorizationPolicies.HostOrAdministrator);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Promotions"));
 
         Summary(s =>
         {

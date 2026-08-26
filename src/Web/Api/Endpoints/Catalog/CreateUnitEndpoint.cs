@@ -14,6 +14,7 @@ public class CreateUnitEndpoint(IMediator mediator) : Endpoint<CreateUnitRequest
         Post("units");
         Policies(AuthorizationPolicies.HostOrAdministrator);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Units"));
 
         Summary(s =>
         {

@@ -14,6 +14,7 @@ public class DeletePricingRuleEndpoint(IMediator mediator) : Endpoint<DeletePric
         Delete("units/{UnitId}/pricing-rules/{PricingRuleId}");
         Policies(AuthorizationPolicies.HostOrAdministrator);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Pricing Rules"));
 
         Summary(s =>
         {

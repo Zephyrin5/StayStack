@@ -14,6 +14,7 @@ public class DeleteUnitEndpoint(IMediator mediator) : Endpoint<DeleteUnitRequest
         Delete("units/{UnitId}");
         Policies(AuthorizationPolicies.HostOrAdministrator);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Units"));
 
         Summary(s =>
         {

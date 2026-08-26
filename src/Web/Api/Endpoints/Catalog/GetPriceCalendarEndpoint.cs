@@ -10,6 +10,7 @@ public class GetPriceCalendarEndpoint(IMediator mediator) : Endpoint<GetPriceCal
         Get("units/{UnitId}/price-calendar");
         AllowAnonymous();
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Availability"));
 
         Summary(s =>
         {

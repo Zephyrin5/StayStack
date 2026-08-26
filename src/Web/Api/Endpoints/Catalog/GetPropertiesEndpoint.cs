@@ -11,6 +11,7 @@ public class GetPropertiesEndpoint(IMediator mediator) : Endpoint<GetPropertiesR
         Get("properties");
         AllowAnonymous();
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Properties"));
 
         Summary(s =>
         {

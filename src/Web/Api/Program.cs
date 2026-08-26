@@ -12,8 +12,10 @@ using TickerQ.DependencyInjection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
+using Microsoft.OpenApi;
 using Persistence;
 using Scalar.AspNetCore;
+using System.Text.Json.Nodes;
 using System.Threading.RateLimiting;
 using Transactions;
 WebApplicationBuilder builder = WebApplication.CreateSlimBuilder(args);
@@ -86,6 +88,43 @@ builder.Services.OpenApiDocument(o =>
     o.Title = "StayStack API";
     o.Version = "v1";
     o.AutoTagPathSegmentIndex = 0;
+
+    // x-tagGroups is a Scalar/ReDoc vendor extension, not a FastEndpoints
+    // concept - there's no first-class option for it here, so it's added
+    // via the underlying OpenApiOptions' document-transformer hook instead.
+    // Nests Catalog's now-split-out per-family tags (see CatalogGroup.cs
+    // and each endpoint's own Description(b => b.WithTags(...)) call)
+    // under one collapsible "Catalog" heading in Scalar's sidebar, rather
+    // than a flat list of a dozen-plus individually-tagged operations.
+    //
+    // IMPORTANT: once x-tagGroups is present at all, Scalar stops showing
+    // any tag that isn't listed inside SOME group - an ungrouped tag
+    // doesn't fall back to its own flat top-level section, it just
+    // silently disappears from the sidebar entirely (confirmed by
+    // rendering this and diffing against the tag list in the raw document).
+    // So every module's tag needs an entry here, even the ones that get no
+    // real nesting - a new module/tag added later needs a line added here
+    // too, or its docs go dark without any other symptom.
+    o.ConfigureOpenApi = openApiOptions =>
+    {
+        openApiOptions.AddDocumentTransformer((document, _, _) =>
+        {
+            document.Extensions ??= new Dictionary<string, IOpenApiExtension>();
+            document.Extensions["x-tagGroups"] = new JsonNodeExtension(JsonNode.Parse(
+                """
+                [
+                    { "name": "Catalog", "tags": ["Properties", "Units", "Pricing Rules", "Promotions", "Availability"] },
+                    { "name": "Hosts", "tags": ["Hosts"] },
+                    { "name": "Bookings", "tags": ["Bookings"] },
+                    { "name": "Transactions", "tags": ["Transactions"] },
+                    { "name": "Auth", "tags": ["Auth"] },
+                    { "name": "Users", "tags": ["Users"] },
+                    { "name": "Localization", "tags": ["Localization"] }
+                ]
+                """)!);
+            return Task.CompletedTask;
+        });
+    };
 });
 
 WebApplication app = builder.Build();

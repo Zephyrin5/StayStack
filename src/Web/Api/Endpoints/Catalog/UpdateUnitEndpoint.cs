@@ -14,6 +14,7 @@ public class UpdateUnitEndpoint(IMediator mediator) : Endpoint<UpdateUnitRequest
         Put("units/{UnitId}");
         Policies(AuthorizationPolicies.HostOrAdministrator);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Units"));
 
         Summary(s =>
         {

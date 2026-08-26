@@ -14,6 +14,7 @@ public class ListPricingRulesEndpoint(IMediator mediator) : Endpoint<ListPricing
         Get("units/{UnitId}/pricing-rules");
         Policies(AuthorizationPolicies.HostOrAdministrator);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Pricing Rules"));
 
         Summary(s =>
         {

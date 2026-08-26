@@ -14,6 +14,7 @@ public class CreatePropertyEndpoint(IMediator mediator) : Endpoint<CreatePropert
         Post("properties");
         Policies(AuthorizationPolicies.Host);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Properties"));
 
         Summary(s =>
         {

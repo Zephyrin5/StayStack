@@ -12,6 +12,7 @@ public class GetPropertyByIdEndpoint(IMediator mediator) : Endpoint<GetPropertyB
         Get("properties/{PropertyId}");
         AllowAnonymous();
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Properties"));
 
         Summary(s =>
         {

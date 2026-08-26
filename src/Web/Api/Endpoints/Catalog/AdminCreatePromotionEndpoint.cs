@@ -21,6 +21,7 @@ public class AdminCreatePromotionEndpoint(IMediator mediator)
         Post("promotions/admin");
         Policies(AuthorizationPolicies.Administrator);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Promotions"));
 
         Summary(s =>
         {

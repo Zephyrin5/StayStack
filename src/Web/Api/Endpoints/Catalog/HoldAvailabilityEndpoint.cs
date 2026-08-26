@@ -11,6 +11,7 @@ public class HoldAvailabilityEndpoint(IMediator mediator) : Endpoint<HoldAvailab
         Post("holds");
         AllowAnonymous();
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Availability"));
 
         Summary(s =>
         {

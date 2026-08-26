@@ -14,6 +14,7 @@ public class DeletePropertyEndpoint(IMediator mediator) : Endpoint<DeletePropert
         Delete("properties/{PropertyId}");
         Policies(AuthorizationPolicies.HostOrAdministrator);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Properties"));
 
         Summary(s =>
         {

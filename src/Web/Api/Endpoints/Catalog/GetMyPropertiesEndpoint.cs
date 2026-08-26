@@ -17,6 +17,7 @@ public class GetMyPropertiesEndpoint(IMediator mediator)
         Get("properties/mine");
         Policies(AuthorizationPolicies.Host);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Properties"));
 
         Summary(s =>
         {

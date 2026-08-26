@@ -14,6 +14,7 @@ public class UpdatePropertyEndpoint(IMediator mediator) : Endpoint<UpdatePropert
         Put("properties/{PropertyId}");
         Policies(AuthorizationPolicies.HostOrAdministrator);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Properties"));
 
         Summary(s =>
         {

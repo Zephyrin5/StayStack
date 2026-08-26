@@ -14,6 +14,7 @@ public class DeletePromotionEndpoint(IMediator mediator) : Endpoint<DeletePromot
         Delete("promotions/{PromotionId}");
         Policies(AuthorizationPolicies.HostOrAdministrator);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Promotions"));
 
         Summary(s =>
         {

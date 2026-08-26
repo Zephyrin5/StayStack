@@ -14,6 +14,7 @@ public class ListMyPromotionsEndpoint(IMediator mediator) : Endpoint<ListMyPromo
         Get("promotions/mine");
         Policies(AuthorizationPolicies.Host);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Promotions"));
 
         Summary(s =>
         {

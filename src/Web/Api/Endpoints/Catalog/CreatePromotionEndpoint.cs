@@ -14,6 +14,7 @@ public class CreatePromotionEndpoint(IMediator mediator) : Endpoint<CreatePromot
         Post("promotions");
         Policies(AuthorizationPolicies.Host);
         Group<CatalogGroup>();
+        Description(b => b.WithTags("Promotions"));
 
         Summary(s =>
         {
