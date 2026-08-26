@@ -147,12 +147,20 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task GetProperties_ShouldReturnCreatedProperty_WithoutAuthentication()
     {
-        // Arrange
+        // Arrange - a unique city, not the "Kuwait City" literal every other
+        // test in this suite reuses. Page 1 of the unfiltered, unbounded
+        // list isn't guaranteed to contain this specific property once
+        // enough other tests (this file and others) have piled up
+        // properties in the same shared collection database - filtering by
+        // a city nothing else uses keeps this assertion independent of how
+        // much other state already exists.
+        string uniqueCity = $"Test City {Guid.NewGuid()}";
         (string hostAccessToken, Guid hostId) = await SeedHostUserAsync();
-        Guid propertyId = await CreatePropertyAsync(hostAccessToken, "Kuwait City");
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken, uniqueCity);
 
         // Act
-        HttpResponseMessage response = await _client.GetAsync("/api/catalog/properties", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/catalog/properties?city={Uri.EscapeDataString(uniqueCity)}", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

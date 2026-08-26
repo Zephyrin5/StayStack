@@ -6,6 +6,7 @@ using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Reviews.Entities;
+using Reviews.Exceptions;
 namespace Reviews.Features.CreateStayReview;
 
 public class CreateStayReviewHandler(
@@ -44,7 +45,7 @@ public class CreateStayReviewHandler(
             .AnyAsync(r => r.BookingId == request.BookingId, cancellationToken);
         if (alreadyReviewed)
         {
-            throw new ValidationException(nameof(request.BookingId), "This stay has already been reviewed.");
+            throw new StayAlreadyReviewedException(request.BookingId);
         }
 
         UnitSummary unit = await unitLookup.GetUnitAsync(access.UnitId, cancellationToken)
@@ -71,7 +72,7 @@ public class CreateStayReviewHandler(
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
-            throw new ValidationException(nameof(request.BookingId), "This stay has already been reviewed.");
+            throw new StayAlreadyReviewedException(request.BookingId);
         }
 
         return new CreateStayReviewResponse { StayReviewId = review.Id };

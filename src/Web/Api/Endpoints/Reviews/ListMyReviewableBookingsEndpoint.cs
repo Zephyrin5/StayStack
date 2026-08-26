@@ -6,8 +6,15 @@ using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
 namespace Api.Endpoints.Reviews;
 
-public class ListMyReviewableBookingsEndpoint(IMediator mediator)
-    : Endpoint<ListMyReviewableBookingsRequest, ListMyReviewableBookingsResponse>
+// EndpointWithoutRequest, not Endpoint<TRequest,TResponse> - the Mediator
+// request behind this has no fields at all (see ListMyReviewableBookingsRequest's
+// own doc comment), and FastEndpoints' generated RequestBinder throws at
+// startup for a request DTO with zero publicly-bindable properties ("Only
+// request DTOs with publicly accessible properties are supported for
+// request binding"). Skipping FastEndpoints' own binding for this request
+// entirely sidesteps that, since there's nothing to bind from the HTTP
+// request in the first place.
+public class ListMyReviewableBookingsEndpoint(IMediator mediator) : EndpointWithoutRequest<ListMyReviewableBookingsResponse>
 {
     public override void Configure()
     {
@@ -25,9 +32,9 @@ public class ListMyReviewableBookingsEndpoint(IMediator mediator)
         });
     }
 
-    public override async Task HandleAsync(ListMyReviewableBookingsRequest req, CancellationToken ct)
+    public override async Task HandleAsync(CancellationToken ct)
     {
-        ListMyReviewableBookingsResponse result = await mediator.Send(req, ct);
+        ListMyReviewableBookingsResponse result = await mediator.Send(new ListMyReviewableBookingsRequest(), ct);
         await Send.OkAsync(result, ct);
     }
 }

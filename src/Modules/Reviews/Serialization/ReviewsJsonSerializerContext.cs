@@ -15,7 +15,6 @@ namespace Reviews.Serialization;
 [JsonSerializable(typeof(CreateStayReviewResponse))]
 [JsonSerializable(typeof(GetPropertyReviewsRequest))]
 [JsonSerializable(typeof(GetPropertyReviewsResponse))]
-[JsonSerializable(typeof(ListMyReviewableBookingsRequest))]
 [JsonSerializable(typeof(ListMyReviewableBookingsResponse))]
 [JsonSerializable(typeof(ReplyToStayReviewRequest))]
 [JsonSerializable(typeof(ReplyToStayReviewResponse))]
