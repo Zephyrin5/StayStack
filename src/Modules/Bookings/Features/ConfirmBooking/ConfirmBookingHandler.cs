@@ -3,6 +3,7 @@ using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using Catalog.Contracts;
 using Mediator;
+using System.Text.Json;
 namespace Bookings.Features.ConfirmBooking;
 
 public class ConfirmBookingHandler(
@@ -76,7 +77,18 @@ public class ConfirmBookingHandler(
 
                 if (redemptionException is PromotionInvalidException promotionInvalidException)
                 {
-                    throw new ValidationException(nameof(request.PromoCode), promotionInvalidException.Message);
+                    // camelCased explicitly, not the bare nameof() PascalCase -
+                    // ValidationProblemDetails.Errors is a Dictionary<string,
+                    // string[]>, and System.Text.Json's PropertyNamingPolicy
+                    // (camelCase, see AppJsonSerializerContext) only governs
+                    // declared property names, never dictionary keys. Without
+                    // this, the wire key would be "PromoCode", not "promoCode" -
+                    // silently breaking the client's error.errors?.promoCode
+                    // lookup while every other property on the response stays
+                    // correctly camelCased.
+                    throw new ValidationException(
+                        JsonNamingPolicy.CamelCase.ConvertName(nameof(request.PromoCode)),
+                        promotionInvalidException.Message);
                 }
 
                 throw;
