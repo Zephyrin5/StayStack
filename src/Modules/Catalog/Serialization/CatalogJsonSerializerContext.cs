@@ -6,6 +6,7 @@ using Catalog.Features.CreateUnit;
 using Catalog.Features.DeletePricingRule;
 using Catalog.Features.DeleteProperty;
 using Catalog.Features.DeleteUnit;
+using Catalog.Features.GetHostProperties;
 using Catalog.Features.GetMyProperties;
 using Catalog.Features.GetPriceCalendar;
 using Catalog.Features.GetProperties;
@@ -31,6 +32,7 @@ namespace Catalog.Serialization;
 [JsonSerializable(typeof(GetPropertiesRequest))]
 [JsonSerializable(typeof(PagedResponse<PropertySummary>))]
 [JsonSerializable(typeof(GetMyPropertiesRequest))]
+[JsonSerializable(typeof(GetHostPropertiesRequest))]
 [JsonSerializable(typeof(GetPropertyByIdRequest))]
 [JsonSerializable(typeof(GetPropertyByIdResponse))]
 [JsonSerializable(typeof(UpdatePropertyRequest))]

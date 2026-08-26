@@ -38,3 +38,4 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 | [0010](0010-postgres-exclusion-constraint-for-double-booking.md) | Postgres exclusion constraint for double-booking prevention | Accepted |
 | [0011](0011-prefer-model-config-over-migration-sql.md) | Prefer EF model configuration over hand-written migration SQL | Accepted |
 | [0012](0012-single-pricing-rule-entity-with-write-time-overlap-rejection.md) | Single PricingRule entity with write-time overlap rejection | Accepted |
+| [0013](0013-admin-targeted-host-queries-as-a-third-request-variant.md) | Admin-targeted host queries as a third request variant | Accepted |

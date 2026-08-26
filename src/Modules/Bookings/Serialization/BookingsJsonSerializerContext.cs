@@ -1,5 +1,6 @@
 using Bookings.Features.CancelBooking;
 using Bookings.Features.ConfirmBooking;
+using Bookings.Features.GetBookingsForHost;
 using Bookings.Features.GetHostBookings;
 using Bookings.Features.GetMyBookings;
 using BuildingBlocks.Pagination;
@@ -13,6 +14,7 @@ namespace Bookings.Serialization;
 [JsonSerializable(typeof(PagedResponse<BookingSummary>))]
 [JsonSerializable(typeof(GetHostBookingsRequest))]
 [JsonSerializable(typeof(PagedResponse<HostBookingSummary>))]
+[JsonSerializable(typeof(GetBookingsForHostRequest))]
 [JsonSerializable(typeof(CancelBookingRequest))]
 [JsonSerializable(typeof(CancelBookingResponse))]
 public partial class BookingsJsonSerializerContext : JsonSerializerContext;
