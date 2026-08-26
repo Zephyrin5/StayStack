@@ -275,9 +275,15 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         Guid firstHostPropertyId = await CreatePropertyAsync(firstHostToken, "Kuwait City");
         Guid secondHostPropertyId = await CreatePropertyAsync(secondHostToken, "Kuwait City");
 
-        // Act
+        // Act - PageSize maxed out, not left at the default 20: property
+        // ids are Guid.CreateVersion7() (time-ordered), and the shared
+        // Testcontainers DB accumulates properties from every other test in
+        // this collection over the run, so relying on the default page size
+        // to still include these two freshly-created ones grows more
+        // fragile the more the suite creates elsewhere - see docs/adr/0008
+        // for why id is the sort tiebreaker to begin with.
         HttpResponseMessage response = await _client.GetAsync(
-            $"/api/catalog/properties?HostId={firstHostId}", TestContext.Current.CancellationToken);
+            $"/api/catalog/properties?HostId={firstHostId}&PageSize={PaginationExtensions.MaxPageSize}", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

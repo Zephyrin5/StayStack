@@ -171,7 +171,10 @@ internal class PromotionRedemption(AppCatalogDbContext dbContext, TimeProvider t
         });
     }
 
-    private static decimal ComputeDiscountAmount(Promotion promotion, decimal subtotal)
+    // internal, not private - exercised directly by PromotionRedemptionTests
+    // (UnitTests) via InternalsVisibleTo, rather than only indirectly
+    // through a full RedeemAsync call.
+    internal static decimal ComputeDiscountAmount(Promotion promotion, decimal subtotal)
     {
         decimal discount = promotion.DiscountType == PromotionDiscountType.Percentage
             ? subtotal * promotion.DiscountValue / 100m

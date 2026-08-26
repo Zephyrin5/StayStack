@@ -32,4 +32,11 @@
         <ProjectReference Include="Catalog.Contracts\Catalog.Contracts.csproj"/>
     </ItemGroup>
 
+    <!-- Same reasoning as BuildingBlocks' own InternalsVisibleTo - lets
+         PromotionRedemptionTests exercise ComputeDiscountAmount directly
+         rather than only indirectly through a full RedeemAsync call. -->
+    <ItemGroup>
+        <InternalsVisibleTo Include="UnitTests"/>
+    </ItemGroup>
+
 </Project>
