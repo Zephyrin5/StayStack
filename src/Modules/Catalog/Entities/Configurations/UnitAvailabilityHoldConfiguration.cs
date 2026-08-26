@@ -12,6 +12,7 @@ public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAv
         builder.Property(h => h.Status).HasMaxLength(20).IsRequired();
         builder.Property(h => h.TotalPrice).HasColumnType("numeric(10,2)").IsRequired();
         builder.Property(h => h.Currency).HasConversion<string>().HasMaxLength(3).IsFixedLength().IsRequired();
+        builder.Property(h => h.LengthOfStayDiscountAmount).HasColumnType("numeric(10,2)");
 
         builder.HasIndex(h => h.UnitId);
 

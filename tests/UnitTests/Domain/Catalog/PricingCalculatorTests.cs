@@ -70,9 +70,11 @@ public class PricingCalculatorTests
         PricingRule overrideRule = PricingRule.CreateDateRangeOverride(
             UnitId, new DateOnly(2026, 8, 29), new DateOnly(2026, 8, 30), 200m);
 
-        decimal total = PricingCalculator.ResolveStayTotal(100m, checkIn, checkOut, [overrideRule]);
+        StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(100m, checkIn, checkOut, [overrideRule]);
 
-        Assert.Equal(400m, total);
+        Assert.Equal(400m, breakdown.Total);
+        Assert.Equal(400m, breakdown.Subtotal);
+        Assert.Null(breakdown.LengthOfStayDiscountAmount);
     }
 
     [Fact]
@@ -84,10 +86,10 @@ public class PricingCalculatorTests
         PricingRule weekendRule = PricingRule.CreateDayOfWeekMultiplier(
             UnitId, [(int)DayOfWeek.Friday, (int)DayOfWeek.Saturday], 2m);
 
-        decimal total = PricingCalculator.ResolveStayTotal(100m, checkIn, checkOut, [weekendRule]);
+        StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(100m, checkIn, checkOut, [weekendRule]);
 
         // 5 base nights @ 100 + 2 weekend nights @ 200
-        Assert.Equal(900m, total);
+        Assert.Equal(900m, breakdown.Total);
     }
 
     [Fact]
@@ -97,9 +99,10 @@ public class PricingCalculatorTests
         DateOnly checkOut = new DateOnly(2026, 1, 7); // 6 nights
         PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(UnitId, 7, 10m);
 
-        decimal total = PricingCalculator.ResolveStayTotal(100m, checkIn, checkOut, [discountRule]);
+        StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(100m, checkIn, checkOut, [discountRule]);
 
-        Assert.Equal(600m, total);
+        Assert.Equal(600m, breakdown.Total);
+        Assert.Null(breakdown.LengthOfStayDiscountAmount);
     }
 
     [Fact]
@@ -109,9 +112,11 @@ public class PricingCalculatorTests
         DateOnly checkOut = new DateOnly(2026, 1, 8); // 7 nights
         PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(UnitId, 7, 10m);
 
-        decimal total = PricingCalculator.ResolveStayTotal(100m, checkIn, checkOut, [discountRule]);
+        StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(100m, checkIn, checkOut, [discountRule]);
 
-        Assert.Equal(630m, total); // 700 * 0.9
+        Assert.Equal(700m, breakdown.Subtotal);
+        Assert.Equal(70m, breakdown.LengthOfStayDiscountAmount);
+        Assert.Equal(630m, breakdown.Total); // 700 * 0.9
     }
 
     [Fact]
@@ -121,9 +126,9 @@ public class PricingCalculatorTests
         DateOnly checkOut = new DateOnly(2026, 1, 15); // 14 nights
         PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(UnitId, 7, 10m);
 
-        decimal total = PricingCalculator.ResolveStayTotal(100m, checkIn, checkOut, [discountRule]);
+        StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(100m, checkIn, checkOut, [discountRule]);
 
-        Assert.Equal(1260m, total); // 1400 * 0.9
+        Assert.Equal(1260m, breakdown.Total); // 1400 * 0.9
     }
 
     [Fact]
@@ -141,10 +146,12 @@ public class PricingCalculatorTests
             UnitId, [(int)DayOfWeek.Friday, (int)DayOfWeek.Saturday], 2m);
         PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(UnitId, 7, 10m);
 
-        decimal total = PricingCalculator.ResolveStayTotal(
+        StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(
             100m, checkIn, checkOut, [overrideRule, weekendRule, discountRule]);
 
         // Nights: Mon100 Tue100 Wed100 Thu100 Fri200 Sat(override)500 Sun100 = 1200 subtotal
-        Assert.Equal(1080m, total); // 1200 * 0.9
+        Assert.Equal(1200m, breakdown.Subtotal);
+        Assert.Equal(120m, breakdown.LengthOfStayDiscountAmount);
+        Assert.Equal(1080m, breakdown.Total); // 1200 * 0.9
     }
 }

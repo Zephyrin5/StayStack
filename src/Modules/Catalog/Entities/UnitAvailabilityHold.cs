@@ -43,4 +43,12 @@ public sealed class UnitAvailabilityHold
     // they held it is the price they get.
     public decimal TotalPrice { get; set; }
     public Currency Currency { get; set; }
+
+    // Part of the same snapshot as TotalPrice/Currency, for the same
+    // reason - a redeemed promo code is exclusive of the length-of-stay
+    // discount rather than stacking with it (see ConfirmBookingHandler),
+    // so confirming a hold needs to be able to undo just this portion of
+    // TotalPrice, not only read the final number. Null when no LOS
+    // discount applied to this stay.
+    public decimal? LengthOfStayDiscountAmount { get; set; }
 }

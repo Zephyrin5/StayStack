@@ -22,6 +22,7 @@ internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmati
         public int GuestCount { get; init; }
         public decimal TotalPrice { get; init; }
         public string Currency { get; init; } = string.Empty;
+        public decimal? LengthOfStayDiscountAmount { get; init; }
     }
 
     public async Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken)
@@ -43,7 +44,7 @@ internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmati
                            UPDATE unit_availability_holds
                            SET status = 'booked'
                            WHERE id = @HoldId AND status = 'held' AND hold_expires_at > now()
-                           RETURNING unit_id AS "UnitId", lower(stay_range) AS "CheckIn", upper(stay_range) AS "CheckOut", guest_count AS "GuestCount", total_price AS "TotalPrice", currency AS "Currency";
+                           RETURNING unit_id AS "UnitId", lower(stay_range) AS "CheckIn", upper(stay_range) AS "CheckOut", guest_count AS "GuestCount", total_price AS "TotalPrice", currency AS "Currency", length_of_stay_discount_amount AS "LengthOfStayDiscountAmount";
                            """;
 
         ConfirmedHoldRow? row = await connection.QuerySingleOrDefaultAsync<ConfirmedHoldRow>(
@@ -61,7 +62,8 @@ internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmati
             CheckOut = row.CheckOut,
             GuestCount = row.GuestCount,
             TotalPrice = row.TotalPrice,
-            Currency = Enum.Parse<Currency>(row.Currency.Trim())
+            Currency = Enum.Parse<Currency>(row.Currency.Trim()),
+            LengthOfStayDiscountAmount = row.LengthOfStayDiscountAmount
         };
     }
 

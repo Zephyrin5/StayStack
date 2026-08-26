@@ -45,9 +45,9 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
             d => d >= today,
             "Check-in date cannot be in the past.");
 
-        int nights = request.CheckOut.DayNumber - request.CheckIn.DayNumber;
-        decimal totalPrice = PricingCalculator.ResolveStayTotal(
+        StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(
             unit.BasePrice, request.CheckIn, request.CheckOut, rules);
+        decimal totalPrice = breakdown.Total;
 
         // Wrapped in the execution strategy, not called bare - a manually
         // started transaction bypasses EF's own per-operation retry
@@ -87,8 +87,8 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
             DateTimeOffset holdExpiresAt = now.Add(HoldDuration);
 
             const string sql = """
-                               INSERT INTO unit_availability_holds (id, unit_id, stay_range, status, hold_expires_at, created_at, guest_count, total_price, currency)
-                               VALUES (@Id, @UnitId, @StayRange, 'held', @HoldExpiresAt, @CreatedAt, @GuestCount, @TotalPrice, @Currency);
+                               INSERT INTO unit_availability_holds (id, unit_id, stay_range, status, hold_expires_at, created_at, guest_count, total_price, currency, length_of_stay_discount_amount)
+                               VALUES (@Id, @UnitId, @StayRange, 'held', @HoldExpiresAt, @CreatedAt, @GuestCount, @TotalPrice, @Currency, @LengthOfStayDiscountAmount);
                                """;
 
             try
@@ -107,7 +107,8 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
                         CreatedAt = now,
                         request.GuestCount,
                         TotalPrice = totalPrice,
-                        Currency = unit.Currency.ToString()
+                        Currency = unit.Currency.ToString(),
+                        breakdown.LengthOfStayDiscountAmount
                     },
                     transaction.GetDbTransaction(),
                     cancellationToken: cancellationToken));

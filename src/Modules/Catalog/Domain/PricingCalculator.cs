@@ -38,8 +38,12 @@ public static class PricingCalculator
 
     // Total for the half-open stay [checkIn, checkOut): sums the nightly
     // price for every night, then applies a length-of-stay discount (if an
-    // active rule's MinNights is met) to that subtotal.
-    public static decimal ResolveStayTotal(
+    // active rule's MinNights is met) to that subtotal. Returns the
+    // breakdown, not just the final total - a redeemed promo code is
+    // exclusive of the LOS discount rather than stacking with it (see
+    // ConfirmBookingHandler), which means callers on that path need to be
+    // able to undo just the LOS portion, not only read the final number.
+    public static StayPriceBreakdown ResolveStayTotal(
         decimal basePrice, DateOnly checkIn, DateOnly checkOut, IReadOnlyList<PricingRule> rules)
     {
         decimal subtotal = 0m;
@@ -52,8 +56,24 @@ public static class PricingCalculator
         PricingRule? lengthOfStayRule = rules.FirstOrDefault(r =>
             r.RuleType == PricingRuleType.LengthOfStayDiscount && r.MinNights!.Value <= nights);
 
-        return lengthOfStayRule is not null
-            ? subtotal * (1 - lengthOfStayRule.DiscountPercent!.Value / 100m)
-            : subtotal;
+        if (lengthOfStayRule is null)
+        {
+            return new StayPriceBreakdown { Subtotal = subtotal, LengthOfStayDiscountAmount = null, Total = subtotal };
+        }
+
+        decimal discountAmount = subtotal * (lengthOfStayRule.DiscountPercent!.Value / 100m);
+        return new StayPriceBreakdown
+        {
+            Subtotal = subtotal,
+            LengthOfStayDiscountAmount = discountAmount,
+            Total = subtotal - discountAmount
+        };
     }
+}
+
+public sealed record StayPriceBreakdown
+{
+    public required decimal Subtotal { get; init; }
+    public decimal? LengthOfStayDiscountAmount { get; init; }
+    public required decimal Total { get; init; }
 }

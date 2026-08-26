@@ -37,4 +37,11 @@ public record ConfirmedHold
     public int GuestCount { get; init; }
     public decimal TotalPrice { get; init; }
     public Currency Currency { get; init; }
+
+    // Same snapshot as TotalPrice, carried through so ConfirmBookingHandler
+    // can undo just the length-of-stay portion when a redeemed promo code
+    // is exclusive of it rather than stacking - see PricingCalculator's
+    // own StayPriceBreakdown for why this needs to travel separately from
+    // the final total.
+    public decimal? LengthOfStayDiscountAmount { get; init; }
 }
