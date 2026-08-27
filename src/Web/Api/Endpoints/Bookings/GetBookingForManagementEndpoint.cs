@@ -1,6 +1,7 @@
 using Bookings.Features.GetBookingForManagement;
 using FastEndpoints;
 using Mediator;
+using Microsoft.AspNetCore.RateLimiting;
 using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
 namespace Api.Endpoints.Bookings;
@@ -13,6 +14,14 @@ public class GetBookingForManagementEndpoint(IMediator mediator)
         Get("{BookingId}/manage");
         AllowAnonymous();
         Group<BookingsGroup>();
+
+        // A ManagementToken is a bearer credential (see BookingManagementToken's
+        // own doc comment) exposed on an anonymous endpoint - unlike account
+        // auth there's no lockout to fall back on, so this reuses the same
+        // per-IP limiter SignIn/Refresh/InitiateTransaction already apply,
+        // rather than leaving it as the one guest-facing credential check
+        // with no throttling at all.
+        Options(x => x.RequireRateLimiting(ApiServicesRegistration.AuthRateLimitPolicy));
 
         Summary(s =>
         {

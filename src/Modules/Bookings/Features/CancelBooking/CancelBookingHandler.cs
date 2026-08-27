@@ -55,9 +55,48 @@ public class CancelBookingHandler(
         // forward path: there's no second write whose failure could leave
         // the booking itself in a bad state. ReverseRedemptionAsync is a
         // no-op if this booking never redeemed a code.
-        await holdConfirmation.ReleaseHoldAsync(booking.HoldId, cancellationToken);
-        decimal? actualRefundAmount = await transactionReversal.ReverseTransactionAsync(booking.Id, refundAmount, cancellationToken);
-        await promotionRedemption.ReverseRedemptionAsync(booking.Id, cancellationToken);
+        //
+        // Each of the three runs independently of the others' outcome - a
+        // failed refund reversal must not prevent the hold release or
+        // promotion reversal from even being attempted, and vice versa.
+        // Same failure-isolation idiom ConfirmBookingHandler's own
+        // compensation block uses (see its doc comment there).
+        List<Exception> compensationFailures = [];
+        decimal? actualRefundAmount = null;
+
+        try
+        {
+            await holdConfirmation.ReleaseHoldAsync(booking.HoldId, cancellationToken);
+        }
+        catch (Exception releaseException)
+        {
+            compensationFailures.Add(releaseException);
+        }
+
+        try
+        {
+            actualRefundAmount = await transactionReversal.ReverseTransactionAsync(booking.Id, refundAmount, cancellationToken);
+        }
+        catch (Exception reverseTransactionException)
+        {
+            compensationFailures.Add(reverseTransactionException);
+        }
+
+        try
+        {
+            await promotionRedemption.ReverseRedemptionAsync(booking.Id, cancellationToken);
+        }
+        catch (Exception reverseRedemptionException)
+        {
+            compensationFailures.Add(reverseRedemptionException);
+        }
+
+        if (compensationFailures.Count > 0)
+        {
+            throw new AggregateException(
+                "Booking was cancelled, but one or more post-cancellation cleanup actions failed.",
+                compensationFailures);
+        }
 
         return new CancelBookingResponse
         {

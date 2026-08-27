@@ -2,6 +2,7 @@ using Bookings.Features.CancelBooking;
 using FastEndpoints;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
 namespace Api.Endpoints.Bookings;
@@ -13,6 +14,12 @@ public class CancelBookingEndpoint(IMediator mediator) : Endpoint<CancelBookingR
         Post("{BookingId}/cancel");
         AllowAnonymous();
         Group<BookingsGroup>();
+
+        // Same ManagementToken-is-a-bearer-credential reasoning as
+        // GetBookingForManagementEndpoint - this one also mutates state
+        // (cancels the booking), making it the more attractive of the two
+        // to throttle.
+        Options(x => x.RequireRateLimiting(ApiServicesRegistration.AuthRateLimitPolicy));
 
         Summary(s =>
         {

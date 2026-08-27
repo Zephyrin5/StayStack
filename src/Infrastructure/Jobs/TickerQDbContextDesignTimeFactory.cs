@@ -36,7 +36,8 @@ public sealed class TickerQDbContextDesignTimeFactory : IDesignTimeDbContextFact
             .Build();
 
         string connectionString = configuration.GetConnectionString("AppConnection")
-                                  ?? "Host=localhost;Database=staystack;Username=postgres;Password=postgres";
+                                  ?? throw new InvalidOperationException(
+                                      $"Connection string 'AppConnection' not found in user secrets ({ApiUserSecretsId}).");
 
         DbContextOptionsBuilder<TickerQDbContext> optionsBuilder = new DbContextOptionsBuilder<TickerQDbContext>();
         optionsBuilder.ConfigureStayStackDefaults(
