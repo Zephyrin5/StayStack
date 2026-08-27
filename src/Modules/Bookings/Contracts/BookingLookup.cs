@@ -5,7 +5,7 @@ namespace Bookings.Contracts;
 
 // internal, same reasoning as Catalog.Contracts.UnitLookup - Transactions/
 // Reviews should only ever reach this through IBookingLookup, resolved via DI.
-internal class BookingLookup(AppBookingsDbContext dbContext) : IBookingLookup
+internal class BookingLookup(AppBookingsDbContext dbContext, TimeProvider timeProvider) : IBookingLookup
 {
     public Task<BookingSummary?> GetBookingAsync(Guid bookingId, CancellationToken cancellationToken)
     {
@@ -24,8 +24,10 @@ internal class BookingLookup(AppBookingsDbContext dbContext) : IBookingLookup
     public async Task<BookingAccessResult?> VerifyBookingAccessAsync(
         Guid bookingId, Guid? customerId, string? managementToken, CancellationToken cancellationToken)
     {
+        DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+
         Booking? booking = await BookingAccessChecker.ResolveAsync(
-            dbContext, bookingId, customerId, managementToken, cancellationToken);
+            dbContext, bookingId, customerId, managementToken, today, cancellationToken);
 
         return booking is null
             ? null

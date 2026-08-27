@@ -12,7 +12,11 @@ namespace Bookings.Entities;
 ///     booking" link over days or weeks, the opposite of a refresh token's
 ///     single-use-then-rotate semantics (see BuildingBlocks.Security.SecureToken's
 ///     own doc comment for why this and refresh tokens share only the
-///     generate-and-hash primitive, not a full "token service").
+///     generate-and-hash primitive, not a full "token service"). Not
+///     unbounded, though: BookingAccessChecker.ResolveAsync rejects it once
+///     the booking's CheckOut is far enough in the past - no ExpiresAt
+///     column here, since that boundary is a property of the booking (its
+///     CheckOut date), not of the token itself.
 /// </summary>
 public sealed class BookingManagementToken
 {

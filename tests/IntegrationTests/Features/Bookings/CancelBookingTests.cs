@@ -3,6 +3,7 @@ using Bookings;
 using Bookings.Entities;
 using Bookings.Features.CancelBooking;
 using Bookings.Features.ConfirmBooking;
+using BuildingBlocks.Security;
 using Catalog;
 using Catalog.Entities;
 using Catalog.Features.HoldAvailability;
@@ -11,6 +12,7 @@ using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
@@ -44,6 +46,44 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         context.AddRange(entities);
         await context.SaveChangesAsync();
+    }
+
+    // Direct-seed shortcut for scenarios HoldAvailabilityHandler's real
+    // flow can't reach at all (CheckOut far in the past - HoldAvailability
+    // requires CheckIn >= today) - same technique StayReviewTests already
+    // established for the same reason.
+    private async Task<Guid> SeedBookingAsync(Guid unitId, DateOnly checkIn, DateOnly checkOut)
+    {
+        Booking booking = Booking.Create(
+            Guid.CreateVersion7(), unitId, Guid.NewGuid(), null,
+            _faker.Name.FullName(), _faker.Internet.Email(), null, checkIn, checkOut, 2, 300m, Currency.KWD,
+            CancellationPolicy.CreateDefault());
+        booking.Confirm();
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        context.Bookings.Add(booking);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        return booking.Id;
+    }
+
+    private async Task<string> SeedManagementTokenAsync(Guid bookingId)
+    {
+        string rawToken = SecureToken.Generate();
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        context.BookingManagementTokens.Add(new BookingManagementToken
+        {
+            Id = Guid.NewGuid(),
+            BookingId = bookingId,
+            TokenHash = SecureToken.Hash(rawToken),
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        return rawToken;
     }
 
     private async Task<string> SeedSignedInCustomerAsync()
@@ -469,6 +509,42 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CancelBooking_ShouldReturn404_ForGuestCheckoutWithExpiredManagementToken()
+    {
+        // Arrange - checked out 91 days ago, one day past
+        // BookingAccessChecker's 90-day-after-CheckOut grace window.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        Guid bookingId = await SeedBookingAsync(unit.Id, today.AddDays(-95), today.AddDays(-91));
+        string managementToken = await SeedManagementTokenAsync(bookingId);
+
+        // Act
+        HttpResponseMessage response = await CancelBookingAsync(bookingId, accessToken: null, managementToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CancelBooking_ShouldSucceed_ForGuestCheckoutWithManagementTokenJustInsideTheGraceWindow()
+    {
+        // Arrange - checked out exactly 90 days ago, still within
+        // BookingAccessChecker's grace window (today <= CheckOut + 90).
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        Guid bookingId = await SeedBookingAsync(unit.Id, today.AddDays(-93), today.AddDays(-90));
+        string managementToken = await SeedManagementTokenAsync(bookingId);
+
+        // Act
+        HttpResponseMessage response = await CancelBookingAsync(bookingId, accessToken: null, managementToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]

@@ -18,13 +18,16 @@ public class CancelBookingHandler(
 {
     public async ValueTask<CancelBookingResponse> Handle(CancelBookingRequest request, CancellationToken cancellationToken)
     {
+        DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+
         // Doesn't distinguish "doesn't exist" from "isn't yours" - same
         // reasoning as IHostAuthorization.RequireOwnership, now covering
         // two proof-of-ownership paths instead of one: a matching
-        // CustomerId (authenticated) or a matching management token
-        // (guest checkout) - see BookingAccessChecker's own doc comment.
+        // CustomerId (authenticated) or a matching, not-yet-expired
+        // management token (guest checkout) - see BookingAccessChecker's
+        // own doc comment.
         Booking booking = await BookingAccessChecker.ResolveAsync(
-                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken, cancellationToken)
+                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken, today, cancellationToken)
                           ?? throw new NotFoundException(nameof(Booking), request.BookingId);
 
         booking.Cancel();
@@ -36,7 +39,6 @@ public class CancelBookingHandler(
         // retroactively. See Booking.CancellationPolicy's own doc comment.
         CancellationPolicy cancellationPolicy = booking.CancellationPolicy ?? CancellationPolicy.CreateDefault();
 
-        DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
         // Cancelling on or after check-in day itself lands on the same
         // strictest applicable tier as cancelling the moment check-in
         // starts, not an undefined negative day count.

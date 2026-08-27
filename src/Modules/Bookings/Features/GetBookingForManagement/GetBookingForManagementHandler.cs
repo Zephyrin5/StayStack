@@ -13,11 +13,11 @@ public class GetBookingForManagementHandler(
     public async ValueTask<GetBookingForManagementResponse> Handle(
         GetBookingForManagementRequest request, CancellationToken cancellationToken)
     {
-        Booking booking = await BookingAccessChecker.ResolveAsync(
-                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken, cancellationToken)
-                          ?? throw new NotFoundException(nameof(Booking), request.BookingId);
-
         DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+
+        Booking booking = await BookingAccessChecker.ResolveAsync(
+                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken, today, cancellationToken)
+                          ?? throw new NotFoundException(nameof(Booking), request.BookingId);
 
         return new GetBookingForManagementResponse
         {
