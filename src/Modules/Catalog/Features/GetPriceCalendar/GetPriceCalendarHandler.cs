@@ -89,6 +89,7 @@ public class GetPriceCalendarHandler(
         // per uncached request is an acceptable cost for correctness here,
         // absorbed by this handler's own 30s HybridCache wrapper above.
         List<PricingRule> rules = await dbContext.PricingRules
+            .AsNoTracking()
             .Where(r => r.UnitId == request.UnitId)
             .ToListAsync(cancellationToken);
 

@@ -2,13 +2,39 @@ using BuildingBlocks.Pagination;
 using Catalog.Entities;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Hybrid;
 using NpgsqlTypes;
 namespace Catalog.Features.GetProperties;
 
-public class GetPropertiesHandler(AppCatalogDbContext dbContext, TimeProvider timeProvider)
+public class GetPropertiesHandler(AppCatalogDbContext dbContext, TimeProvider timeProvider, HybridCache cache)
     : IRequestHandler<GetPropertiesRequest, PagedResponse<PropertySummary>>
 {
     public async ValueTask<PagedResponse<PropertySummary>> Handle(GetPropertiesRequest request, CancellationToken cancellationToken)
+    {
+        // Every filter/pagination field that changes the result has to be
+        // part of the key - an incomplete key would serve one search's
+        // results back for a different one. A 30s staleness window here
+        // only ever means a listing briefly under- or over-represents live
+        // availability, never an actual double-booking - the exclusion
+        // constraint HoldAvailabilityHandler writes through is what
+        // guarantees that, not this cache. Same accepted tradeoff as
+        // GetPriceCalendarHandler's own cache.
+        string cacheKey = $"properties:{request.City}:{request.PropertyType}:{request.Guests}:" +
+                          $"{request.CheckIn:yyyyMMdd}:{request.CheckOut:yyyyMMdd}:{request.Page}:{request.PageSize}";
+
+        return await cache.GetOrCreateAsync(
+            cacheKey,
+            async ct => await LoadFromDatabaseAsync(request, ct),
+            new HybridCacheEntryOptions
+            {
+                Expiration = TimeSpan.FromSeconds(30),
+                LocalCacheExpiration = TimeSpan.FromSeconds(30)
+            },
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task<PagedResponse<PropertySummary>> LoadFromDatabaseAsync(
+        GetPropertiesRequest request, CancellationToken cancellationToken)
     {
         var query = dbContext.Properties.AsNoTracking();
 

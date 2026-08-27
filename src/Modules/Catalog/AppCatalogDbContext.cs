@@ -38,6 +38,11 @@ public class AppCatalogDbContext(DbContextOptions<AppCatalogDbContext> options) 
     // afterward can never be skipped. See StayStackDbContext.
     protected override void OnStayStackModelCreating(ModelBuilder modelBuilder)
     {
+        // Backs PropertyConfiguration's GIN trigram index on City - a plain
+        // B-tree index can't serve GetPropertiesHandler's ILIKE '%term%'
+        // (leading wildcard), so the search stays a full scan without this.
+        modelBuilder.HasPostgresExtension("pg_trgm");
+
         modelBuilder.ApplyConfiguration(new PropertyConfiguration());
         modelBuilder.ApplyConfiguration(new UnitConfiguration());
         modelBuilder.ApplyConfiguration(new UnitAvailabilityHoldConfiguration());

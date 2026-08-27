@@ -11,6 +11,19 @@ public static class NpgsqlDbContextOptionsExtensions
     ///     independent even though they share one physical database - see
     ///     the earlier note on why that matters once two DbContexts target
     ///     the same connection string.
+    ///     <para>
+    ///         Pool sizing: every module's ServicesRegistration resolves the
+    ///         same literal "AppConnection" string and passes it here
+    ///         unmodified (no per-module Application Name/search_path). Npgsql
+    ///         pools connections by exact connection-string text at the driver
+    ///         level, so this is one shared pool (Npgsql's default Maximum
+    ///         Pool Size=100) across every DbContext in the app, not one pool
+    ///         per module - do not "fix" this by giving each module a
+    ///         distinguishing connection-string param, that would multiply the
+    ///         total connection count instead of sharing it. Tune pool size,
+    ///         if it's ever needed, via "Maximum Pool Size=N" on the
+    ///         AppConnection secret itself.
+    ///     </para>
     /// </summary>
     public static void ConfigureStayStackDefaults(
         this DbContextOptionsBuilder builder,
