@@ -4,6 +4,7 @@ using BuildingBlocks.Identity;
 using BuildingBlocks.Security;
 using Catalog.Contracts;
 using Mediator;
+using Promotions.Contracts;
 using SeedWork.ValueObjects;
 using System.Text.Json;
 namespace Bookings.Features.ConfirmBooking;

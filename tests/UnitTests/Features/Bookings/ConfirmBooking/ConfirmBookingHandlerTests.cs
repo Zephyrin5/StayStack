@@ -5,6 +5,7 @@ using Catalog.Contracts;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Moq;
+using Promotions.Contracts;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 namespace UnitTests.Features.Bookings.ConfirmBooking;

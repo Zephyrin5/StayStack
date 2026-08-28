@@ -1,27 +1,21 @@
 using BuildingBlocks.Pagination;
 using Catalog.Features;
 using Catalog.Features.AdminCreateProperty;
-using Catalog.Features.AdminCreatePromotion;
 using Catalog.Features.CreatePricingRule;
 using Catalog.Features.CreateProperty;
-using Catalog.Features.CreatePromotion;
 using Catalog.Features.CreateUnit;
 using Catalog.Features.DeletePricingRule;
 using Catalog.Features.DeleteProperty;
-using Catalog.Features.DeletePromotion;
 using Catalog.Features.DeleteUnit;
-using Catalog.Features.GetHostPromotions;
 using Catalog.Features.GetHostProperties;
 using Catalog.Features.GetMyProperties;
 using Catalog.Features.GetPriceCalendar;
 using Catalog.Features.GetProperties;
 using Catalog.Features.GetPropertyById;
 using Catalog.Features.HoldAvailability;
-using Catalog.Features.ListMyPromotions;
 using Catalog.Features.ListPricingRules;
 using Catalog.Features.UpdatePricingRule;
 using Catalog.Features.UpdateProperty;
-using Catalog.Features.UpdatePromotion;
 using Catalog.Features.UpdateUnit;
 using System.Text.Json.Serialization;
 namespace Catalog.Serialization;
@@ -58,14 +52,4 @@ namespace Catalog.Serialization;
 [JsonSerializable(typeof(DeletePricingRuleResponse))]
 [JsonSerializable(typeof(ListPricingRulesRequest))]
 [JsonSerializable(typeof(ListPricingRulesResponse))]
-[JsonSerializable(typeof(CreatePromotionRequest))]
-[JsonSerializable(typeof(CreatePromotionResponse))]
-[JsonSerializable(typeof(AdminCreatePromotionRequest))]
-[JsonSerializable(typeof(UpdatePromotionRequest))]
-[JsonSerializable(typeof(UpdatePromotionResponse))]
-[JsonSerializable(typeof(DeletePromotionRequest))]
-[JsonSerializable(typeof(DeletePromotionResponse))]
-[JsonSerializable(typeof(PagedResponse<PromotionSummary>))]
-[JsonSerializable(typeof(ListMyPromotionsRequest))]
-[JsonSerializable(typeof(GetHostPromotionsRequest))]
 public partial class CatalogJsonSerializerContext : JsonSerializerContext;

@@ -2,6 +2,7 @@ using Bookings.Serialization;
 using Catalog.Serialization;
 using Hosts.Serialization;
 using Identity.Serialization;
+using Promotions.Serialization;
 using Reviews.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Transactions.Serialization;
@@ -25,6 +26,7 @@ public static class ApiJsonTypeInfoResolver
         IdentityJsonSerializerContext.Default,
         CatalogJsonSerializerContext.Default,
         HostsJsonSerializerContext.Default,
+        PromotionsJsonSerializerContext.Default,
         BookingsJsonSerializerContext.Default,
         ReviewsJsonSerializerContext.Default,
         TransactionsJsonSerializerContext.Default,

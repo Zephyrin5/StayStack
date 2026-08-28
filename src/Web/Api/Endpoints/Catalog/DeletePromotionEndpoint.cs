@@ -1,8 +1,8 @@
 using BuildingBlocks.Identity;
-using Catalog.Features.DeletePromotion;
 using FastEndpoints;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
+using Promotions.Features.DeletePromotion;
 using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
 namespace Api.Endpoints.Catalog;

@@ -4,6 +4,7 @@ using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using Catalog.Contracts;
 using Mediator;
+using Promotions.Contracts;
 using SeedWork.ValueObjects;
 using Transactions.Contracts;
 namespace Bookings.Features.CancelBooking;

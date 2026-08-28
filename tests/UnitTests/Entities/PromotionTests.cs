@@ -1,5 +1,5 @@
-using Catalog.Entities;
-using Catalog.Enums;
+using Promotions.Entities;
+using Promotions.Enums;
 using SeedWork.Enums;
 namespace UnitTests.Entities;
 

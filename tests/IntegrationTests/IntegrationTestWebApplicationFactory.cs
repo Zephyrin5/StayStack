@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Persistence;
+using Promotions;
 using Reviews;
 using Testcontainers.PostgreSql;
 using TickerQ.EntityFrameworkCore.DbContextFactory;
@@ -93,6 +94,10 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             services.AddDbContext<AppHostsDbContext>(options =>
                 options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "hosts", false));
 
+            services.RemoveAll<DbContextOptions<AppPromotionsDbContext>>();
+            services.AddDbContext<AppPromotionsDbContext>(options =>
+                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "promotions", false));
+
             services.RemoveAll<DbContextOptions<AppBookingsDbContext>>();
             services.AddDbContext<AppBookingsDbContext>(options =>
                 options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "bookings", false));
@@ -117,6 +122,7 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppHostsDbContext>().Database.Migrate();
+            scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppReviewsDbContext>().Database.Migrate();

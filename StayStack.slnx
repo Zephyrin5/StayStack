@@ -17,6 +17,8 @@
         <Project Path="src/Modules/Catalog/Catalog.csproj" />
         <Project Path="src/Modules/Hosts/Hosts.csproj" />
         <Project Path="src/Modules/Hosts/Hosts.Contracts/Hosts.Contracts.csproj" />
+        <Project Path="src/Modules/Promotions/Promotions.Contracts/Promotions.Contracts.csproj" />
+        <Project Path="src/Modules/Promotions/Promotions.csproj" />
         <Project Path="src/Modules/Transactions/Transactions.csproj" />
         <Project Path="src/Modules/Reviews/Reviews.csproj" />
         <Project Path="src/Modules/Transactions/Transactions.Contracts/Transactions.Contracts.csproj" />

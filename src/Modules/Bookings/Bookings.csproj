@@ -32,6 +32,7 @@
         <ProjectReference Include="..\..\Infrastructure\Persistence\Persistence.csproj"/>
         <ProjectReference Include="..\Catalog\Catalog.Contracts\Catalog.Contracts.csproj"/>
         <ProjectReference Include="..\Hosts\Hosts.Contracts\Hosts.Contracts.csproj"/>
+        <ProjectReference Include="..\Promotions\Promotions.Contracts\Promotions.Contracts.csproj"/>
         <ProjectReference Include="..\Transactions\Transactions.Contracts\Transactions.Contracts.csproj"/>
         <ProjectReference Include="Bookings.Contracts\Bookings.Contracts.csproj"/>
     </ItemGroup>

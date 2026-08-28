@@ -1,10 +1,10 @@
 using BuildingBlocks.Identity;
 using BuildingBlocks.Pagination;
-using Catalog.Features;
-using Catalog.Features.GetHostPromotions;
 using FastEndpoints;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
+using Promotions.Features;
+using Promotions.Features.GetHostPromotions;
 using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
 namespace Api.Endpoints.Hosts;

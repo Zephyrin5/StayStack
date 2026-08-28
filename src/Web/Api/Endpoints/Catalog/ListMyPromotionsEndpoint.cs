@@ -1,9 +1,9 @@
 using BuildingBlocks.Identity;
 using BuildingBlocks.Pagination;
-using Catalog.Features;
-using Catalog.Features.ListMyPromotions;
 using FastEndpoints;
 using Mediator;
+using Promotions.Features;
+using Promotions.Features.ListMyPromotions;
 
 namespace Api.Endpoints.Catalog;
 
