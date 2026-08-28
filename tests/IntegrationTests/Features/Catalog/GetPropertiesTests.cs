@@ -1,3 +1,5 @@
+using Availability;
+using Availability.Entities;
 using Bogus;
 using BuildingBlocks.Pagination;
 using Catalog;
@@ -129,7 +131,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     private async Task SeedHoldAsync(Guid unitId, DateOnly checkIn, DateOnly checkOut, string status = "booked")
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
 
         context.UnitAvailabilityHolds.Add(new UnitAvailabilityHold
         {

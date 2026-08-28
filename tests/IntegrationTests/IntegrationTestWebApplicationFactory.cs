@@ -1,3 +1,4 @@
+using Availability;
 using Bookings;
 using Catalog;
 using Hosts;
@@ -98,6 +99,10 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             services.AddDbContext<AppPromotionsDbContext>(options =>
                 options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "promotions", false));
 
+            services.RemoveAll<DbContextOptions<AppAvailabilityDbContext>>();
+            services.AddDbContext<AppAvailabilityDbContext>(options =>
+                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "availability", false));
+
             services.RemoveAll<DbContextOptions<AppBookingsDbContext>>();
             services.AddDbContext<AppBookingsDbContext>(options =>
                 options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "bookings", false));
@@ -123,6 +128,7 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppHostsDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>().Database.Migrate();
+            scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>().Database.Migrate();
             scope.ServiceProvider.GetRequiredService<AppReviewsDbContext>().Database.Migrate();

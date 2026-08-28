@@ -1,10 +1,12 @@
+using Availability;
+using Availability.Entities;
+using Availability.Features.HoldAvailability;
 using Bogus;
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
 using Catalog;
 using Catalog.Entities;
-using Catalog.Features.HoldAvailability;
 using Identity.Entities;
 using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Identity;
@@ -41,6 +43,14 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
     {
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        context.AddRange(entities);
+        await context.SaveChangesAsync();
+    }
+
+    private async Task SeedAvailabilityAsync(params object[] entities)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         context.AddRange(entities);
         await context.SaveChangesAsync();
     }
@@ -102,8 +112,8 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal("jane@example.com", booking.GuestEmail);
         Assert.Equal(2, booking.GuestCount); // from the hold, not re-collected at confirm time
 
-        AppCatalogDbContext catalogDb = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
-        UnitAvailabilityHold persistedHold = await catalogDb.UnitAvailabilityHolds
+        AppAvailabilityDbContext availabilityDb = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        UnitAvailabilityHold persistedHold = await availabilityDb.UnitAvailabilityHolds
             .AsNoTracking()
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
         Assert.Equal("booked", persistedHold.Status);
@@ -167,7 +177,8 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
             TotalPrice = Money.Of(100m, Currency.KWD),
             Subtotal = 100m
         };
-        await SeedCatalogAsync(unit, expiredHold);
+        await SeedCatalogAsync(unit);
+        await SeedAvailabilityAsync(expiredHold);
 
         // Act
         HttpResponseMessage response = await _client.PostAsJsonAsync(

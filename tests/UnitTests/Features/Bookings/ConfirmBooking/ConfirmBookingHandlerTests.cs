@@ -1,3 +1,4 @@
+using Availability.Contracts;
 using Bookings;
 using Bookings.Features.ConfirmBooking;
 using BuildingBlocks.Identity;

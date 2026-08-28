@@ -1,3 +1,4 @@
+using Availability.Contracts;
 using Bookings.Entities;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;

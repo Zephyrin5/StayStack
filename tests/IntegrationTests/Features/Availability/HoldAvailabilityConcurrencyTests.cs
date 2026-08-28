@@ -1,12 +1,13 @@
+using Availability;
+using Availability.Features.HoldAvailability;
 using Catalog;
 using Catalog.Entities;
-using Catalog.Features.HoldAvailability;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Json;
-namespace IntegrationTests.Features.Catalog;
+namespace IntegrationTests.Features.Availability;
 
 // This is the highest-value concurrency test in the system: proves the
 // Postgres exclusion constraint - not application code - is what actually
@@ -71,7 +72,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         Assert.Equal(concurrentRequests - 1, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         int holdCount = await context.UnitAvailabilityHolds.CountAsync(h => h.UnitId == unit.Id, TestContext.Current.CancellationToken);
         Assert.Equal(1, holdCount);
     }
@@ -112,7 +113,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         Assert.Equal(concurrentRequests - 1, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         int holdCount = await context.UnitAvailabilityHolds.CountAsync(h => h.UnitId == unit.Id, TestContext.Current.CancellationToken);
         Assert.Equal(1, holdCount);
     }
@@ -171,7 +172,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         Assert.Equal(2 * concurrentRequestsPerRange - 2, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         int holdCount = await context.UnitAvailabilityHolds.CountAsync(h => h.UnitId == unit.Id, TestContext.Current.CancellationToken);
         Assert.Equal(2, holdCount);
     }

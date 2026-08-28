@@ -1,13 +1,13 @@
-using Catalog;
-using Catalog.Entities;
-using Catalog.Jobs;
+using Availability;
+using Availability.Entities;
+using Availability.Jobs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using NpgsqlTypes;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
-namespace IntegrationTests.Features.Catalog;
+namespace IntegrationTests.Features.Availability;
 
 [Collection("Integration Tests")]
 public class ExpiredHoldsSweepJobTests(IntegrationTestWebApplicationFactory factory)
@@ -15,7 +15,7 @@ public class ExpiredHoldsSweepJobTests(IntegrationTestWebApplicationFactory fact
     private async Task SeedDatabaseAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
 
         context.AddRange(entities);
         await context.SaveChangesAsync();
@@ -69,7 +69,7 @@ public class ExpiredHoldsSweepJobTests(IntegrationTestWebApplicationFactory fact
         await SeedDatabaseAsync(expiredHeld, stillLiveHeld, expiredButBooked);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(now);
         ExpiredHoldsSweepJob job = new ExpiredHoldsSweepJob(context, timeProvider);

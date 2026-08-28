@@ -14,6 +14,7 @@ public class DeleteUnitHandler(
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization,
     IUnitArchivalGuard unitArchivalGuard,
+    IUnitAvailabilityLookup availabilityLookup,
     TimeProvider timeProvider) : IRequestHandler<DeleteUnitRequest, DeleteUnitResponse>
 {
     public async ValueTask<DeleteUnitResponse> Handle(DeleteUnitRequest request, CancellationToken cancellationToken)
@@ -39,7 +40,7 @@ public class DeleteUnitHandler(
             hostAuthorization.RequireOwnership(property.HostId, nameof(Property), property.Id);
         }
 
-        await EnsureNoActiveBookingsOrHoldsAsync(unit.Id, timeProvider, dbContext, unitArchivalGuard, cancellationToken);
+        await EnsureNoActiveBookingsOrHoldsAsync(unit.Id, timeProvider, unitArchivalGuard, availabilityLookup, cancellationToken);
 
         unit.Archive(timeProvider.GetUtcNow(), currentUserProvider.UserId);
 
@@ -57,8 +58,8 @@ public class DeleteUnitHandler(
     internal static async Task EnsureNoActiveBookingsOrHoldsAsync(
         Guid unitId,
         TimeProvider timeProvider,
-        AppCatalogDbContext dbContext,
         IUnitArchivalGuard unitArchivalGuard,
+        IUnitAvailabilityLookup availabilityLookup,
         CancellationToken cancellationToken)
     {
         DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
@@ -69,8 +70,7 @@ public class DeleteUnitHandler(
             throw new UnitHasActiveBookingsException(unitId);
         }
 
-        bool hasActiveHold = await dbContext.UnitAvailabilityHolds.AsNoTracking()
-            .AnyAsync(h => h.UnitId == unitId && (h.Status == "held" || h.Status == "booked"), cancellationToken);
+        bool hasActiveHold = await availabilityLookup.HasActiveHoldForUnitAsync(unitId, cancellationToken);
         if (hasActiveHold)
         {
             throw new UnitHasActiveBookingsException(unitId);

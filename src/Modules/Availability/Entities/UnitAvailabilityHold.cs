@@ -1,6 +1,6 @@
 using NpgsqlTypes;
 using SeedWork.ValueObjects;
-namespace Catalog.Entities;
+namespace Availability.Entities;
 
 /// <summary>
 ///     This is a persistence-layer construct, not a Domain aggregate - its
@@ -11,12 +11,18 @@ namespace Catalog.Entities;
 ///     migrated normally, one migration history for the whole database),
 ///     but HoldAvailabilityHandler writes to it with hand-written Dapper
 ///     SQL inside an explicit transaction instead of DbContext.SaveChanges()
-///     the way Owner/Property/Unit are - see docs/adr/0010 for why.
+///     the way most entities are - see docs/adr/0010 for why.
 /// </summary>
 public sealed class UnitAvailabilityHold
 {
     public Guid Id { get; set; }
+
+    // Opaque cross-module id, resolved through Catalog.Contracts.IUnitLookup
+    // when this module needs a fact about the unit itself (price,
+    // capacity) - never a navigation property or a join against Catalog's
+    // own tables.
     public Guid UnitId { get; set; }
+
     public int GuestCount { get; set; }
 
     // [CheckIn, CheckOut) - half-open, matches normal hotel-industry
@@ -50,15 +56,14 @@ public sealed class UnitAvailabilityHold
     // predating this column.
     public string? HolderToken { get; set; }
 
-    // Snapshotted from the unit at hold-creation time, not read live at
-    // confirm time - Unit.BasePrice can change (SetBasePrice) between a
-    // customer holding a range and confirming it; the price they saw when
-    // they held it is the price they get. The one Money-typed (currency-
-    // carrying) field on this entity - Subtotal/LengthOfStayDiscountAmount
-    // below are plain decimals in this same currency by construction (a
-    // hold has exactly one currency), not independently-currencied amounts,
-    // matching how PricingRule.OverridePrice stays a plain decimal for the
-    // same reason (see docs/adr/0015).
+    // Snapshotted from the unit at hold-creation time (via
+    // Catalog.Contracts.IUnitLookup.ResolveStayPricingAsync), not read live
+    // at confirm time - a unit's price can change between a customer
+    // holding a range and confirming it; the price they saw when they held
+    // it is the price they get. The one Money-typed (currency-carrying)
+    // field on this entity - Subtotal/LengthOfStayDiscountAmount below are
+    // plain decimals in this same currency by construction (a hold has
+    // exactly one currency), not independently-currencied amounts.
     public Money TotalPrice { get; set; }
 
     // The pre-discount total, snapshotted directly rather than left for a

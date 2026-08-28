@@ -5,11 +5,11 @@ using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using System.Data;
 using System.Data.Common;
-namespace Catalog.Contracts;
+namespace Availability.Contracts;
 
-// internal, same reasoning as HostRegistrar - Bookings should only ever
-// reach this through IHoldConfirmation, resolved via DI.
-internal class HoldConfirmation(AppCatalogDbContext dbContext, TimeProvider timeProvider) : IHoldConfirmation
+// internal, same reasoning as Hosts.Contracts' implementations - Bookings
+// should only ever reach this through IHoldConfirmation, resolved via DI.
+internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider timeProvider) : IHoldConfirmation
 {
     // Raw shape of the RETURNING row - Currency comes back as its column
     // text, materialized first and turned into a real Money afterward

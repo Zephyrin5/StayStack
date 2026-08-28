@@ -1,12 +1,13 @@
-namespace Catalog.Contracts;
+namespace Availability.Contracts;
 
 /// <summary>
 ///     Lets Bookings find its own orphaned-hold reconciliation candidates
-///     without ever referencing Catalog's own entities, AppCatalogDbContext,
-///     or the unit_availability_holds table directly - same boundary
-///     reasoning as IHoldConfirmation. Deliberately read-only/separate from
-///     IHoldConfirmation: this answers "which holds look orphaned", the
-///     actual release still goes through IHoldConfirmation.ReleaseHoldAsync.
+///     without ever referencing Availability's own entities,
+///     AppAvailabilityDbContext, or the unit_availability_holds table
+///     directly - same boundary reasoning as IHoldConfirmation. Deliberately
+///     read-only/separate from IHoldConfirmation: this answers "which holds
+///     look orphaned", the actual release still goes through
+///     IHoldConfirmation.ReleaseHoldAsync.
 /// </summary>
 public interface IHoldLookup
 {

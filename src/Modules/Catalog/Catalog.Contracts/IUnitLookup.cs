@@ -25,6 +25,19 @@ public interface IUnitLookup
     ///     by, since Bookings has no notion of Property/HostId itself.
     /// </summary>
     Task<IReadOnlyList<Guid>> GetUnitIdsForHostAsync(Guid hostId, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     Resolves what a stay would cost right now, plus the unit's max
+    ///     occupancy for the same guard HoldAvailabilityHandler (Availability)
+    ///     needs before ever touching a hold - one call instead of two,
+    ///     avoiding a duplicate Unit read the way GetUnitAsync alone would
+    ///     require alongside this. Runs through the same PricingCalculator
+    ///     GetPriceCalendarHandler uses internally (see docs/adr/0012), so
+    ///     the actual charged price and the public calendar preview can
+    ///     never structurally disagree. Null if the unit doesn't exist.
+    /// </summary>
+    Task<StayPricingResult?> ResolveStayPricingAsync(
+        Guid unitId, DateOnly checkIn, DateOnly checkOut, CancellationToken cancellationToken);
 }
 
 public record UnitSummary
@@ -45,4 +58,12 @@ public record UnitSummary
     // time, same "the terms they saw are the terms they get" reasoning as
     // TotalPrice/Currency.
     public required CancellationPolicy CancellationPolicy { get; init; }
+}
+
+public record StayPricingResult
+{
+    public int MaxOccupancy { get; init; }
+    public Money TotalPrice { get; init; }
+    public decimal Subtotal { get; init; }
+    public Money? LengthOfStayDiscountAmount { get; init; }
 }

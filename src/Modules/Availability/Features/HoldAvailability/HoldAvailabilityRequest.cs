@@ -1,7 +1,7 @@
 using FastEndpoints;
 using Mediator;
 using System.Text.Json.Serialization;
-namespace Catalog.Features.HoldAvailability;
+namespace Availability.Features.HoldAvailability;
 
 public record HoldAvailabilityRequest : IRequest<HoldAvailabilityResponse>
 {

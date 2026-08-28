@@ -1,23 +1,35 @@
-﻿using BuildingBlocks.Exceptions;
+using Availability;
+using Availability.Entities;
+using Availability.Exceptions;
+using Availability.Features.HoldAvailability;
+using BuildingBlocks.Exceptions;
 using Catalog;
+using Catalog.Contracts;
 using Catalog.Entities;
-using Catalog.Exceptions;
-using Catalog.Features.HoldAvailability;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using NpgsqlTypes;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
-namespace IntegrationTests.Features.Catalog;
+namespace IntegrationTests.Features.Availability;
 
 [Collection("Integration Tests")]
 public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory factory)
 {
-    private async Task SeedDatabaseAsync(params object[] entities)
+    private async Task SeedCatalogAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+
+        context.AddRange(entities);
+        await context.SaveChangesAsync();
+    }
+
+    private async Task SeedAvailabilityAsync(params object[] entities)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
 
         context.AddRange(entities);
         await context.SaveChangesAsync();
@@ -32,21 +44,31 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             100);
     }
 
+    // Real IUnitLookup, not a mock - these tests verify actual pricing math
+    // (PricingCalculator via Catalog's own database), which a mock would
+    // defeat the purpose of. Resolved once per handler construction, same
+    // as the real AppAvailabilityDbContext.
+    private HoldAvailabilityHandler CreateHandler(AppAvailabilityDbContext context, TimeProvider timeProvider, IServiceScope scope)
+    {
+        IUnitLookup unitLookup = scope.ServiceProvider.GetRequiredService<IUnitLookup>();
+        return new HoldAvailabilityHandler(context, unitLookup, timeProvider);
+    }
+
     [Fact]
     public async Task Handle_ValidRequest_CreatesHoldAndPersistsToDatabase()
     {
         // Arrange
         Unit unit = CreateTestUnit();
-        await SeedDatabaseAsync(unit);
+        await SeedCatalogAsync(unit);
 
         DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(fixedInstant);
-        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
 
         HoldAvailabilityRequest command = new HoldAvailabilityRequest
         {
@@ -103,13 +125,14 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             Subtotal = 100m
         };
 
-        await SeedDatabaseAsync(unit, existingHold);
+        await SeedCatalogAsync(unit);
+        await SeedAvailabilityAsync(existingHold);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(fixedInstant);
-        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
 
         HoldAvailabilityRequest command = new HoldAvailabilityRequest
         {
@@ -152,13 +175,14 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             Subtotal = 100m
         };
 
-        await SeedDatabaseAsync(unit, expiredHold);
+        await SeedCatalogAsync(unit);
+        await SeedAvailabilityAsync(expiredHold);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(fixedInstant);
-        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
 
         HoldAvailabilityRequest command = new HoldAvailabilityRequest
         {
@@ -202,13 +226,14 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             Subtotal = 100m
         };
 
-        await SeedDatabaseAsync(unit, existingHold);
+        await SeedCatalogAsync(unit);
+        await SeedAvailabilityAsync(existingHold);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(fixedInstant);
-        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
 
         HoldAvailabilityRequest command = new HoldAvailabilityRequest
         {
@@ -235,13 +260,13 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         PricingRule overrideRule = PricingRule.CreateDateRangeOverride(
             unit.Id, today.AddDays(1), today.AddDays(2), 500m);
 
-        await SeedDatabaseAsync(unit, overrideRule);
+        await SeedCatalogAsync(unit, overrideRule);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(fixedInstant);
-        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
 
         HoldAvailabilityRequest command = new HoldAvailabilityRequest
         {
@@ -269,13 +294,13 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
 
         PricingRule multiplierRule = PricingRule.CreateDayOfWeekMultiplier(unit.Id, [(int)DayOfWeek.Friday], 2m);
 
-        await SeedDatabaseAsync(unit, multiplierRule);
+        await SeedCatalogAsync(unit, multiplierRule);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(fixedInstant);
-        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
 
         HoldAvailabilityRequest command = new HoldAvailabilityRequest
         {
@@ -303,13 +328,13 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
 
         PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(unit.Id, 7, 10m);
 
-        await SeedDatabaseAsync(unit, discountRule);
+        await SeedCatalogAsync(unit, discountRule);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(fixedInstant);
-        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
 
         HoldAvailabilityRequest command = new HoldAvailabilityRequest
         {
@@ -335,10 +360,10 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(fixedInstant);
-        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
 
         HoldAvailabilityRequest command = new HoldAvailabilityRequest
         {
@@ -362,16 +387,16 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         // that decade-long block - see HoldAvailabilityHandler's own
         // MaxLeadTimeDays constant.
         Unit unit = CreateTestUnit();
-        await SeedDatabaseAsync(unit);
+        await SeedCatalogAsync(unit);
 
         DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(fixedInstant);
-        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
 
         HoldAvailabilityRequest command = new HoldAvailabilityRequest
         {
@@ -390,17 +415,17 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     public async Task Handle_SixthActiveHoldForSameSession_ThrowsTooManyActiveHoldsException()
     {
         Unit unit = CreateTestUnit(maxCapacity: 10);
-        await SeedDatabaseAsync(unit);
+        await SeedCatalogAsync(unit);
 
         DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
         string holderToken = Guid.NewGuid().ToString();
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(fixedInstant);
-        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
 
         // Five non-overlapping ranges on the same unit, same session token -
         // all should succeed, filling the cap exactly.
@@ -445,14 +470,14 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         // browser after their 5th ever completed booking. 'booked' rows
         // must never count toward the cap.
         Unit unit = CreateTestUnit(maxCapacity: 10);
-        await SeedDatabaseAsync(unit);
+        await SeedCatalogAsync(unit);
 
         DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
         string holderToken = Guid.NewGuid().ToString();
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
 
         // Five already-'booked' holds under the same session token,
         // simulating five completed bookings - none of these are "active"
@@ -477,7 +502,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
 
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(fixedInstant);
-        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
 
         HoldAvailabilityRequest sixthRequest = new HoldAvailabilityRequest
         {
@@ -505,14 +530,14 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         // different units is locked out of a sixth for up to 15 minutes
         // with zero live holds.
         Unit unit = CreateTestUnit(maxCapacity: 10);
-        await SeedDatabaseAsync(unit);
+        await SeedCatalogAsync(unit);
 
         DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
         string holderToken = Guid.NewGuid().ToString();
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
 
         for (int i = 0; i < 5; i++)
         {
@@ -533,7 +558,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
 
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(fixedInstant);
-        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
 
         HoldAvailabilityRequest sixthRequest = new HoldAvailabilityRequest
         {

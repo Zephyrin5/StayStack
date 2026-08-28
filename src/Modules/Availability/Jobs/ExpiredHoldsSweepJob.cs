@@ -2,7 +2,7 @@ using Dapper;
 using Microsoft.EntityFrameworkCore;
 using System.Data;
 using TickerQ.Utilities.Base;
-namespace Catalog.Jobs;
+namespace Availability.Jobs;
 
 /// <summary>
 ///     HoldAvailabilityHandler already deletes a unit's own stale holds
@@ -14,14 +14,14 @@ namespace Catalog.Jobs;
 ///     for that exact unit/range again), but still worth sweeping
 ///     periodically so the table doesn't accumulate dead rows indefinitely.
 /// </summary>
-public class ExpiredHoldsSweepJob(AppCatalogDbContext dbContext, TimeProvider timeProvider)
+public class ExpiredHoldsSweepJob(AppAvailabilityDbContext dbContext, TimeProvider timeProvider)
 {
     private const string CleanupSql = """
                                        DELETE FROM unit_availability_holds
                                        WHERE status = 'held' AND hold_expires_at <= @Now;
                                        """;
 
-    [TickerFunction(functionName: "Catalog.SweepExpiredHolds", cronExpression: "*/5 * * * *")]
+    [TickerFunction(functionName: "Availability.SweepExpiredHolds", cronExpression: "*/5 * * * *")]
     public async Task SweepAsync(TickerFunctionContext context, CancellationToken cancellationToken)
     {
         IDbConnection connection = dbContext.Database.GetDbConnection();

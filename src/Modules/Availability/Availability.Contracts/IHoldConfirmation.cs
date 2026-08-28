@@ -1,11 +1,11 @@
 using SeedWork.ValueObjects;
-namespace Catalog.Contracts;
+namespace Availability.Contracts;
 
 /// <summary>
-///     Write-side counterpart to IUnitLookup - lets Bookings turn a Hold
-///     into a real booking without ever seeing UnitAvailabilityHold or
-///     touching unit_availability_holds directly. Same boundary reasoning
-///     as Hosts.Contracts.IHostRegistrar.
+///     Write-side counterpart to Catalog.Contracts.IUnitLookup - lets
+///     Bookings turn a Hold into a real booking without ever seeing
+///     UnitAvailabilityHold or touching unit_availability_holds directly.
+///     Same boundary reasoning as Hosts.Contracts.IHostRegistrar.
 /// </summary>
 public interface IHoldConfirmation
 {
@@ -49,7 +49,7 @@ public record ConfirmedHold
     // Same snapshot as TotalPrice/Subtotal, carried through so
     // ConfirmBookingHandler can undo just the length-of-stay portion when a
     // redeemed promo code is exclusive of it rather than stacking - see
-    // PricingCalculator's own StayPriceBreakdown for why this needs to
+    // Catalog.Contracts.IUnitLookup.StayPricingResult for why this needs to
     // travel separately from the final total.
     public decimal? LengthOfStayDiscountAmount { get; init; }
 }

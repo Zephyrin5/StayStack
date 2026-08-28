@@ -1,6 +1,6 @@
 using BuildingBlocks.Exceptions;
 using System.Net;
-namespace Catalog.Exceptions;
+namespace Availability.Exceptions;
 
 /// <summary>
 ///     The requested unit is not available for some or all of the requested

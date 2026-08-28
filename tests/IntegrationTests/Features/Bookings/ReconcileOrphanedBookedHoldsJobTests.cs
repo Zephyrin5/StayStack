@@ -1,9 +1,9 @@
+using Availability;
+using Availability.Contracts;
+using Availability.Entities;
 using Bookings;
 using Bookings.Entities;
 using Bookings.Jobs;
-using Catalog;
-using Catalog.Contracts;
-using Catalog.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -39,7 +39,7 @@ public class ReconcileOrphanedBookedHoldsJobTests(IntegrationTestWebApplicationF
     private async Task SeedHoldAsync(UnitAvailabilityHold hold)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         context.Add(hold);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
     }
@@ -61,7 +61,7 @@ public class ReconcileOrphanedBookedHoldsJobTests(IntegrationTestWebApplicationF
     private async Task<string> GetHoldStatusAsync(Guid holdId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         UnitAvailabilityHold hold = await context.UnitAvailabilityHolds.AsNoTracking()
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
         return hold.Status;

@@ -1,5 +1,5 @@
 using Api.Security;
-using Catalog.Features.HoldAvailability;
+using Availability.Features.HoldAvailability;
 using FastEndpoints;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;

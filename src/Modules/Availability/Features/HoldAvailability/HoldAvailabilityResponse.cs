@@ -1,5 +1,5 @@
 using SeedWork.Enums;
-namespace Catalog.Features.HoldAvailability;
+namespace Availability.Features.HoldAvailability;
 
 public record HoldAvailabilityResponse
 {

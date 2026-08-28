@@ -1,4 +1,4 @@
-using Catalog.Contracts;
+using Availability.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using TickerQ.Utilities.Base;
@@ -14,13 +14,14 @@ namespace Bookings.Jobs;
 ///     hold stuck 'booked' forever; ExpiredHoldsSweepJob only ever looks at
 ///     'held' rows, so nothing else would ever find it.
 ///
-///     Deliberately owned by Bookings, not Catalog: it's Bookings that knows
-///     what "orphaned" means here (a hold with no matching bookings.hold_id
-///     row). Reads Catalog's candidate hold ids through IHoldLookup rather
-///     than joining unit_availability_holds directly by table name - a raw
-///     cross-module join would be exactly the kind of boundary violation
-///     docs/adr/0004 exists to prevent, even though this job happens to live
-///     on the "allowed to call Catalog" side of that boundary.
+///     Deliberately owned by Bookings, not Availability: it's Bookings that
+///     knows what "orphaned" means here (a hold with no matching
+///     bookings.hold_id row). Reads Availability's candidate hold ids
+///     through IHoldLookup rather than joining unit_availability_holds
+///     directly by table name - a raw cross-module join would be exactly
+///     the kind of boundary violation docs/adr/0004 exists to prevent, even
+///     though this job happens to live on the "allowed to call Availability"
+///     side of that boundary.
 /// </summary>
 public partial class ReconcileOrphanedBookedHoldsJob(
     AppBookingsDbContext dbContext,

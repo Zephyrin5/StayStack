@@ -12,7 +12,6 @@ using Catalog.Features.GetMyProperties;
 using Catalog.Features.GetPriceCalendar;
 using Catalog.Features.GetProperties;
 using Catalog.Features.GetPropertyById;
-using Catalog.Features.HoldAvailability;
 using Catalog.Features.ListPricingRules;
 using Catalog.Features.UpdatePricingRule;
 using Catalog.Features.UpdateProperty;
@@ -28,8 +27,6 @@ namespace Catalog.Serialization;
 [JsonSerializable(typeof(CreateUnitResponse))]
 [JsonSerializable(typeof(GetPriceCalendarRequest))]
 [JsonSerializable(typeof(GetPriceCalendarResponse))]
-[JsonSerializable(typeof(HoldAvailabilityRequest))]
-[JsonSerializable(typeof(HoldAvailabilityResponse))]
 [JsonSerializable(typeof(GetPropertiesRequest))]
 [JsonSerializable(typeof(PagedResponse<PropertySummary>))]
 [JsonSerializable(typeof(GetMyPropertiesRequest))]

@@ -1,6 +1,6 @@
-using Catalog.Features.HoldAvailability;
+using Availability.Features.HoldAvailability;
 using FluentValidation.TestHelper;
-namespace UnitTests.Features.Catalog.HoldAvailability;
+namespace UnitTests.Features.Availability.HoldAvailability;
 
 public class HoldAvailabilityRequestValidatorTests
 {

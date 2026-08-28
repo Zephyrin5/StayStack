@@ -1,6 +1,7 @@
 using Api;
 using Api.RateLimiting;
 using Api.Serialization;
+using Availability;
 using Bookings;
 using Catalog;
 using FastEndpoints;
@@ -43,6 +44,7 @@ builder.Services.ConfigurePersistenceServices();
 builder.Services.ConfigureApiServices(builder.Configuration);
 builder.Services.ConfigureCatalogServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureHostsServices(builder.Configuration, builder.Environment);
+builder.Services.ConfigureAvailabilityServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigurePromotionsServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureBookingsServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureReviewsServices(builder.Configuration, builder.Environment);

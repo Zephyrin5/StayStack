@@ -1,6 +1,6 @@
 using FastEndpoints;
 using FluentValidation;
-namespace Catalog.Features.HoldAvailability;
+namespace Availability.Features.HoldAvailability;
 
 public sealed class HoldAvailabilityRequestValidator : Validator<HoldAvailabilityRequest>
 {

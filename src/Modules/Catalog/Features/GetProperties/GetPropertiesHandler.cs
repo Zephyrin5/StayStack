@@ -1,13 +1,16 @@
 using BuildingBlocks.Pagination;
+using Catalog.Contracts;
 using Catalog.Entities;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
-using NpgsqlTypes;
 namespace Catalog.Features.GetProperties;
 
-public class GetPropertiesHandler(AppCatalogDbContext dbContext, TimeProvider timeProvider, HybridCache cache)
-    : IRequestHandler<GetPropertiesRequest, PagedResponse<PropertySummary>>
+public class GetPropertiesHandler(
+    AppCatalogDbContext dbContext,
+    IUnitAvailabilityLookup availabilityLookup,
+    TimeProvider timeProvider,
+    HybridCache cache) : IRequestHandler<GetPropertiesRequest, PagedResponse<PropertySummary>>
 {
     public async ValueTask<PagedResponse<PropertySummary>> Handle(GetPropertiesRequest request, CancellationToken cancellationToken)
     {
@@ -83,33 +86,33 @@ public class GetPropertiesHandler(AppCatalogDbContext dbContext, TimeProvider ti
             // checks would let a property match via one unit that fits the
             // guest count and a different unit that's free for the dates,
             // even if no single unit satisfies both.
-            var matchingUnits = dbContext.Units.AsNoTracking();
+            var matchingUnitsQuery = dbContext.Units.AsNoTracking();
 
             if (request.Guests is not null)
             {
-                matchingUnits = matchingUnits.Where(u => u.MaxOccupancy >= request.Guests.Value);
+                matchingUnitsQuery = matchingUnitsQuery.Where(u => u.MaxOccupancy >= request.Guests.Value);
             }
 
-            if (request.CheckIn is not null && request.CheckOut is not null)
+            // Materialized here rather than left as a composed subquery -
+            // unit_availability_holds moved to the Availability module (see
+            // docs/adr/0004), so the per-date check below can no longer be
+            // a local correlated Any() against it. One extra round trip:
+            // resolve capacity-matching candidate unit ids first, then ask
+            // Availability which of those have a blocking hold/booking for
+            // the requested dates.
+            List<Guid> candidateUnitIds = await matchingUnitsQuery
+                .Select(u => u.Id)
+                .ToListAsync(cancellationToken);
+
+            if (request.CheckIn is not null && request.CheckOut is not null && candidateUnitIds.Count > 0)
             {
-                // Half-open [CheckIn, CheckOut) - matches the range
-                // HoldAvailabilityHandler writes and GetPriceCalendarHandler
-                // reads. Same "booked always blocks, held only while not
-                // expired" predicate as GetPriceCalendarHandler's raw SQL -
-                // see docs/adr/0010 for why unit_availability_holds itself
-                // is a Dapper-owned table even though plain reads like this
-                // one go through EF's normal LINQ translation.
-                NpgsqlRange<DateOnly> requestedRange =
-                    new NpgsqlRange<DateOnly>(request.CheckIn.Value, true, request.CheckOut.Value, false);
-                DateTimeOffset now = timeProvider.GetUtcNow();
+                IReadOnlySet<Guid> blockedUnitIds = await availabilityLookup.GetUnitIdsWithOverlappingHoldAsync(
+                    candidateUnitIds, request.CheckIn.Value, request.CheckOut.Value, timeProvider.GetUtcNow(), cancellationToken);
 
-                matchingUnits = matchingUnits.Where(u => !dbContext.UnitAvailabilityHolds.Any(h =>
-                    h.UnitId == u.Id &&
-                    h.StayRange.Overlaps(requestedRange) &&
-                    (h.Status == "booked" || (h.Status == "held" && (h.HoldExpiresAt == null || h.HoldExpiresAt > now)))));
+                candidateUnitIds = [.. candidateUnitIds.Where(id => !blockedUnitIds.Contains(id))];
             }
 
-            query = query.Where(p => matchingUnits.Any(u => u.PropertyId == p.Id));
+            query = query.Where(p => dbContext.Units.Any(u => candidateUnitIds.Contains(u.Id) && u.PropertyId == p.Id));
         }
 
         // Id as a tiebreaker, not a deliberate sort - see docs/adr/0008.

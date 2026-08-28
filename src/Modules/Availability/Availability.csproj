@@ -7,13 +7,13 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- Bookings.Contracts is nested inside this project's folder;
+        <!-- Availability.Contracts is nested inside this project's folder;
              without this, SDK-default globbing would compile its files into
-             both projects (the same CS0436 gotcha Catalog.csproj/Hosts.csproj
-             already document for their own nested Contracts projects). -->
-        <Compile Remove="Bookings.Contracts\**"/>
-        <EmbeddedResource Remove="Bookings.Contracts\**"/>
-        <None Remove="Bookings.Contracts\**"/>
+             both projects (the same CS0436 gotcha every other module's own
+             nested Contracts project already documents). -->
+        <Compile Remove="Availability.Contracts\**"/>
+        <EmbeddedResource Remove="Availability.Contracts\**"/>
+        <None Remove="Availability.Contracts\**"/>
     </ItemGroup>
 
     <ItemGroup>
@@ -21,8 +21,8 @@
         <PackageReference Include="FastEndpoints.Generator"/>
         <PackageReference Include="Mediator.Abstractions"/>
         <PackageReference Include="Microsoft.EntityFrameworkCore"/>
-        <!-- For ReconcileOrphanedBookedHoldsJob - same TickerFunction source-
-             generator Catalog/Identity already use for their own jobs. -->
+        <!-- For ExpiredHoldsSweepJob - same TickerFunction source-generator
+             every other module with a job already uses. -->
         <PackageReference Include="TickerQ"/>
     </ItemGroup>
 
@@ -30,12 +30,12 @@
         <ProjectReference Include="..\..\Core\SeedWork\SeedWork.csproj"/>
         <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
         <ProjectReference Include="..\..\Infrastructure\Persistence\Persistence.csproj"/>
-        <ProjectReference Include="..\Availability\Availability.Contracts\Availability.Contracts.csproj"/>
+        <!-- For Catalog.Contracts.IUnitLookup.ResolveStayPricingAsync -
+             HoldAvailabilityHandler needs a unit's price/capacity, but
+             Availability owns no Unit/PricingRule data of its own. See
+             docs/adr/0004's Availability-extraction note. -->
         <ProjectReference Include="..\Catalog\Catalog.Contracts\Catalog.Contracts.csproj"/>
-        <ProjectReference Include="..\Hosts\Hosts.Contracts\Hosts.Contracts.csproj"/>
-        <ProjectReference Include="..\Promotions\Promotions.Contracts\Promotions.Contracts.csproj"/>
-        <ProjectReference Include="..\Transactions\Transactions.Contracts\Transactions.Contracts.csproj"/>
-        <ProjectReference Include="Bookings.Contracts\Bookings.Contracts.csproj"/>
+        <ProjectReference Include="Availability.Contracts\Availability.Contracts.csproj"/>
     </ItemGroup>
 
 </Project>

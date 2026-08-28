@@ -13,7 +13,7 @@ Hangfire is the default choice for most .NET teams: mature, huge ecosystem, a bu
 Adopt **TickerQ**: a newer, source-generator-based scheduler. Jobs are plain methods marked `[TickerFunction]`, registered at compile time - no runtime reflection in the dispatch path. It has its own EF Core-backed operational store and a dashboard, matching Hangfire's feature set without Hangfire's dispatch model.
 
 Ownership split:
-- Each module owns its own jobs as `[TickerFunction]` methods against its own `DbContext` (`Catalog.Jobs.ExpiredHoldsSweepJob`, `Identity.Jobs.ExpiredRefreshTokensSweepJob`) - the module knows *what* should happen periodically.
+- Each module owns its own jobs as `[TickerFunction]` methods against its own `DbContext` (`Availability.Jobs.ExpiredHoldsSweepJob`, `Identity.Jobs.ExpiredRefreshTokensSweepJob`) - the module knows *what* should happen periodically.
 - `Infrastructure/Jobs` owns scheduler registration, the operational store, and the dashboard (gated behind the existing `Administrator` authorization policy via `WithHostAuthentication`, not a second credential store) - infrastructure knows *how* scheduled execution is hosted.
 
 Every job is written to be safe under at-least-once execution (idempotent `DELETE`/`ExecuteDeleteAsync` operations) - a background scheduler should never be assumed to run a job exactly once, TickerQ or otherwise.

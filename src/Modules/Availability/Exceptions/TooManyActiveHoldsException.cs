@@ -1,6 +1,6 @@
 using BuildingBlocks.Exceptions;
 using System.Net;
-namespace Catalog.Exceptions;
+namespace Availability.Exceptions;
 
 /// <summary>
 ///     This hold-session already has too many concurrent active

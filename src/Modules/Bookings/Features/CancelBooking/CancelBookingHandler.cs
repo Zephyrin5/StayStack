@@ -1,8 +1,8 @@
+using Availability.Contracts;
 using Bookings.Entities;
 using Bookings.Features.Common;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
-using Catalog.Contracts;
 using Mediator;
 using Promotions.Contracts;
 using SeedWork.ValueObjects;

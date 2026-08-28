@@ -1,3 +1,4 @@
+using Availability.Contracts;
 using Catalog.Contracts;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -5,11 +6,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Persistence;
 using Persistence.Interceptors;
-namespace Catalog;
+namespace Availability;
 
-public static class CatalogServicesRegistration
+public static class AvailabilityServicesRegistration
 {
-    public static IServiceCollection ConfigureCatalogServices(
+    public static IServiceCollection ConfigureAvailabilityServices(
         this IServiceCollection services,
         IConfiguration configuration,
         IWebHostEnvironment? environment = null)
@@ -25,21 +26,27 @@ public static class CatalogServicesRegistration
         // than being newed up by hand.
         services.AddScoped<AuditableEntitySaveChangesInterceptor>();
 
-        services.AddDbContext<AppCatalogDbContext>((serviceProvider, options) =>
+        services.AddDbContext<AppAvailabilityDbContext>((serviceProvider, options) =>
         {
             string connectionString = configuration.GetConnectionString("AppConnection")
                                       ?? throw new InvalidOperationException(
-                                          "Connection string for AppCatalogDbContext not found.");
+                                          "Connection string for AppAvailabilityDbContext not found.");
 
             options.ConfigureStayStackDefaults(
                 connectionString,
-                "catalog",
+                "availability",
                 environment is not null && environment.IsDevelopment());
 
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
 
-        services.AddScoped<IUnitLookup, UnitLookup>();
+        services.AddScoped<IHoldConfirmation, HoldConfirmation>();
+        services.AddScoped<IHoldLookup, HoldLookup>();
+
+        // Implements a Catalog-defined interface, not one of Availability's
+        // own - see IUnitAvailabilityLookup's own doc comment for why the
+        // interface lives on the Catalog side of this relationship.
+        services.AddScoped<IUnitAvailabilityLookup, UnitAvailabilityLookup>();
 
         return services;
     }

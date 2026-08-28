@@ -14,6 +14,7 @@ public class DeletePropertyHandler(
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization,
     IUnitArchivalGuard unitArchivalGuard,
+    IUnitAvailabilityLookup availabilityLookup,
     TimeProvider timeProvider) : IRequestHandler<DeletePropertyRequest, DeletePropertyResponse>
 {
     public async ValueTask<DeletePropertyResponse> Handle(DeletePropertyRequest request, CancellationToken cancellationToken)
@@ -47,7 +48,7 @@ public class DeletePropertyHandler(
         // shouldn't be a back door around the single-unit check.
         foreach (Unit unit in units)
         {
-            await DeleteUnitHandler.EnsureNoActiveBookingsOrHoldsAsync(unit.Id, timeProvider, dbContext, unitArchivalGuard, cancellationToken);
+            await DeleteUnitHandler.EnsureNoActiveBookingsOrHoldsAsync(unit.Id, timeProvider, unitArchivalGuard, availabilityLookup, cancellationToken);
         }
 
         foreach (Unit unit in units)

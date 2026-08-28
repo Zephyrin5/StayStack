@@ -1,3 +1,4 @@
+using Catalog.Domain;
 using Catalog.Entities;
 using Microsoft.EntityFrameworkCore;
 namespace Catalog.Contracts;
@@ -74,5 +75,31 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
             .Where(u => dbContext.Properties.Where(p => p.HostId == hostId).Select(p => p.Id).Contains(u.PropertyId))
             .Select(u => u.Id)
             .ToListAsync(cancellationToken);
+    }
+
+    public async Task<StayPricingResult?> ResolveStayPricingAsync(
+        Guid unitId, DateOnly checkIn, DateOnly checkOut, CancellationToken cancellationToken)
+    {
+        Unit? unit = await dbContext.Units.AsNoTracking()
+            .SingleOrDefaultAsync(u => u.Id == unitId, cancellationToken);
+
+        if (unit is null)
+        {
+            return null;
+        }
+
+        List<PricingRule> rules = await dbContext.PricingRules.AsNoTracking()
+            .Where(r => r.UnitId == unitId)
+            .ToListAsync(cancellationToken);
+
+        StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(unit.BasePrice, checkIn, checkOut, rules);
+
+        return new StayPricingResult
+        {
+            MaxOccupancy = unit.MaxOccupancy,
+            TotalPrice = breakdown.Total,
+            Subtotal = breakdown.Subtotal.Amount,
+            LengthOfStayDiscountAmount = breakdown.LengthOfStayDiscountAmount
+        };
     }
 }

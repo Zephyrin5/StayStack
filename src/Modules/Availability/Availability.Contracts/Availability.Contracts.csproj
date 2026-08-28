@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- See docs/adr/0004 for why Contracts projects (not Availability
+             itself) are what other modules depend on. -->
+        <ProjectReference Include="..\..\..\Core\SeedWork\SeedWork.csproj"/>
+        <ProjectReference Include="..\..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
+    </ItemGroup>
+
+</Project>

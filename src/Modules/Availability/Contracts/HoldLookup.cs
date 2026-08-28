@@ -1,9 +1,9 @@
 using Microsoft.EntityFrameworkCore;
-namespace Catalog.Contracts;
+namespace Availability.Contracts;
 
-// internal, same reasoning as UnitLookup - Bookings should only ever reach
-// this through IHoldLookup, resolved via DI.
-internal class HoldLookup(AppCatalogDbContext dbContext) : IHoldLookup
+// internal, same reasoning as HoldConfirmation - Bookings should only ever
+// reach this through IHoldLookup, resolved via DI.
+internal class HoldLookup(AppAvailabilityDbContext dbContext) : IHoldLookup
 {
     public async Task<IReadOnlyList<Guid>> GetBookedHoldIdsOlderThanAsync(
         DateTimeOffset cutoff, DateTimeOffset earliestBookedAt, int maxResults, CancellationToken cancellationToken)

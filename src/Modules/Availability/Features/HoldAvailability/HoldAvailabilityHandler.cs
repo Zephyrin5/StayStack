@@ -1,7 +1,6 @@
 using Ardalis.GuardClauses;
-using Catalog.Domain;
-using Catalog.Entities;
-using Catalog.Exceptions;
+using Availability.Exceptions;
+using Catalog.Contracts;
 using Dapper;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
@@ -10,11 +9,10 @@ using Npgsql;
 using NpgsqlTypes;
 using System.Data;
 using NotFoundException = BuildingBlocks.Exceptions.NotFoundException;
-using Unit = Catalog.Entities.Unit;
 
-namespace Catalog.Features.HoldAvailability;
+namespace Availability.Features.HoldAvailability;
 
-public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider timeProvider)
+public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLookup unitLookup, TimeProvider timeProvider)
     : IRequestHandler<HoldAvailabilityRequest, HoldAvailabilityResponse>
 {
     private static readonly TimeSpan HoldDuration = TimeSpan.FromMinutes(15);
@@ -37,20 +35,22 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
         HoldAvailabilityRequest request,
         CancellationToken cancellationToken)
     {
-        Unit unit = await dbContext.Units
-                        .SingleOrDefaultAsync(u => u.Id == request.UnitId, cancellationToken)
-                    ?? throw new NotFoundException(nameof(Unit), request.UnitId);
-
-        List<PricingRule> rules = await dbContext.PricingRules
-            .Where(r => r.UnitId == unit.Id)
-            .ToListAsync(cancellationToken);
+        // One call covers everything this module needs from Catalog: the
+        // unit's max occupancy (for the guard below) and the resolved
+        // price for this exact stay - see Catalog.Contracts.IUnitLookup's
+        // own doc comment for why this replaced two local EF reads
+        // (Units, then PricingRules) this handler used to do directly,
+        // back when it lived in the same module as both tables.
+        StayPricingResult pricing = await unitLookup.ResolveStayPricingAsync(
+                                        request.UnitId, request.CheckIn, request.CheckOut, cancellationToken)
+                                    ?? throw new NotFoundException("Unit", request.UnitId);
 
         // Guard clauses for invariants that depend on THIS unit's data -
         // the request validator already confirmed CheckOut > CheckIn and
         // GuestCount > 0 as pure shape rules; these need the loaded Unit.
         Guard.Against.OutOfRange(
-            request.GuestCount, nameof(request.GuestCount), 1, unit.MaxOccupancy,
-            $"Guest count exceeds this unit's maximum occupancy of {unit.MaxOccupancy}.");
+            request.GuestCount, nameof(request.GuestCount), 1, pricing.MaxOccupancy,
+            $"Guest count exceeds this unit's maximum occupancy of {pricing.MaxOccupancy}.");
 
         DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().DateTime);
 
@@ -63,9 +63,6 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
             request.CheckIn, nameof(request.CheckIn),
             d => d.DayNumber - today.DayNumber <= MaxLeadTimeDays,
             $"Check-in date cannot be more than {MaxLeadTimeDays} days in the future.");
-
-        StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(
-            unit.BasePrice, request.CheckIn, request.CheckOut, rules);
 
         // Wrapped in the execution strategy, not called bare - a manually
         // started transaction bypasses EF's own per-operation retry
@@ -154,10 +151,10 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
                         HoldExpiresAt = holdExpiresAt,
                         CreatedAt = now,
                         request.GuestCount,
-                        TotalPrice = breakdown.Total.Amount,
-                        Subtotal = breakdown.Subtotal.Amount,
-                        Currency = breakdown.Total.Currency.ToString(),
-                        LengthOfStayDiscountAmount = breakdown.LengthOfStayDiscountAmount?.Amount,
+                        TotalPrice = pricing.TotalPrice.Amount,
+                        Subtotal = pricing.Subtotal,
+                        Currency = pricing.TotalPrice.Currency.ToString(),
+                        LengthOfStayDiscountAmount = pricing.LengthOfStayDiscountAmount?.Amount,
                         request.HolderToken
                     },
                     transaction.GetDbTransaction(),
@@ -188,8 +185,8 @@ public class HoldAvailabilityHandler(AppCatalogDbContext dbContext, TimeProvider
         {
             HoldId = result.HoldId,
             HoldExpiresAt = result.HoldExpiresAt.UtcDateTime,
-            TotalPrice = breakdown.Total.Amount,
-            Currency = breakdown.Total.Currency
+            TotalPrice = pricing.TotalPrice.Amount,
+            Currency = pricing.TotalPrice.Currency
         };
     }
 }

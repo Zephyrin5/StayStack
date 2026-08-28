@@ -11,6 +11,8 @@
     </Folder>
     <Folder Name="/src/Modules/">
         <Project Path="src/Modules/Identity/Identity.csproj" />
+        <Project Path="src/Modules/Availability/Availability.Contracts/Availability.Contracts.csproj" />
+        <Project Path="src/Modules/Availability/Availability.csproj" />
         <Project Path="src/Modules/Bookings/Bookings.Contracts/Bookings.Contracts.csproj" />
         <Project Path="src/Modules/Bookings/Bookings.csproj" />
         <Project Path="src/Modules/Catalog/Catalog.Contracts/Catalog.Contracts.csproj" />

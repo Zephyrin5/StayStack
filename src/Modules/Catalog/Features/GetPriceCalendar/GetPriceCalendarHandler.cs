@@ -1,3 +1,4 @@
+using Catalog.Contracts;
 using Catalog.Domain;
 using Catalog.Entities;
 using Dapper;
@@ -12,6 +13,7 @@ namespace Catalog.Features.GetPriceCalendar;
 
 public class GetPriceCalendarHandler(
     AppCatalogDbContext dbContext,
+    IUnitAvailabilityLookup availabilityLookup,
     HybridCache cache,
     TimeProvider timeProvider) : IRequestHandler<GetPriceCalendarRequest, GetPriceCalendarResponse>
 {
@@ -52,12 +54,15 @@ public class GetPriceCalendarHandler(
             await dbContext.Database.OpenConnectionAsync(cancellationToken);
         }
 
-        // Availability stays a pure SQL/indexed concern - no reason to
-        // duplicate that logic anywhere else. Pricing resolution, though,
-        // happens in C# via PricingCalculator (the same one
-        // HoldAvailabilityHandler calls) rather than re-implemented here in
-        // SQL, so the calendar preview and the actual charged price can
-        // never structurally drift apart. See docs/adr/0012.
+        // No longer joins unit_availability_holds directly - that table
+        // moved to the Availability module (see docs/adr/0004), so a raw
+        // SQL join against it by table name would be exactly the boundary
+        // violation ADR-0004 exists to prevent, no matter how proven the
+        // query shape already was. Availability answers "which ranges are
+        // blocking this unit" through IUnitAvailabilityLookup instead; the
+        // per-day containment check below is cheap enough in C# (a handful
+        // of ranges against at most a few dozen calendar days) that it
+        // isn't worth trying to push back into one SQL statement.
         //
         // Column aliases are cased to match PriceCalendarDayRow's property
         // names exactly (Dapper matches case-insensitively but does NOT
@@ -81,16 +86,7 @@ public class GetPriceCalendarHandler(
                            SELECT
                                d::date AS "Date",
                                u.base_price AS "BasePrice",
-                               u.currency AS "Currency",
-                               NOT EXISTS (
-                                   SELECT 1 FROM unit_availability_holds h
-                                   WHERE h.unit_id = @UnitId
-                                     AND h.stay_range @> d::date
-                                     AND (
-                                         h.status = 'booked'
-                                         OR (h.status = 'held' AND (h.hold_expires_at IS NULL OR h.hold_expires_at > @Now))
-                                     )
-                               ) AS "IsAvailable"
+                               u.currency AS "Currency"
                            FROM generate_series(@From::date, @To::date - interval '1 day', interval '1 day') AS d
                            CROSS JOIN units u
                            WHERE u.id = @UnitId AND u.status <> @ArchivedStatus
@@ -104,7 +100,6 @@ public class GetPriceCalendarHandler(
                 request.UnitId,
                 request.From,
                 request.To,
-                Now = timeProvider.GetUtcNow(),
                 ArchivedStatus = (int)EntityStatus.Archived
             },
             cancellationToken: cancellationToken);
@@ -119,6 +114,9 @@ public class GetPriceCalendarHandler(
             .Where(r => r.UnitId == request.UnitId)
             .ToListAsync(cancellationToken);
 
+        IReadOnlyList<ActiveHoldRange> blockedRanges = await availabilityLookup.GetActiveHoldRangesAsync(
+            request.UnitId, request.From, request.To, timeProvider.GetUtcNow(), cancellationToken);
+
         return rows
             .Select(row =>
             {
@@ -127,7 +125,7 @@ public class GetPriceCalendarHandler(
                 {
                     Date = row.Date,
                     Price = PricingCalculator.ResolveNightlyPrice(basePrice, row.Date, rules).Amount,
-                    IsAvailable = row.IsAvailable
+                    IsAvailable = !blockedRanges.Any(r => r.CheckIn <= row.Date && row.Date < r.CheckOut)
                 };
             })
             .ToList();
@@ -138,6 +136,5 @@ public class GetPriceCalendarHandler(
         public DateOnly Date { get; init; }
         public decimal BasePrice { get; init; }
         public string Currency { get; init; } = string.Empty;
-        public bool IsAvailable { get; init; }
     }
 }
