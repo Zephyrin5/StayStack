@@ -4,6 +4,7 @@ using BuildingBlocks.Identity;
 using BuildingBlocks.Security;
 using Catalog.Contracts;
 using Mediator;
+using SeedWork.ValueObjects;
 using System.Text.Json;
 namespace Bookings.Features.ConfirmBooking;
 
@@ -35,8 +36,8 @@ public class ConfirmBookingHandler(
         // before the Booking itself is ever saved.
         Guid bookingId = Guid.CreateVersion7();
 
-        decimal totalPrice = hold.TotalPrice;
-        decimal? redeemedDiscountAmount = null;
+        Money totalPrice = hold.TotalPrice;
+        Money? redeemedDiscountAmount = null;
 
         if (!string.IsNullOrWhiteSpace(request.PromoCode))
         {
@@ -46,15 +47,18 @@ public class ConfirmBookingHandler(
             // LOS discount undone) rather than the LOS-discounted total. See
             // docs on StayPriceBreakdown/PricingCalculator for why this is
             // the one PricingRule type a coupon competes with rather than
-            // compounds.
-            decimal couponBase = hold.LengthOfStayDiscountAmount is not null
-                ? hold.TotalPrice + hold.LengthOfStayDiscountAmount.Value
-                : hold.TotalPrice;
+            // compounds. hold.Subtotal is read directly - snapshotted on the
+            // hold at creation time (see UnitAvailabilityHold.Subtotal) -
+            // rather than reconstructed via hold.TotalPrice +
+            // hold.LengthOfStayDiscountAmount, which is exactly the rounding
+            // bug docs/adr/0015 exists to close: two independently-rounded
+            // numbers added back together to recover a third.
+            Money couponBase = Money.Of(hold.Subtotal, hold.TotalPrice.Currency);
 
             try
             {
                 PromotionRedemptionResult redemption = await promotionRedemption.RedeemAsync(
-                    request.PromoCode, hold.UnitId, request.GuestEmail, couponBase, hold.Currency,
+                    request.PromoCode, hold.UnitId, request.GuestEmail, couponBase,
                     bookingId, cancellationToken);
 
                 redeemedDiscountAmount = redemption.DiscountAmount;
@@ -138,7 +142,7 @@ public class ConfirmBookingHandler(
                 hold.CheckOut,
                 hold.GuestCount,
                 totalPrice,
-                hold.Currency,
+                hold.Subtotal,
                 unit.CancellationPolicy);
 
             dbContext.Bookings.Add(booking);
@@ -206,8 +210,8 @@ public class ConfirmBookingHandler(
             BookingStatus = booking.BookingStatus,
             CheckIn = booking.CheckIn,
             CheckOut = booking.CheckOut,
-            TotalPrice = booking.TotalPrice,
-            Currency = booking.Currency,
+            TotalPrice = booking.TotalPrice.Amount,
+            Currency = booking.TotalPrice.Currency,
             ManagementToken = managementToken
         };
     }

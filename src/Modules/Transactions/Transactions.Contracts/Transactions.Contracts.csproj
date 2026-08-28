@@ -3,4 +3,11 @@
     <PropertyGroup>
     </PropertyGroup>
 
+    <ItemGroup>
+        <!-- Needed for Money (docs/adr/0015) on ITransactionReversal - same
+             boundary reasoning as every other Contracts project referencing
+             the shared kernel, see docs/adr/0004. -->
+        <ProjectReference Include="..\..\..\Core\SeedWork\SeedWork.csproj"/>
+    </ItemGroup>
+
 </Project>

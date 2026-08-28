@@ -21,6 +21,9 @@
         <PackageReference Include="FastEndpoints.Generator"/>
         <PackageReference Include="Mediator.Abstractions"/>
         <PackageReference Include="Microsoft.EntityFrameworkCore"/>
+        <!-- For ReconcileOrphanedBookedHoldsJob - same TickerFunction source-
+             generator Catalog/Identity already use for their own jobs. -->
+        <PackageReference Include="TickerQ"/>
     </ItemGroup>
 
     <ItemGroup>

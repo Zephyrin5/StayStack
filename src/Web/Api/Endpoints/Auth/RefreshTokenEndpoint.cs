@@ -14,7 +14,8 @@ namespace Api.Endpoints.Auth;
 // Endpoint<Request, Response> maps the HTTP payload to your data shapes
 public class RefreshTokenEndpoint(
     IMediator mediator,
-    IOptions<AuthTokenConfiguration> tokenSettings) : Endpoint<RefreshTokenRequest, RefreshTokenResponse>
+    IOptions<AuthTokenConfiguration> tokenSettings,
+    TimeProvider timeProvider) : Endpoint<RefreshTokenRequest, RefreshTokenResponse>
 {
     public override void Configure()
     {
@@ -59,7 +60,7 @@ public class RefreshTokenEndpoint(
 
         if (cookieAuth)
         {
-            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken!, tokenSettings.Value);
+            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken!, tokenSettings.Value, timeProvider);
             result = result with { RefreshToken = null };
         }
 

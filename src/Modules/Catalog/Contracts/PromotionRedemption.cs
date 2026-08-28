@@ -5,7 +5,7 @@ using Dapper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
-using SeedWork.Enums;
+using SeedWork.ValueObjects;
 using System.Data;
 using NotFoundException = BuildingBlocks.Exceptions.NotFoundException;
 using Unit = Catalog.Entities.Unit;
@@ -20,8 +20,7 @@ internal class PromotionRedemption(AppCatalogDbContext dbContext, TimeProvider t
         string code,
         Guid unitId,
         string guestEmail,
-        decimal subtotal,
-        Currency currency,
+        Money subtotal,
         Guid bookingId,
         CancellationToken cancellationToken)
     {
@@ -51,12 +50,12 @@ internal class PromotionRedemption(AppCatalogDbContext dbContext, TimeProvider t
             }
         }
 
-        if (promotion.DiscountType == PromotionDiscountType.FixedAmount && promotion.Currency != currency)
+        if (promotion.DiscountType == PromotionDiscountType.FixedAmount && promotion.Currency != subtotal.Currency)
         {
             throw new PromotionInvalidException($"Promo code '{code}' is not valid in this currency.");
         }
 
-        decimal discountAmount = ComputeDiscountAmount(promotion, subtotal);
+        Money discountAmount = ComputeDiscountAmount(promotion, subtotal);
 
         // Wrapped in the execution strategy, not called bare - same
         // deadlock/retry reasoning as HoldAvailabilityHandler. Two
@@ -105,8 +104,8 @@ internal class PromotionRedemption(AppCatalogDbContext dbContext, TimeProvider t
                         PromotionId = promotion.Id,
                         BookingId = bookingId,
                         GuestEmail = normalizedEmail,
-                        DiscountAmount = discountAmount,
-                        Currency = currency.ToString(),
+                        DiscountAmount = discountAmount.Amount,
+                        Currency = discountAmount.Currency.ToString(),
                         RedeemedAt = timeProvider.GetUtcNow()
                     },
                     transaction.GetDbTransaction(),
@@ -139,20 +138,27 @@ internal class PromotionRedemption(AppCatalogDbContext dbContext, TimeProvider t
                 await dbContext.Database.BeginTransactionAsync(cancellationToken);
             IDbConnection connection = dbContext.Database.GetDbConnection();
 
-            const string deleteSql = """
-                                     DELETE FROM promotion_redemptions
-                                     WHERE booking_id = @BookingId
-                                     RETURNING promotion_id AS "PromotionId";
-                                     """;
+            // UPDATE, not DELETE - the row survives as history (see
+            // PromotionRedemption.ReversedAt's own doc comment), and the
+            // "already reversed" guard (reversed_at IS NULL) makes this
+            // idempotent the same way a plain DELETE naturally was: calling
+            // it twice for the same booking only ever affects the row once.
+            const string reverseSql = """
+                                      UPDATE promotion_redemptions
+                                      SET reversed_at = @Now
+                                      WHERE booking_id = @BookingId AND reversed_at IS NULL
+                                      RETURNING promotion_id AS "PromotionId";
+                                      """;
 
             Guid? promotionId = await connection.QuerySingleOrDefaultAsync<Guid?>(new CommandDefinition(
-                deleteSql, new { BookingId = bookingId }, transaction.GetDbTransaction(),
+                reverseSql, new { BookingId = bookingId, Now = timeProvider.GetUtcNow() }, transaction.GetDbTransaction(),
                 cancellationToken: cancellationToken));
 
             if (promotionId is null)
             {
-                // No-op - this booking never redeemed a code, same
-                // idempotent shape as IHoldConfirmation.ReleaseHoldAsync.
+                // No-op - this booking never redeemed a code, or its
+                // redemption was already reversed - same idempotent shape
+                // as IHoldConfirmation.ReleaseHoldAsync.
                 await transaction.CommitAsync(cancellationToken);
                 return;
             }
@@ -174,12 +180,17 @@ internal class PromotionRedemption(AppCatalogDbContext dbContext, TimeProvider t
     // internal, not private - exercised directly by PromotionRedemptionTests
     // (UnitTests) via InternalsVisibleTo, rather than only indirectly
     // through a full RedeemAsync call.
-    internal static decimal ComputeDiscountAmount(Promotion promotion, decimal subtotal)
+    internal static Money ComputeDiscountAmount(Promotion promotion, Money subtotal)
     {
+        // promotion.DiscountValue is already validated to match
+        // subtotal.Currency for FixedAmount (see the check in RedeemAsync);
+        // Percentage is currency-agnostic by construction (Promotion.Currency
+        // is null for it), so the result just inherits subtotal's currency
+        // either way.
         decimal discount = promotion.DiscountType == PromotionDiscountType.Percentage
-            ? subtotal * promotion.DiscountValue / 100m
+            ? subtotal.Amount * promotion.DiscountValue / 100m
             : promotion.DiscountValue;
 
-        return Math.Min(discount, subtotal);
+        return Money.Of(Math.Min(discount, subtotal.Amount), subtotal.Currency);
     }
 }

@@ -260,7 +260,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         Assert.Equal(1, promotion.RedemptionCount);
         PromotionRedemption redemption = await db.PromotionRedemptions
             .SingleAsync(r => r.PromotionId == promotionId, TestContext.Current.CancellationToken);
-        Assert.Equal(60m, redemption.DiscountAmount);
+        Assert.Equal(60m, redemption.DiscountAmount.Amount);
         Assert.Equal("guest@example.com", redemption.GuestEmail);
         Assert.Equal(result.BookingId, redemption.BookingId);
     }
@@ -460,7 +460,11 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         Guid[] holdIds = new Guid[concurrentRequests];
         for (int i = 0; i < concurrentRequests; i++)
         {
-            holdIds[i] = await HoldUnitAsync(unitId, today.AddDays(i * 3), today.AddDays(i * 3 + 2));
+            // A fresh client per iteration, same as the confirm step below -
+            // these represent 8 different prospective guests, not one
+            // session holding 8 ranges, so each needs its own hold-session
+            // cookie rather than sharing _client's.
+            holdIds[i] = await HoldUnitAsync(unitId, today.AddDays(i * 3), today.AddDays(i * 3 + 2), factory.CreateClient());
         }
 
         Task<HttpResponseMessage>[] tasks =

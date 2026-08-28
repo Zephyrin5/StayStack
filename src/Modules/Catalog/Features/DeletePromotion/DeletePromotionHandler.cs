@@ -23,7 +23,7 @@ public class DeletePromotionHandler(
             throw new NotFoundException(nameof(Promotion), request.PromotionId);
         }
 
-        if (!currentUserProvider.Roles.Contains("Administrator"))
+        if (!currentUserProvider.Roles.Contains(AuthorizationPolicies.Administrator))
         {
             if (promotion.HostId is null)
             {

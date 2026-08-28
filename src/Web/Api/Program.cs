@@ -10,12 +10,14 @@ using Identity;
 using Jobs;
 using Reviews;
 using TickerQ.DependencyInjection;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using Persistence;
 using Scalar.AspNetCore;
+using System.Net;
 using System.Text.Json.Nodes;
 using System.Threading.RateLimiting;
 using Transactions;
@@ -62,6 +64,9 @@ builder.Services.AddHealthChecks();
 // ordinary test traffic; RateLimitingTests overrides it back down on its
 // own WithWebHostBuilder-derived factory to actually exercise a 429.
 builder.Services.Configure<AuthRateLimitOptions>(builder.Configuration.GetSection("RateLimiting"));
+// Same "RateLimiting" section, sibling keys - HoldPermitLimit/HoldWindowSeconds
+// coexist with AuthPermitLimit/AuthWindowSeconds without colliding.
+builder.Services.Configure<HoldRateLimitOptions>(builder.Configuration.GetSection("RateLimiting"));
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -77,6 +82,28 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = limits.AuthPermitLimit,
                 Window = TimeSpan.FromSeconds(limits.AuthWindowSeconds),
+                QueueLimit = 0
+            });
+    });
+
+    // HoldAvailabilityEndpoint is anonymous and DB-write - the caps in
+    // HoldAvailabilityRequestValidator/HoldAvailabilityHandler bound how
+    // much damage one hold can do, this bounds how many a single caller can
+    // fire. Partitioned the same way as "auth" (by RemoteIpAddress, correct
+    // once ForwardedHeaders is processing a real proxy's headers) rather
+    // than by the hold-session cookie - the cookie is an ownership handle a
+    // scripted caller can drop and regenerate per request, so it would be
+    // no partition at all as a rate-limit key.
+    options.AddPolicy(ApiServicesRegistration.HoldRateLimitPolicy, httpContext =>
+    {
+        HoldRateLimitOptions limits = httpContext.RequestServices.GetRequiredService<IOptions<HoldRateLimitOptions>>().Value;
+
+        return RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = limits.HoldPermitLimit,
+                Window = TimeSpan.FromSeconds(limits.HoldWindowSeconds),
                 QueueLimit = 0
             });
     });
@@ -146,7 +173,33 @@ if (app.Environment.IsDevelopment())
     });
 }
 
+// Trusts nothing by default - ForwardedHeadersOptions' own KnownNetworks/
+// KnownProxies (loopback only) would otherwise let an untrusted edge spoof
+// X-Forwarded-For/-Proto and defeat both AuthCookies' Secure-flag check and
+// the IP-partitioned rate limiter's partition key below. Populated from
+// config (never hardcoded) so each deployment lists its actual reverse
+// proxy/load balancer addresses. Registered before anything else in the
+// pipeline reads Request.IsHttps or Connection.RemoteIpAddress.
+ForwardedHeadersOptions forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+};
+foreach (string proxy in app.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [])
+{
+    forwardedHeadersOptions.KnownProxies.Add(IPAddress.Parse(proxy));
+}
+app.UseForwardedHeaders(forwardedHeadersOptions);
+
 app.UseRequestLocalization();
+
+app.UseHttpsRedirection();
+
+// Registered before the /api exception-handler branch below (rather than
+// after it, as it was originally) so CORS headers still get applied to
+// responses the exception handler generates - CORS is the outer wrapper on
+// the way back out, so a 4xx/5xx from /api no longer looks like a CORS
+// failure to a cross-origin frontend instead of the real error.
+app.UseCors(ApiServicesRegistration.ClientAppCorsPolicy);
 
 // Scope global error and status code handling strictly to /api routes
 app.UseWhen(context => context.Request.Path.StartsWithSegments("/api"), apiApp =>
@@ -172,10 +225,6 @@ app.UseWhen(context => context.Request.Path.StartsWithSegments("/api"), apiApp =
     // 2. Handles exceptions thrown inside /api request pipelines
     apiApp.UseExceptionHandler(_ => { });
 });
-
-app.UseHttpsRedirection();
-
-app.UseCors(ApiServicesRegistration.ClientAppCorsPolicy);
 
 // Explicit rather than relying on WebApplication's implicit auto-insertion
 // (which only fires immediately before the first endpoint-routing-aware

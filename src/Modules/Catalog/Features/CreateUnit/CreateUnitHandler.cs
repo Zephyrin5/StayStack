@@ -34,7 +34,7 @@ public class CreateUnitHandler(
         // unlike CreatePropertyRequest's old HostId field - this decides
         // whether to run an extra check, not whether to trust
         // client-supplied data over the token.
-        if (!currentUserProvider.Roles.Contains("Administrator"))
+        if (!currentUserProvider.Roles.Contains(AuthorizationPolicies.Administrator))
         {
             hostAuthorization.RequireOwnership(property.HostId, nameof(Property), request.PropertyId);
         }

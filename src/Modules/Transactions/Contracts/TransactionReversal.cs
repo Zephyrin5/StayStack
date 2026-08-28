@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SeedWork.ValueObjects;
 using Transactions.Entities;
 using Transactions.Exceptions;
 namespace Transactions.Contracts;
@@ -7,7 +8,7 @@ namespace Transactions.Contracts;
 // should only ever reach this through ITransactionReversal, resolved via DI.
 internal class TransactionReversal(AppTransactionsDbContext dbContext) : ITransactionReversal
 {
-    public async Task<decimal?> ReverseTransactionAsync(Guid bookingId, decimal refundAmount, CancellationToken cancellationToken)
+    public async Task<decimal?> ReverseTransactionAsync(Guid bookingId, Money refundAmount, CancellationToken cancellationToken)
     {
         // Only a Succeeded transaction needs anything done here - money
         // was actually collected, so it needs reversing. A Pending one is
@@ -29,7 +30,7 @@ internal class TransactionReversal(AppTransactionsDbContext dbContext) : ITransa
         {
             transaction.MarkRefundPending(refundAmount);
             await dbContext.SaveChangesAsync(cancellationToken);
-            return refundAmount;
+            return refundAmount.Amount;
         }
         catch (TransactionAlreadyFinalizedException)
         {
@@ -39,5 +40,25 @@ internal class TransactionReversal(AppTransactionsDbContext dbContext) : ITransa
             // side won is already correct, nothing left to do here.
             return null;
         }
+    }
+
+    public async Task<TransactionRefundSnapshot?> GetRefundSnapshotAsync(Guid bookingId, CancellationToken cancellationToken)
+    {
+        // RefundAmount is only ever set by MarkRefundPending, which is only
+        // reachable from Succeeded and never reversible - at most one
+        // transaction per booking can ever have a non-null RefundAmount, so
+        // this is safe as a SingleOrDefaultAsync despite a booking
+        // potentially having more than one Transaction row across retried
+        // payment attempts (the partial unique index only constrains
+        // Pending/Succeeded to one at a time, not history). Materialize
+        // first, map after - see docs/adr/0006, applied to Amount's
+        // ComplexProperty mapping the same way BookingLookup.GetBookingAsync
+        // already does for TotalPrice.
+        Transaction? transaction = await dbContext.Transactions.AsNoTracking()
+            .SingleOrDefaultAsync(t => t.BookingId == bookingId && t.RefundAmount != null, cancellationToken);
+
+        return transaction is null
+            ? null
+            : new TransactionRefundSnapshot { Amount = transaction.Amount.Amount, RefundAmount = transaction.RefundAmount!.Value };
     }
 }

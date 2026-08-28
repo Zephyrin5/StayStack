@@ -57,8 +57,8 @@ public class GetPropertyByIdHandler(AppCatalogDbContext dbContext, HybridCache c
                     Id = u.Id,
                     Name = new Dictionary<string, string>(u.Name.Values),
                     MaxOccupancy = u.MaxOccupancy,
-                    BasePrice = u.BasePrice,
-                    Currency = u.Currency,
+                    BasePrice = u.BasePrice.Amount,
+                    Currency = u.BasePrice.Currency,
                     CancellationTiers = [.. u.CancellationPolicy.Tiers]
                 })
             ]

@@ -18,7 +18,7 @@ public class ReplyToStayReviewHandler(
                                  .SingleOrDefaultAsync(r => r.Id == request.StayReviewId, cancellationToken)
                              ?? throw new NotFoundException(nameof(StayReview), request.StayReviewId);
 
-        if (!currentUserProvider.Roles.Contains("Administrator"))
+        if (!currentUserProvider.Roles.Contains(AuthorizationPolicies.Administrator))
         {
             hostAuthorization.RequireOwnership(review.HostId, nameof(StayReview), review.Id);
         }

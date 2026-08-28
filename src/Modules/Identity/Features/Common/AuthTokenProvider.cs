@@ -128,13 +128,18 @@ public class AuthTokenProvider(
             throw new InvalidRefreshTokenException();
         }
 
-        if (existing.IsRevoked)
+        // Expiry checked before revocation status: a token that is both
+        // revoked and expired (an old, already-rotated token replayed long
+        // after its own lifetime ran out) is an expired token, not reuse -
+        // checking IsRevoked first would classify that harmless case as an
+        // attack and revoke the entire family over it.
+        if (existing.ExpiresAt <= now)
         {
-            await RevokeFamilyAsync(existing.FamilyId, cancellationToken);
-            throw new RefreshTokenReuseDetectedException();
+            throw new RefreshTokenExpiredException();
         }
 
-        throw new RefreshTokenExpiredException();
+        await RevokeFamilyAsync(existing.FamilyId, cancellationToken);
+        throw new RefreshTokenReuseDetectedException();
     }
 
     public async Task RevokeRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken)

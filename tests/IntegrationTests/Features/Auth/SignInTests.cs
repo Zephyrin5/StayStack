@@ -95,4 +95,75 @@ public class SignInIntegrationTests(IntegrationTestWebApplicationFactory factory
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task SignIn_ShouldLockAccount_AfterFiveFailedAttempts()
+    {
+        // IdentityServicesRegistration configures MaxFailedAccessAttempts =
+        // 5 - lockoutOnFailure: true in SignInHandler is what actually arms
+        // it (previously false, so failed attempts never counted at all).
+        string email = _faker.Internet.Email();
+        string correctPassword = $"P@1{_faker.Internet.Password()}!";
+        string wrongPassword = $"P@2{_faker.Internet.Password()}!";
+        await SeedUserAsync(email, correctPassword);
+
+        for (int i = 0; i < 5; i++)
+        {
+            HttpResponseMessage failedAttempt = await _client.PostAsJsonAsync("/api/auth/sign-in", new SignInRequest
+            {
+                Email = email,
+                Password = wrongPassword
+            });
+            Assert.Equal(HttpStatusCode.Unauthorized, failedAttempt.StatusCode);
+        }
+
+        // The 6th attempt uses the CORRECT password - if lockout is truly
+        // armed, this still fails, proving the account is locked rather
+        // than just repeatedly rejecting a wrong password.
+        HttpResponseMessage lockedAttempt = await _client.PostAsJsonAsync("/api/auth/sign-in", new SignInRequest
+        {
+            Email = email,
+            Password = correctPassword
+        });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, lockedAttempt.StatusCode);
+    }
+
+    [Fact]
+    public async Task SignIn_LockedOutResponse_ShouldBeIndistinguishableFromWrongPassword()
+    {
+        // See docs/adr/0016: a distinguishable "account locked" response is
+        // itself an enumeration oracle (only an account that exists can
+        // ever be locked out), so SignInHandler deliberately maps
+        // IsLockedOut to the exact same InvalidCredentialsException as any
+        // other failure. Asserts the actual response bodies match, not just
+        // both being 401 - a different Detail message would still leak it.
+        string email = _faker.Internet.Email();
+        string correctPassword = $"P@1{_faker.Internet.Password()}!";
+        string wrongPassword = $"P@2{_faker.Internet.Password()}!";
+        await SeedUserAsync(email, correctPassword);
+
+        HttpResponseMessage ordinaryWrongPassword = await _client.PostAsJsonAsync("/api/auth/sign-in", new SignInRequest
+        {
+            Email = email,
+            Password = wrongPassword
+        });
+        string ordinaryBody = await ordinaryWrongPassword.Content.ReadAsStringAsync();
+
+        for (int i = 0; i < 4; i++)
+        {
+            await _client.PostAsJsonAsync("/api/auth/sign-in", new SignInRequest { Email = email, Password = wrongPassword });
+        }
+
+        // Now locked out - even the correct password fails.
+        HttpResponseMessage lockedOut = await _client.PostAsJsonAsync("/api/auth/sign-in", new SignInRequest
+        {
+            Email = email,
+            Password = correctPassword
+        });
+        string lockedOutBody = await lockedOut.Content.ReadAsStringAsync();
+
+        Assert.Equal(ordinaryWrongPassword.StatusCode, lockedOut.StatusCode);
+        Assert.Equal(ordinaryBody, lockedOutBody);
+    }
 }

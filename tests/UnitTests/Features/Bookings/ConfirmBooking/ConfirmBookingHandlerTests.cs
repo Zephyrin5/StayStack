@@ -52,8 +52,8 @@ public class ConfirmBookingHandlerTests : IDisposable
             CheckIn = DateOnly.FromDateTime(DateTime.UtcNow),
             CheckOut = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(2),
             GuestCount = 2,
-            TotalPrice = 200m,
-            Currency = Currency.KWD
+            TotalPrice = Money.Of(200m, Currency.KWD),
+            Subtotal = 200m
         };
 
         Mock<IHoldConfirmation> holdConfirmationMock = new Mock<IHoldConfirmation>();
@@ -72,7 +72,6 @@ public class ConfirmBookingHandlerTests : IDisposable
                 Id = hold.UnitId,
                 MaxOccupancy = hold.GuestCount,
                 BasePrice = hold.TotalPrice,
-                Currency = hold.Currency,
                 PropertyId = Guid.NewGuid(),
                 HostId = Guid.NewGuid(),
                 CancellationPolicy = CancellationPolicy.CreateDefault()
@@ -115,8 +114,8 @@ public class ConfirmBookingHandlerTests : IDisposable
             CheckIn = DateOnly.FromDateTime(DateTime.UtcNow),
             CheckOut = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(2),
             GuestCount = 2,
-            TotalPrice = 200m,
-            Currency = Currency.KWD
+            TotalPrice = Money.Of(200m, Currency.KWD),
+            Subtotal = 200m
         };
 
         Mock<IHoldConfirmation> holdConfirmationMock = new Mock<IHoldConfirmation>();
@@ -139,7 +138,6 @@ public class ConfirmBookingHandlerTests : IDisposable
                 Id = hold.UnitId,
                 MaxOccupancy = hold.GuestCount,
                 BasePrice = hold.TotalPrice,
-                Currency = hold.Currency,
                 PropertyId = Guid.NewGuid(),
                 HostId = Guid.NewGuid(),
                 CancellationPolicy = CancellationPolicy.CreateDefault()

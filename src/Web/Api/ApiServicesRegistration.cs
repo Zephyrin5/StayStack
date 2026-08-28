@@ -20,6 +20,7 @@ public static class ApiServicesRegistration
 {
     public const string ClientAppCorsPolicy = "ClientApp";
     public const string AuthRateLimitPolicy = "auth";
+    public const string HoldRateLimitPolicy = "holds";
 
     public static IServiceCollection ConfigureApiServices(
         this IServiceCollection services,

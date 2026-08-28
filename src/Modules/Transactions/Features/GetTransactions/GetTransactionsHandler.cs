@@ -28,8 +28,8 @@ public class GetTransactionsHandler(AppTransactionsDbContext dbContext) : IReque
                 {
                     TransactionId = t.Id,
                     BookingId = t.BookingId,
-                    Amount = t.Amount,
-                    Currency = t.Currency,
+                    Amount = t.Amount.Amount,
+                    Currency = t.Amount.Currency,
                     TransactionStatus = t.TransactionStatus,
                     FailureReason = t.FailureReason,
                     CreatedAt = t.CreatedAt

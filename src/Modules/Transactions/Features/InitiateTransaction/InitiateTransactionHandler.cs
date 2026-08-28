@@ -45,7 +45,7 @@ public class InitiateTransactionHandler(
             throw new TransactionAlreadyInProgressException(request.BookingId);
         }
 
-        Transaction transaction = Transaction.Create(request.BookingId, booking.TotalPrice, booking.Currency);
+        Transaction transaction = Transaction.Create(request.BookingId, booking.TotalPrice);
 
         dbContext.Transactions.Add(transaction);
 
@@ -62,8 +62,8 @@ public class InitiateTransactionHandler(
         {
             TransactionId = transaction.Id,
             BookingId = transaction.BookingId,
-            Amount = transaction.Amount,
-            Currency = transaction.Currency,
+            Amount = transaction.Amount.Amount,
+            Currency = transaction.Amount.Currency,
             TransactionStatus = transaction.TransactionStatus
         };
     }

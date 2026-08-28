@@ -1,10 +1,13 @@
+using Api.Security;
 using Catalog.Features.HoldAvailability;
 using FastEndpoints;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 namespace Api.Endpoints.Catalog;
 
-public class HoldAvailabilityEndpoint(IMediator mediator) : Endpoint<HoldAvailabilityRequest, HoldAvailabilityResponse>
+public class HoldAvailabilityEndpoint(IMediator mediator, TimeProvider timeProvider)
+    : Endpoint<HoldAvailabilityRequest, HoldAvailabilityResponse>
 {
     public override void Configure()
     {
@@ -12,6 +15,7 @@ public class HoldAvailabilityEndpoint(IMediator mediator) : Endpoint<HoldAvailab
         AllowAnonymous();
         Group<CatalogGroup>();
         Description(b => b.WithTags("Availability"));
+        Options(x => x.RequireRateLimiting(ApiServicesRegistration.HoldRateLimitPolicy));
 
         Summary(s =>
         {
@@ -23,11 +27,14 @@ public class HoldAvailabilityEndpoint(IMediator mediator) : Endpoint<HoldAvailab
             s.Response<ValidationProblemDetails>(400, "Validation failed.");
             s.Response(404, "Unit not found.");
             s.Response(409, "Unit is unavailable for some or all of the requested range.");
+            s.Response(429, "Too many concurrent holds for this session, or too many requests.");
         });
     }
 
     public override async Task HandleAsync(HoldAvailabilityRequest req, CancellationToken ct)
     {
+        req.HolderToken = HttpContext.Request.GetOrCreateHoldSessionToken(HttpContext.Response, timeProvider);
+
         HoldAvailabilityResponse result = await mediator.Send(req, ct);
         await Send.OkAsync(result, ct);
     }

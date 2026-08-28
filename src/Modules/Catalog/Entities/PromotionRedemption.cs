@@ -1,4 +1,4 @@
-using SeedWork.Enums;
+using SeedWork.ValueObjects;
 namespace Catalog.Entities;
 
 /// <summary>
@@ -27,7 +27,13 @@ public sealed class PromotionRedemption
     // as distinct rows.
     public string GuestEmail { get; set; } = string.Empty;
 
-    public decimal DiscountAmount { get; set; }
-    public Currency Currency { get; set; }
+    public Money DiscountAmount { get; set; }
     public DateTimeOffset RedeemedAt { get; set; }
+
+    // Null while the redemption stands. Set instead of deleting the row on
+    // cancellation - see docs/adr's finding #10 write-up: a deleted
+    // redemption erases the one-per-email history the unique index exists
+    // to enforce, letting the same code be redeemed, cancelled, and
+    // redeemed again by the same email indefinitely.
+    public DateTimeOffset? ReversedAt { get; set; }
 }

@@ -1,4 +1,5 @@
 using Bookings.Contracts;
+using Catalog.Contracts;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -41,6 +42,11 @@ public static class BookingsServicesRegistration
 
         services.AddScoped<IBookingLookup, BookingLookup>();
         services.AddScoped<IBookingPaymentConfirmation, BookingPaymentConfirmation>();
+
+        // Implements a Catalog-defined interface, not one of Bookings' own -
+        // see IUnitArchivalGuard's own doc comment for why the interface
+        // lives on the Catalog side of this relationship.
+        services.AddScoped<IUnitArchivalGuard, UnitArchivalGuard>();
 
         return services;
     }

@@ -1,4 +1,4 @@
-﻿using Mediator;
+using Mediator;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;

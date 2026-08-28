@@ -51,10 +51,20 @@ public static class NpgsqlDbContextOptionsExtensions
             // HoldAvailabilityHandler's own CreateExecutionStrategy wrap
             // for the other half: this only makes the error retriable,
             // something still has to actually invoke the retry loop).
+            // 40001 (serialization_failure) added alongside it for the same
+            // reason, once CreatePricingRuleHandler started wrapping its
+            // check-then-insert in an IsolationLevel.Serializable
+            // transaction (see docs/adr/0012) - without it, a genuine
+            // concurrent conflict there would surface as an unhandled 500
+            // instead of retrying, the opposite of what Serializable was
+            // added for. This widens retry semantics for every DbContext in
+            // the app, not just that one path - accepted, since a
+            // serialization failure is retriable by definition everywhere
+            // it can occur.
             npgsql.EnableRetryOnFailure(
                 maxRetryCount: 6,
                 maxRetryDelay: TimeSpan.FromSeconds(30),
-                errorCodesToAdd: ["40P01"]);
+                errorCodesToAdd: ["40P01", "40001"]);
 
             if (migrationsAssembly is not null)
             {

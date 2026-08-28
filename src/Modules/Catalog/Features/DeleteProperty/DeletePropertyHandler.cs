@@ -1,6 +1,8 @@
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
+using Catalog.Contracts;
 using Catalog.Entities;
+using Catalog.Features.DeleteUnit;
 using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +13,7 @@ public class DeletePropertyHandler(
     AppCatalogDbContext dbContext,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization,
+    IUnitArchivalGuard unitArchivalGuard,
     TimeProvider timeProvider) : IRequestHandler<DeletePropertyRequest, DeletePropertyResponse>
 {
     public async ValueTask<DeletePropertyResponse> Handle(DeletePropertyRequest request, CancellationToken cancellationToken)
@@ -23,7 +26,7 @@ public class DeletePropertyHandler(
             throw new NotFoundException(nameof(Property), request.PropertyId);
         }
 
-        if (!currentUserProvider.Roles.Contains("Administrator"))
+        if (!currentUserProvider.Roles.Contains(AuthorizationPolicies.Administrator))
         {
             hostAuthorization.RequireOwnership(property.HostId, nameof(Property), request.PropertyId);
         }
@@ -39,6 +42,13 @@ public class DeletePropertyHandler(
         List<Unit> units = await dbContext.Units
             .Where(u => u.PropertyId == property.Id)
             .ToListAsync(cancellationToken);
+
+        // Same guard as DeleteUnitHandler, per unit - a cascading archive
+        // shouldn't be a back door around the single-unit check.
+        foreach (Unit unit in units)
+        {
+            await DeleteUnitHandler.EnsureNoActiveBookingsOrHoldsAsync(unit.Id, timeProvider, dbContext, unitArchivalGuard, cancellationToken);
+        }
 
         foreach (Unit unit in units)
         {

@@ -7,18 +7,24 @@ namespace Bookings.Contracts;
 // Reviews should only ever reach this through IBookingLookup, resolved via DI.
 internal class BookingLookup(AppBookingsDbContext dbContext, TimeProvider timeProvider) : IBookingLookup
 {
-    public Task<BookingSummary?> GetBookingAsync(Guid bookingId, CancellationToken cancellationToken)
+    public async Task<BookingSummary?> GetBookingAsync(Guid bookingId, CancellationToken cancellationToken)
     {
-        return dbContext.Bookings.AsNoTracking()
-            .Where(b => b.Id == bookingId)
-            .Select(b => new BookingSummary
+        // Materialize first, map after - see docs/adr/0006. Applied here to
+        // TotalPrice's ComplexProperty mapping the same way ADR-0006 already
+        // requires for LocalizedText/CancellationPolicy - a .Select()
+        // projecting a complex property straight into a different record
+        // type is exactly the shape that convention exists to avoid.
+        Booking? booking = await dbContext.Bookings.AsNoTracking()
+            .SingleOrDefaultAsync(b => b.Id == bookingId, cancellationToken);
+
+        return booking is null
+            ? null
+            : new BookingSummary
             {
-                Id = b.Id,
-                TotalPrice = b.TotalPrice,
-                Currency = b.Currency,
-                IsPending = b.BookingStatus == BookingStatus.Pending
-            })
-            .SingleOrDefaultAsync(cancellationToken);
+                Id = booking.Id,
+                TotalPrice = booking.TotalPrice,
+                IsPending = booking.BookingStatus == BookingStatus.Pending
+            };
     }
 
     public async Task<BookingAccessResult?> VerifyBookingAccessAsync(

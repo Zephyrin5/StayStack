@@ -41,6 +41,7 @@ public static class CatalogServicesRegistration
 
         services.AddScoped<IUnitLookup, UnitLookup>();
         services.AddScoped<IHoldConfirmation, HoldConfirmation>();
+        services.AddScoped<IHoldLookup, HoldLookup>();
         services.AddScoped<IPromotionRedemption, PromotionRedemption>();
 
         return services;

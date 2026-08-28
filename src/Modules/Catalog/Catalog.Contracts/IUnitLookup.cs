@@ -1,4 +1,3 @@
-using SeedWork.Enums;
 using SeedWork.ValueObjects;
 namespace Catalog.Contracts;
 
@@ -33,8 +32,7 @@ public record UnitSummary
     public Guid Id { get; init; }
     public Dictionary<string, string> Name { get; init; } = new Dictionary<string, string>();
     public int MaxOccupancy { get; init; }
-    public decimal BasePrice { get; init; }
-    public Currency Currency { get; init; }
+    public Money BasePrice { get; init; }
 
     // Added for Reviews - resolving "which property/host does this review
     // belong to" from a unit id, once at review-creation time, without a

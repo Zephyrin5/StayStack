@@ -14,7 +14,8 @@ namespace Api.Endpoints.Auth;
 // Endpoint<Request, Response> maps the HTTP payload to your data shapes
 public class SignInEndpoint(
     IMediator mediator,
-    IOptions<AuthTokenConfiguration> tokenSettings) : Endpoint<SignInRequest, SignInResponse>
+    IOptions<AuthTokenConfiguration> tokenSettings,
+    TimeProvider timeProvider) : Endpoint<SignInRequest, SignInResponse>
 {
     public override void Configure()
     {
@@ -48,7 +49,7 @@ public class SignInEndpoint(
 
         if (HttpContext.Request.WantsCookieAuth())
         {
-            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken!, tokenSettings.Value);
+            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken!, tokenSettings.Value, timeProvider);
             result = result with { RefreshToken = null };
         }
 

@@ -1,11 +1,22 @@
 using Catalog.Entities;
 using Catalog.Enums;
+using SeedWork.ValueObjects;
 namespace Catalog.Domain;
 
 // Pure, no DB/DI dependency - the one place pricing-rule resolution is
 // implemented, called by both HoldAvailabilityHandler (the actual charged
 // price, snapshotted onto a hold) and GetPriceCalendarHandler (the public
 // preview), so the two can never structurally disagree. See docs/adr/0012.
+//
+// Operates in Money throughout (docs/adr/0015) - every nightly price is
+// rounded to its own currency's precision as soon as it's resolved (Money's
+// arithmetic operators round on every result), rather than accumulating
+// full-precision decimals and rounding once at the end. This makes each
+// night's price the same number a caller would ever actually display or
+// charge, and closes the exact bug ConfirmBookingHandler used to have
+// reconstructing a pre-discount subtotal by adding two independently-
+// rounded numbers back together - see StayPriceBreakdown.Subtotal, snapshotted
+// directly instead of ever needing that reconstruction again.
 public static class PricingCalculator
 {
     // Resolution order for a single night: an active date-range override
@@ -14,7 +25,7 @@ public static class PricingCalculator
     // that weekday (or just BasePrice if none matches). Length-of-stay
     // discount is deliberately NOT applied here - it's a whole-stay
     // concept a single calendar day doesn't have; see ResolveStayTotal.
-    public static decimal ResolveNightlyPrice(decimal basePrice, DateOnly date, IReadOnlyList<PricingRule> rules)
+    public static Money ResolveNightlyPrice(Money basePrice, DateOnly date, IReadOnlyList<PricingRule> rules)
     {
         // Constructed as [LowerBound, UpperBound) everywhere a DateRange is
         // built (see PricingRule.BuildDateRange), so a plain half-open
@@ -26,7 +37,7 @@ public static class PricingCalculator
 
         if (overrideRule is not null)
         {
-            return overrideRule.OverridePrice!.Value;
+            return Money.Of(overrideRule.OverridePrice!.Value, basePrice.Currency);
         }
 
         int dayOfWeek = (int)date.DayOfWeek;
@@ -44,9 +55,9 @@ public static class PricingCalculator
     // ConfirmBookingHandler), which means callers on that path need to be
     // able to undo just the LOS portion, not only read the final number.
     public static StayPriceBreakdown ResolveStayTotal(
-        decimal basePrice, DateOnly checkIn, DateOnly checkOut, IReadOnlyList<PricingRule> rules)
+        Money basePrice, DateOnly checkIn, DateOnly checkOut, IReadOnlyList<PricingRule> rules)
     {
-        decimal subtotal = 0m;
+        Money subtotal = Money.Of(0m, basePrice.Currency);
         for (DateOnly date = checkIn; date < checkOut; date = date.AddDays(1))
         {
             subtotal += ResolveNightlyPrice(basePrice, date, rules);
@@ -61,7 +72,7 @@ public static class PricingCalculator
             return new StayPriceBreakdown { Subtotal = subtotal, LengthOfStayDiscountAmount = null, Total = subtotal };
         }
 
-        decimal discountAmount = subtotal * (lengthOfStayRule.DiscountPercent!.Value / 100m);
+        Money discountAmount = subtotal * (lengthOfStayRule.DiscountPercent!.Value / 100m);
         return new StayPriceBreakdown
         {
             Subtotal = subtotal,
@@ -73,7 +84,7 @@ public static class PricingCalculator
 
 public sealed record StayPriceBreakdown
 {
-    public required decimal Subtotal { get; init; }
-    public decimal? LengthOfStayDiscountAmount { get; init; }
-    public required decimal Total { get; init; }
+    public required Money Subtotal { get; init; }
+    public Money? LengthOfStayDiscountAmount { get; init; }
+    public required Money Total { get; init; }
 }

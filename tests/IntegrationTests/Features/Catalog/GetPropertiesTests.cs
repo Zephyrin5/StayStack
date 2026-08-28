@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using NpgsqlTypes;
 using SeedWork.Enums;
+using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -138,8 +139,8 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
             Status = status,
             GuestCount = 2,
             CreatedAt = DateTimeOffset.UtcNow,
-            TotalPrice = 100m,
-            Currency = Currency.KWD
+            TotalPrice = Money.Of(100m, Currency.KWD),
+            Subtotal = 100m
         });
         await context.SaveChangesAsync();
     }

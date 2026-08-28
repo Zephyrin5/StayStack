@@ -28,12 +28,38 @@ public sealed partial class GlobalExceptionHandler(
         {
             ValidationException validationEx => BuildValidationProblem(validationEx),
             AppException appEx => BuildProblem(appEx.StatusCode, appEx.Message),
+            // ArgumentNullException derives from ArgumentException, and
+            // Guard.Against.Null/NullOrWhiteSpace do throw it (on the null
+            // branch specifically - NullOrWhiteSpace throws plain
+            // ArgumentException for the whitespace-only branch), so this
+            // isn't about which exception type Guard happens to pick. The
+            // reason it's still a 500: every one of those Guard calls sits
+            // inside a domain factory (Booking.Create, Unit.Create, etc.)
+            // behind a FluentValidation validator that's supposed to reject
+            // a missing required field before the handler ever constructs
+            // the entity. A null reaching the factory anyway means that
+            // validator has a gap - a bug in this codebase, not bad input
+            // from the caller - so it belongs on the 500 path even though
+            // the thrown type is the same family the line below maps to
+            // 400. Ordered before the ArgumentException arm below
+            // specifically so it isn't caught by it: without this, the
+            // validator-gap bug would return 400 with "Value cannot be
+            // null. (Parameter 'x')" verbatim - masking the real bug as a
+            // client error and leaking an internal parameter name in the
+            // same message.
+            ArgumentNullException => BuildUnhandledProblem(exception),
+            // Guard.Against.* throws ArgumentException/ArgumentOutOfRangeException
+            // (a subtype) for ordinary bad-input cases (HoldAvailabilityHandler,
+            // Booking.Create, Transaction.Create, etc.) - these are caller
+            // errors, not bugs, and belong on the 400 path rather than falling
+            // through to BuildUnhandledProblem's generic 500.
+            ArgumentException argEx => BuildProblem(StatusCodes.Status400BadRequest, argEx.Message),
             _ => BuildUnhandledProblem(exception)
         };
 
         problem.Instance = httpContext.Request.Path;
 
-        if (exception is AppException)
+        if (exception is AppException or (ArgumentException and not ArgumentNullException))
         {
             LogHandledAppException(
                 logger,

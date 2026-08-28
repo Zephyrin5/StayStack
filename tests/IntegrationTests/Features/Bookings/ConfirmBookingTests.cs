@@ -163,7 +163,9 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
             Status = "held",
             HoldExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1),
             CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-16),
-            GuestCount = 2
+            GuestCount = 2,
+            TotalPrice = Money.Of(100m, Currency.KWD),
+            Subtotal = 100m
         };
         await SeedCatalogAsync(unit, expiredHold);
 

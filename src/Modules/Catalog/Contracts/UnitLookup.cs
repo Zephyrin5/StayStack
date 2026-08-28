@@ -34,7 +34,6 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
                 Name = new Dictionary<string, string>(row.unit.Name.Values),
                 MaxOccupancy = row.unit.MaxOccupancy,
                 BasePrice = row.unit.BasePrice,
-                Currency = row.unit.Currency,
                 PropertyId = row.unit.PropertyId,
                 HostId = row.HostId,
                 CancellationPolicy = row.unit.CancellationPolicy
@@ -63,7 +62,6 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
                 Name = new Dictionary<string, string>(row.unit.Name.Values),
                 MaxOccupancy = row.unit.MaxOccupancy,
                 BasePrice = row.unit.BasePrice,
-                Currency = row.unit.Currency,
                 PropertyId = row.unit.PropertyId,
                 HostId = row.HostId,
                 CancellationPolicy = row.unit.CancellationPolicy

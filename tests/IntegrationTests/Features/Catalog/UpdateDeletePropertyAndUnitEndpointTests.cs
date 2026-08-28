@@ -1,4 +1,6 @@
 using Bogus;
+using Bookings;
+using Bookings.Entities;
 using Catalog;
 using Catalog.Entities;
 using Catalog.Enums;
@@ -255,8 +257,8 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
         AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         Unit unit = await db.Units.SingleAsync(u => u.Id == unitId, TestContext.Current.CancellationToken);
         Assert.Equal(4, unit.MaxOccupancy);
-        Assert.Equal(99.9m, unit.BasePrice);
-        Assert.Equal(Currency.SAR, unit.Currency);
+        Assert.Equal(99.9m, unit.BasePrice.Amount);
+        Assert.Equal(Currency.SAR, unit.BasePrice.Currency);
         Assert.Equal("Renamed Unit", unit.Name.Values["en"]);
     }
 
@@ -383,5 +385,45 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteUnit_ShouldReturn409_WhenUnitHasAnActiveBooking()
+    {
+        // Regression test for the Catalog/Bookings module-boundary fix:
+        // DeleteUnitHandler asks Catalog.Contracts.IUnitArchivalGuard,
+        // whose only implementation lives in Bookings and is resolved
+        // purely through DI - Catalog itself has no project reference to
+        // Bookings or Bookings.Contracts at all (see docs/adr/0004's note
+        // on this pattern). This is the one test that actually exercises
+        // that cross-module resolution end to end over real HTTP, not just
+        // that the handler code compiles against the new interface.
+        string hostAccessToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken);
+        Guid unitId = await CreateUnitAsync(hostAccessToken, propertyId);
+
+        using (IServiceScope seedScope = factory.Services.CreateScope())
+        {
+            AppBookingsDbContext bookingsDb = seedScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            Booking booking = Booking.Create(
+                Guid.CreateVersion7(), unitId, Guid.NewGuid(), null,
+                "Jane Guest", "jane@example.com", null,
+                DateOnly.FromDateTime(DateTime.UtcNow).AddDays(5), DateOnly.FromDateTime(DateTime.UtcNow).AddDays(7),
+                2, Money.Of(200m, Currency.KWD), 200m, CancellationPolicy.CreateDefault());
+            bookingsDb.Bookings.Add(booking);
+            await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        // Act
+        HttpResponseMessage response = await _client.SendAsync(
+            Authorized(HttpMethod.Delete, $"/api/catalog/units/{unitId}", hostAccessToken),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        using IServiceScope verifyScope = factory.Services.CreateScope();
+        AppCatalogDbContext db = verifyScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        Assert.Equal(EntityStatus.Active, (await db.Units.SingleAsync(u => u.Id == unitId, TestContext.Current.CancellationToken)).Status);
     }
 }

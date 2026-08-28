@@ -46,7 +46,23 @@ public class BecomeHostHandler(
         IdentityResult updateResult = await userManager.UpdateAsync(user);
         if (!updateResult.Succeeded)
         {
+            // UserStore.UpdateAsync already catches EF's own
+            // DbUpdateConcurrencyException internally and surfaces it here
+            // as a failed IdentityResult (ErrorDescriber.ConcurrencyFailure)
+            // rather than throwing - so the compensating delete below
+            // already runs correctly for two concurrent BecomeHost calls on
+            // the same user, no extra try/catch needed. What's worth fixing
+            // is the error the loser sees: without this branch it would get
+            // a generic "concurrency failure" ValidationException even
+            // though a plain retry would now correctly hit the
+            // AlreadyAHostException above instead.
             await hostRegistrar.DeleteAsync(hostId, cancellationToken);
+
+            if (updateResult.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.ConcurrencyFailure)))
+            {
+                throw new AlreadyAHostException();
+            }
+
             throw new ValidationException(
                 "Host",
                 string.Join(" ", updateResult.Errors.Select(e => e.Description)));

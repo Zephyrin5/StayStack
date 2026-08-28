@@ -1,25 +1,34 @@
 using Ardalis.GuardClauses;
 using SeedWork.Abstractions;
-using SeedWork.Enums;
 using SeedWork.Interfaces;
+using SeedWork.ValueObjects;
 using Transactions.Exceptions;
 namespace Transactions.Entities;
 
 public sealed class Transaction : Entity, IAggregateRoot
 {
+    // EF Core's constructor-binding convention can't bind a parameter typed
+    // as a ComplexProperty (Money) back to the entity's own mapped complex
+    // property - see Booking's identical constructor pair for the full
+    // explanation and docs/adr/0015. EF's materialization fallback only;
+    // Create() below still goes through the full validated constructor for
+    // every write. No reference-type properties here need a placeholder -
+    // FailureReason/RefundAmount are both nullable already.
+    private Transaction()
+    {
+    }
+
     // See Property.cs (Catalog) for why materialization goes through a
     // real constructor rather than a parameterless one + `required`/`null!`.
     private Transaction(
         Guid id,
         Guid bookingId,
-        decimal amount,
-        Currency currency,
+        Money amount,
         TransactionStatus transactionStatus)
     {
         Id = id;
         BookingId = bookingId;
         Amount = amount;
-        Currency = currency;
         TransactionStatus = transactionStatus;
     }
 
@@ -32,9 +41,13 @@ public sealed class Transaction : Entity, IAggregateRoot
     // Snapshotted from the booking at initiation time, not a live read -
     // same reasoning as Booking.GuestName being a snapshot: what was
     // actually charged shouldn't drift if the booking's own total ever
-    // changed later.
-    public decimal Amount { get; private set; }
-    public Currency Currency { get; private set; }
+    // changed later. The one Money-typed (currency-carrying) field on this
+    // entity - RefundAmount below is a plain decimal in this same currency
+    // by construction (a transaction has exactly one currency, validated at
+    // MarkRefundPending), matching how UnitAvailabilityHold.Subtotal stays
+    // a plain decimal next to its own canonical TotalPrice (see
+    // docs/adr/0015).
+    public Money Amount { get; private set; }
 
     // Named TransactionStatus, not Status - Status is already claimed by
     // the inherited Entity.Status (EntityStatus: soft-delete state), same
@@ -50,12 +63,12 @@ public sealed class Transaction : Entity, IAggregateRoot
     // policy - it just records whatever amount it was told to refund.
     public decimal? RefundAmount { get; private set; }
 
-    public static Transaction Create(Guid bookingId, decimal amount, Currency currency)
+    public static Transaction Create(Guid bookingId, Money amount)
     {
         Guard.Against.Default(bookingId);
-        Guard.Against.NegativeOrZero(amount);
+        Guard.Against.NegativeOrZero(amount.Amount);
 
-        return new Transaction(Guid.CreateVersion7(), bookingId, amount, currency, TransactionStatus.Pending);
+        return new Transaction(Guid.CreateVersion7(), bookingId, amount, TransactionStatus.Pending);
     }
 
     // Both transitions guard "only from Pending", same reasoning as
@@ -93,17 +106,26 @@ public sealed class Transaction : Entity, IAggregateRoot
     // cancelled, and resolved by the same kind of admin stand-in endpoint
     // MarkTransactionSucceeded/MarkTransactionFailed already use in place
     // of a real gateway webhook.
-    public void MarkRefundPending(decimal refundAmount)
+    public void MarkRefundPending(Money refundAmount)
     {
         if (TransactionStatus != TransactionStatus.Succeeded)
         {
             throw new TransactionAlreadyFinalizedException(Id);
         }
 
-        Guard.Against.OutOfRange(refundAmount, nameof(refundAmount), 0m, Amount);
+        // A caller computing a refund in the wrong currency is exactly the
+        // kind of bug Money's own currency-carrying arithmetic can't catch
+        // by itself once the two values reach this boundary as independent
+        // arguments - worth guarding explicitly rather than trusting it.
+        if (refundAmount.Currency != Amount.Currency)
+        {
+            throw new CurrencyMismatchException(refundAmount.Currency, Amount.Currency);
+        }
+
+        Guard.Against.OutOfRange(refundAmount.Amount, nameof(refundAmount), 0m, Amount.Amount);
 
         TransactionStatus = TransactionStatus.RefundPending;
-        RefundAmount = refundAmount;
+        RefundAmount = refundAmount.Amount;
     }
 
     public void MarkRefunded()

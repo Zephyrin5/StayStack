@@ -26,7 +26,7 @@ public class UpdatePropertyHandler(
         }
 
         // Same Administrator-bypass/Host-ownership split as CreateUnitHandler.
-        if (!currentUserProvider.Roles.Contains("Administrator"))
+        if (!currentUserProvider.Roles.Contains(AuthorizationPolicies.Administrator))
         {
             hostAuthorization.RequireOwnership(property.HostId, nameof(Property), request.PropertyId);
         }

@@ -1,4 +1,4 @@
-using SeedWork.Enums;
+using SeedWork.ValueObjects;
 namespace Catalog.Contracts;
 
 /// <summary>
@@ -35,13 +35,21 @@ public record ConfirmedHold
     public DateOnly CheckIn { get; init; }
     public DateOnly CheckOut { get; init; }
     public int GuestCount { get; init; }
-    public decimal TotalPrice { get; init; }
-    public Currency Currency { get; init; }
+    public Money TotalPrice { get; init; }
 
-    // Same snapshot as TotalPrice, carried through so ConfirmBookingHandler
-    // can undo just the length-of-stay portion when a redeemed promo code
-    // is exclusive of it rather than stacking - see PricingCalculator's
-    // own StayPriceBreakdown for why this needs to travel separately from
-    // the final total.
+    // The pre-discount total, snapshotted on the hold itself (see
+    // UnitAvailabilityHold.Subtotal) rather than left for ConfirmBookingHandler
+    // to reconstruct via TotalPrice + LengthOfStayDiscountAmount - that
+    // reconstruction is exactly the rounding bug docs/adr/0015 exists to
+    // close, since each side was independently rounded. Shares
+    // TotalPrice.Currency, same reasoning as UnitAvailabilityHold's own
+    // Subtotal field.
+    public decimal Subtotal { get; init; }
+
+    // Same snapshot as TotalPrice/Subtotal, carried through so
+    // ConfirmBookingHandler can undo just the length-of-stay portion when a
+    // redeemed promo code is exclusive of it rather than stacking - see
+    // PricingCalculator's own StayPriceBreakdown for why this needs to
+    // travel separately from the final total.
     public decimal? LengthOfStayDiscountAmount { get; init; }
 }

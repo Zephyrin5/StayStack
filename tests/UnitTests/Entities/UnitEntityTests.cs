@@ -24,8 +24,8 @@ public class UnitEntityTests
         Assert.Equal(propertyId, unit.PropertyId);
         Assert.Equal(name, unit.Name);
         Assert.Equal(2, unit.MaxOccupancy);
-        Assert.Equal(45.5m, unit.BasePrice);
-        Assert.Equal(Currency.KWD, unit.Currency);
+        Assert.Equal(45.5m, unit.BasePrice.Amount);
+        Assert.Equal(Currency.KWD, unit.BasePrice.Currency);
         Assert.Equal(EntityStatus.Active, unit.Status);
     }
 
@@ -34,7 +34,7 @@ public class UnitEntityTests
     {
         Unit unit = Unit.Create(Guid.NewGuid(), CreateName(), 2, 45.5m);
 
-        Assert.Equal(Currency.KWD, unit.Currency);
+        Assert.Equal(Currency.KWD, unit.BasePrice.Currency);
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public class UnitEntityTests
 
         unit.SetBasePrice(60m);
 
-        Assert.Equal(60m, unit.BasePrice);
+        Assert.Equal(60m, unit.BasePrice.Amount);
     }
 
     [Theory]

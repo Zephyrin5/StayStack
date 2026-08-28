@@ -10,8 +10,16 @@ public class PromotionConfiguration : IEntityTypeConfiguration<Promotion>
 
         builder.Property(p => p.Code).HasMaxLength(30).IsRequired();
         builder.Property(p => p.DiscountType).HasConversion<string>().HasMaxLength(20).IsRequired();
-        builder.Property(p => p.DiscountValue).HasColumnType("numeric(10,2)").IsRequired();
-        builder.Property(p => p.Currency).HasConversion<string>().HasMaxLength(3).IsFixedLength();
+        // numeric(12,3)/varchar(3), matching every other money-adjacent
+        // column (docs/adr/0015) even though DiscountValue stays a plain
+        // decimal, not Money - it's a discriminated field (a real currency
+        // amount for FixedAmount, a bare percentage for Percentage), so
+        // wrapping it would null out the percentage case. But for
+        // FixedAmount it IS money, and was the one money value left on
+        // numeric(10,2)/character(3) - a KWD fixed-amount promotion of
+        // 1.005 would silently truncate to 1.00 on write otherwise.
+        builder.Property(p => p.DiscountValue).HasColumnType("numeric(12,3)").IsRequired();
+        builder.Property(p => p.Currency).HasConversion<string>().HasMaxLength(3);
         builder.Property(p => p.MaxRedemptions);
         builder.Property(p => p.RedemptionCount).IsRequired();
 

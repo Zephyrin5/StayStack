@@ -18,7 +18,8 @@ public static class AuthCookies
     extension(HttpResponse response)
     {
         public void SetRefreshTokenCookie(string refreshToken,
-            AuthTokenConfiguration tokenSettings)
+            AuthTokenConfiguration tokenSettings,
+            TimeProvider timeProvider)
         {
             response.Cookies.Append(RefreshTokenCookieName, refreshToken, new CookieOptions
             {
@@ -45,7 +46,7 @@ public static class AuthCookies
                 // POST here) that a cookie-based credential would otherwise
                 // reopen.
                 SameSite = SameSiteMode.Lax,
-                Expires = DateTimeOffset.UtcNow.AddDays(tokenSettings.RefreshTokenLifespanInDays),
+                Expires = timeProvider.GetUtcNow().AddDays(tokenSettings.RefreshTokenLifespanInDays),
                 Path = "/"
             });
         }

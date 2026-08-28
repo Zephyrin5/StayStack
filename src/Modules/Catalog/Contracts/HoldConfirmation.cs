@@ -2,16 +2,17 @@ using BuildingBlocks.Exceptions;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
 using SeedWork.Enums;
+using SeedWork.ValueObjects;
 using System.Data;
 using System.Data.Common;
 namespace Catalog.Contracts;
 
 // internal, same reasoning as HostRegistrar - Bookings should only ever
 // reach this through IHoldConfirmation, resolved via DI.
-internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmation
+internal class HoldConfirmation(AppCatalogDbContext dbContext, TimeProvider timeProvider) : IHoldConfirmation
 {
-    // Raw shape of the RETURNING row - Currency comes back as its
-    // character(3) column text, mapped to the enum after materializing
+    // Raw shape of the RETURNING row - Currency comes back as its column
+    // text, materialized first and turned into a real Money afterward
     // rather than asking Dapper to convert it. Same materialize-first-map-
     // after shape as docs/adr/0006, applied here to Dapper rather than EF.
     private sealed record ConfirmedHoldRow
@@ -21,6 +22,7 @@ internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmati
         public DateOnly CheckOut { get; init; }
         public int GuestCount { get; init; }
         public decimal TotalPrice { get; init; }
+        public decimal Subtotal { get; init; }
         public string Currency { get; init; } = string.Empty;
         public decimal? LengthOfStayDiscountAmount { get; init; }
     }
@@ -39,21 +41,26 @@ internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmati
         // not a distributed transaction. The status/expiry check in the
         // WHERE clause is what makes this safe to call exactly once per
         // hold: a second call (already-booked or expired hold) returns no
-        // row.
+        // row. @Now (the app's TimeProvider) rather than Postgres' own
+        // now() - the app server and DB server are otherwise two different
+        // clocks comparing the same expiry, and every other hold-adjacent
+        // clock read in this codebase already goes through TimeProvider.
         const string sql = """
                            UPDATE unit_availability_holds
-                           SET status = 'booked'
-                           WHERE id = @HoldId AND status = 'held' AND hold_expires_at > now()
-                           RETURNING unit_id AS "UnitId", lower(stay_range) AS "CheckIn", upper(stay_range) AS "CheckOut", guest_count AS "GuestCount", total_price AS "TotalPrice", currency AS "Currency", length_of_stay_discount_amount AS "LengthOfStayDiscountAmount";
+                           SET status = 'booked', booked_at = @Now
+                           WHERE id = @HoldId AND status = 'held' AND hold_expires_at > @Now
+                           RETURNING unit_id AS "UnitId", lower(stay_range) AS "CheckIn", upper(stay_range) AS "CheckOut", guest_count AS "GuestCount", total_price AS "TotalPrice", subtotal AS "Subtotal", currency AS "Currency", length_of_stay_discount_amount AS "LengthOfStayDiscountAmount";
                            """;
 
         ConfirmedHoldRow? row = await connection.QuerySingleOrDefaultAsync<ConfirmedHoldRow>(
-            new CommandDefinition(sql, new { HoldId = holdId }, cancellationToken: cancellationToken));
+            new CommandDefinition(sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() }, cancellationToken: cancellationToken));
 
         if (row is null)
         {
             throw new NotFoundException("Hold", holdId);
         }
+
+        Currency currency = Enum.Parse<Currency>(row.Currency.Trim());
 
         return new ConfirmedHold
         {
@@ -61,8 +68,8 @@ internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmati
             CheckIn = row.CheckIn,
             CheckOut = row.CheckOut,
             GuestCount = row.GuestCount,
-            TotalPrice = row.TotalPrice,
-            Currency = Enum.Parse<Currency>(row.Currency.Trim()),
+            TotalPrice = Money.Of(row.TotalPrice, currency),
+            Subtotal = row.Subtotal,
             LengthOfStayDiscountAmount = row.LengthOfStayDiscountAmount
         };
     }
@@ -86,10 +93,11 @@ internal class HoldConfirmation(AppCatalogDbContext dbContext) : IHoldConfirmati
         // cleanup and ExpiredHoldsSweepJob, instead of waiting it out.
         const string sql = """
                            UPDATE unit_availability_holds
-                           SET status = 'held', hold_expires_at = now()
+                           SET status = 'held', hold_expires_at = @Now, booked_at = NULL
                            WHERE id = @HoldId AND status = 'booked';
                            """;
 
-        await connection.ExecuteAsync(new CommandDefinition(sql, new { HoldId = holdId }, cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition(
+            sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() }, cancellationToken: cancellationToken));
     }
 }

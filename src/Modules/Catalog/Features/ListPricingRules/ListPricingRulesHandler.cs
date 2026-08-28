@@ -32,7 +32,7 @@ public class ListPricingRulesHandler(
             throw new NotFoundException(nameof(Property), unit.PropertyId);
         }
 
-        if (!currentUserProvider.Roles.Contains("Administrator"))
+        if (!currentUserProvider.Roles.Contains(AuthorizationPolicies.Administrator))
         {
             hostAuthorization.RequireOwnership(property.HostId, nameof(Property), property.Id);
         }

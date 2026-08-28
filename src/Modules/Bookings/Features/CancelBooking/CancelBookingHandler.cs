@@ -30,6 +30,31 @@ public class CancelBookingHandler(
                               dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken, today, cancellationToken)
                           ?? throw new NotFoundException(nameof(Booking), request.BookingId);
 
+        // Idempotent re-cancel: report the refund that already happened
+        // instead of re-running the compensations below. Booking.Cancel()
+        // itself no-ops safely on a second call, but ReverseTransactionAsync
+        // would now find the transaction no longer Succeeded (it already
+        // moved to RefundPending/Refunded/RefundFailed) and return null -
+        // silently looking like "no refund happened" for a booking where
+        // one did, instead of reporting what actually happened the first
+        // time.
+        if (booking.BookingStatus == BookingStatus.Cancelled)
+        {
+            TransactionRefundSnapshot? refundSnapshot =
+                await transactionReversal.GetRefundSnapshotAsync(booking.Id, cancellationToken);
+
+            return new CancelBookingResponse
+            {
+                BookingId = booking.Id,
+                BookingStatus = booking.BookingStatus,
+                RefundAmount = refundSnapshot?.RefundAmount,
+                Currency = refundSnapshot is not null ? booking.TotalPrice.Currency : null,
+                RefundPercent = refundSnapshot is not null
+                    ? refundSnapshot.RefundAmount / refundSnapshot.Amount * 100m
+                    : null
+            };
+        }
+
         booking.Cancel();
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -44,7 +69,13 @@ public class CancelBookingHandler(
         // starts, not an undefined negative day count.
         int daysBeforeCheckIn = Math.Max(booking.CheckIn.DayNumber - today.DayNumber, 0);
         decimal refundPercent = cancellationPolicy.ResolveRefundPercent(daysBeforeCheckIn);
-        decimal refundAmount = booking.TotalPrice * refundPercent / 100m;
+        // The division has to happen first, in plain decimal, before the one
+        // Money multiplication - see Money's own doc comment on why `a * b
+        // / c` and `a * (b / c)` aren't the same value for a type that
+        // rounds on every operation. PricingCalculator's discount math uses
+        // this same shape (subtotal * (percent / 100m)); this site
+        // previously didn't match it.
+        Money refundAmount = booking.TotalPrice * (refundPercent / 100m);
 
         // Released/resolved/reversed after the booking's own cancellation is
         // durable, not before - if any fails, the booking is still
@@ -105,6 +136,7 @@ public class CancelBookingHandler(
             BookingId = booking.Id,
             BookingStatus = booking.BookingStatus,
             RefundAmount = actualRefundAmount,
+            Currency = actualRefundAmount is not null ? refundAmount.Currency : null,
             // Null in lockstep with RefundAmount - a policy percent with no
             // actual money behind it (nothing was ever Succeeded) would be
             // misleading to show as if a refund is happening.

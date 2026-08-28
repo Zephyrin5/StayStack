@@ -22,7 +22,7 @@ public class UpdatePromotionHandler(
             throw new NotFoundException(nameof(Promotion), request.PromotionId);
         }
 
-        if (!currentUserProvider.Roles.Contains("Administrator"))
+        if (!currentUserProvider.Roles.Contains(AuthorizationPolicies.Administrator))
         {
             // A platform-wide promotion (HostId null) has no owning host to
             // check against - only an Administrator can touch it. Same

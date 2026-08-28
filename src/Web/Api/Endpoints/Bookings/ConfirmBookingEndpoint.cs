@@ -2,6 +2,7 @@ using Bookings.Features.ConfirmBooking;
 using FastEndpoints;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
 namespace Api.Endpoints.Bookings;
@@ -14,6 +15,13 @@ public class ConfirmBookingEndpoint(IMediator mediator) : Endpoint<ConfirmBookin
         AllowAnonymous();
         Group<BookingsGroup>();
 
+        // Anonymous and a real DB write with financial consequences (see
+        // docs/adr/0016) - same "auth" policy as CancelBookingEndpoint/
+        // GetBookingForManagementEndpoint/InitiateTransactionEndpoint, the
+        // established rate limit for this exact class of sensitive,
+        // guest-checkout-capable Bookings endpoint.
+        Options(x => x.RequireRateLimiting(ApiServicesRegistration.AuthRateLimitPolicy));
+
         Summary(s =>
         {
             s.Summary = "Confirm a held unit into a booking";
@@ -24,6 +32,7 @@ public class ConfirmBookingEndpoint(IMediator mediator) : Endpoint<ConfirmBookin
             s.Response<ConfirmBookingResponse>(200, "Booking created.");
             s.Response<ValidationProblemDetails>(400, "Validation failed.");
             s.Response<ProblemDetails>(404, "Hold not found, already used, or expired.");
+            s.Response(429, "Too many requests.");
         });
     }
 

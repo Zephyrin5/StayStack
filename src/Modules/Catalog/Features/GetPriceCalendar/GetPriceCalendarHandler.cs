@@ -4,13 +4,16 @@ using Dapper;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
+using SeedWork.Enums;
+using SeedWork.ValueObjects;
 using System.Data;
 using System.Data.Common;
 namespace Catalog.Features.GetPriceCalendar;
 
 public class GetPriceCalendarHandler(
     AppCatalogDbContext dbContext,
-    HybridCache cache) : IRequestHandler<GetPriceCalendarRequest, GetPriceCalendarResponse>
+    HybridCache cache,
+    TimeProvider timeProvider) : IRequestHandler<GetPriceCalendarRequest, GetPriceCalendarResponse>
 {
     public async ValueTask<GetPriceCalendarResponse> Handle(
         GetPriceCalendarRequest request,
@@ -61,27 +64,50 @@ public class GetPriceCalendarHandler(
         // strip underscores) - a deliberate per-query choice rather than
         // introducing a project-wide snake_case type map for this first
         // handwritten Dapper query.
+        // Raw SQL against `units` (an Entity-derived, soft-delete-governed
+        // table) bypasses EF's ApplySoftDeleteQueryFilter entirely, so the
+        // status predicate has to be restated by hand here - see
+        // docs/adr/0014's Tier 3 rule. Without it an archived unit's
+        // calendar was still returned and priced. EntityStatus.Status is
+        // stored as its raw integer ordinal, not a string via
+        // HasConversion<string>() (unlike Currency) - confirmed against
+        // EF's own generated SQL elsewhere (`WHERE p.status <> 2`). Passed
+        // as a parameter derived from the enum itself, not a hardcoded `2`
+        // literal in the SQL text - this codebase just renumbered Currency
+        // specifically because hardcoded ordinals are unsafe to depend on
+        // (docs/adr/0015), and EntityStatus has no HasConversion<string>()
+        // protection against the same risk if it's ever reordered.
         const string sql = """
                            SELECT
                                d::date AS "Date",
                                u.base_price AS "BasePrice",
+                               u.currency AS "Currency",
                                NOT EXISTS (
                                    SELECT 1 FROM unit_availability_holds h
                                    WHERE h.unit_id = @UnitId
                                      AND h.stay_range @> d::date
                                      AND (
                                          h.status = 'booked'
-                                         OR (h.status = 'held' AND (h.hold_expires_at IS NULL OR h.hold_expires_at > now()))
+                                         OR (h.status = 'held' AND (h.hold_expires_at IS NULL OR h.hold_expires_at > @Now))
                                      )
                                ) AS "IsAvailable"
                            FROM generate_series(@From::date, @To::date - interval '1 day', interval '1 day') AS d
                            CROSS JOIN units u
-                           WHERE u.id = @UnitId
+                           WHERE u.id = @UnitId AND u.status <> @ArchivedStatus
                            ORDER BY d;
                            """;
 
         CommandDefinition command = new CommandDefinition(
-            sql, new { request.UnitId, request.From, request.To }, cancellationToken: cancellationToken);
+            sql,
+            new
+            {
+                request.UnitId,
+                request.From,
+                request.To,
+                Now = timeProvider.GetUtcNow(),
+                ArchivedStatus = (int)EntityStatus.Archived
+            },
+            cancellationToken: cancellationToken);
 
         var rows = await connection.QueryAsync<PriceCalendarDayRow>(command);
 
@@ -94,11 +120,15 @@ public class GetPriceCalendarHandler(
             .ToListAsync(cancellationToken);
 
         return rows
-            .Select(row => new PriceCalendarDay
+            .Select(row =>
             {
-                Date = row.Date,
-                Price = PricingCalculator.ResolveNightlyPrice(row.BasePrice, row.Date, rules),
-                IsAvailable = row.IsAvailable
+                Money basePrice = Money.Of(row.BasePrice, Enum.Parse<Currency>(row.Currency.Trim()));
+                return new PriceCalendarDay
+                {
+                    Date = row.Date,
+                    Price = PricingCalculator.ResolveNightlyPrice(basePrice, row.Date, rules).Amount,
+                    IsAvailable = row.IsAvailable
+                };
             })
             .ToList();
     }
@@ -107,6 +137,7 @@ public class GetPriceCalendarHandler(
     {
         public DateOnly Date { get; init; }
         public decimal BasePrice { get; init; }
+        public string Currency { get; init; } = string.Empty;
         public bool IsAvailable { get; init; }
     }
 }

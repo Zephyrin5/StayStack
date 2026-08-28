@@ -19,12 +19,21 @@ public class GetPropertiesHandler(AppCatalogDbContext dbContext, TimeProvider ti
         // constraint HoldAvailabilityHandler writes through is what
         // guarantees that, not this cache. Same accepted tradeoff as
         // GetPriceCalendarHandler's own cache.
-        string cacheKey = $"properties:{request.City}:{request.PropertyType}:{request.Guests}:" +
+        //
+        // City is normalized (trimmed/lowercased) the same way the ILIKE
+        // query below normalizes it, and the same normalized value is used
+        // for both - otherwise "Kuwait City" and "kuwait city" (or with
+        // stray whitespace) fragment across separate cache entries for what
+        // the query itself treats as an identical search, and an
+        // unnormalized freeform field is unbounded cache-key cardinality
+        // for no reason.
+        string? normalizedCity = request.City?.Trim().ToLowerInvariant();
+        string cacheKey = $"properties:{normalizedCity}:{request.PropertyType}:{request.Guests}:" +
                           $"{request.CheckIn:yyyyMMdd}:{request.CheckOut:yyyyMMdd}:{request.Page}:{request.PageSize}";
 
         return await cache.GetOrCreateAsync(
             cacheKey,
-            async ct => await LoadFromDatabaseAsync(request, ct),
+            async ct => await LoadFromDatabaseAsync(request, normalizedCity, ct),
             new HybridCacheEntryOptions
             {
                 Expiration = TimeSpan.FromSeconds(30),
@@ -34,11 +43,11 @@ public class GetPropertiesHandler(AppCatalogDbContext dbContext, TimeProvider ti
     }
 
     private async Task<PagedResponse<PropertySummary>> LoadFromDatabaseAsync(
-        GetPropertiesRequest request, CancellationToken cancellationToken)
+        GetPropertiesRequest request, string? normalizedCity, CancellationToken cancellationToken)
     {
         var query = dbContext.Properties.AsNoTracking();
 
-        if (request.City is not null)
+        if (normalizedCity is not null)
         {
             // Case-insensitive contains, not exact match - City is
             // freeform text on both sides (a host types it when creating a
@@ -47,7 +56,7 @@ public class GetPropertiesHandler(AppCatalogDbContext dbContext, TimeProvider ti
             // reject any partial search entirely. EscapeLikePattern guards
             // against a search term that itself contains '%'/'_'/'\' being
             // misread as ILIKE wildcards rather than literal characters.
-            string pattern = $"%{EscapeLikePattern(request.City)}%";
+            string pattern = $"%{EscapeLikePattern(normalizedCity)}%";
             // The 3-arg overload, not the 2-arg one - Npgsql's translation
             // of the 2-arg EF.Functions.ILike emits `ESCAPE ''` (escape
             // processing disabled entirely), not backslash-as-default, so

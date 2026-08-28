@@ -77,3 +77,17 @@ than adding raw migration SQL.
   "at most one active length-of-stay rule" simplification means a host wanting tiered discounts (e.g. one
   rate at 7 nights, a deeper one at 30) cannot express that in v1 without deleting and replacing the
   existing rule - a deliberate scope cut, not an oversight, revisit if a real need for it shows up.
+- **The write-time overlap check was still a genuine in-memory race** (two concurrent `CreatePricingRule`
+  calls could both load the same "no conflict" snapshot and both insert) - closed without contradicting
+  the GIST-constraint rejection above: `CreatePricingRuleHandler` now wraps its check-then-insert in an
+  explicit `IsolationLevel.Serializable` transaction rather than adding a constraint. Still no GIST, still
+  plain EF, matching this ADR's own low-frequency/single-host reasoning - Postgres just refuses to let two
+  concurrent serializable transactions both believe they saw the only version of the truth. Requires
+  `40001` (serialization_failure) in `EnableRetryOnFailure`'s `errorCodesToAdd` alongside the existing
+  `40P01` (deadlock) - without it, a genuine conflict here surfaces as an unhandled 500 instead of a
+  retried transaction, the opposite of the intended fix.
+- **Both pricing paths now agree structurally *and* arithmetically.** The shared `PricingCalculator`
+  already guaranteed `GetPriceCalendarHandler` and `HoldAvailabilityHandler` could never disagree on
+  *which* rule applies - it didn't guarantee they'd land on the same final number, since neither path
+  rounded before this session's `Money` work (see [ADR-0015](0015-money-value-type-for-currency-amounts.md)).
+  Both now round through the same per-currency rule, at the same points, closing that gap.

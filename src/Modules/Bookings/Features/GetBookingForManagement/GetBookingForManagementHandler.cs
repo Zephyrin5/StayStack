@@ -26,8 +26,8 @@ public class GetBookingForManagementHandler(
             BookingStatus = booking.BookingStatus,
             CheckIn = booking.CheckIn,
             CheckOut = booking.CheckOut,
-            TotalPrice = booking.TotalPrice,
-            Currency = booking.Currency,
+            TotalPrice = booking.TotalPrice.Amount,
+            Currency = booking.TotalPrice.Currency,
             CanCancel = booking.BookingStatus != BookingStatus.Cancelled,
             CanReview = booking.BookingStatus == BookingStatus.Confirmed && booking.CheckOut <= today
         };

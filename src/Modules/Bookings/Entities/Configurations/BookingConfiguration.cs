@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Persistence;
 namespace Bookings.Entities.Configurations;
 
 public class BookingConfiguration : IEntityTypeConfiguration<Booking>
@@ -11,7 +12,8 @@ public class BookingConfiguration : IEntityTypeConfiguration<Booking>
         builder.Property(b => b.GuestName).HasMaxLength(200).IsRequired();
         builder.Property(b => b.GuestEmail).HasMaxLength(200).IsRequired();
         builder.Property(b => b.GuestPhone).HasMaxLength(50);
-        builder.Property(b => b.Currency).HasConversion<string>().HasMaxLength(3).IsFixedLength().IsRequired();
+        builder.ComplexProperty(b => b.TotalPrice, money => money.ConfigureMoney("total_price"));
+        builder.Property(b => b.Subtotal).HasColumnType("numeric(12,3)").IsRequired();
 
         // Stored as text, not the integer enum value - same reasoning as
         // Property.PropertyType (Catalog): legible in psql, safe against

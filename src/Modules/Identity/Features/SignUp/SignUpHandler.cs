@@ -62,7 +62,11 @@ public class SignUpHandler(
         {
             // Extremely unlikely once the seed data is in place, but if the
             // Customer role is ever missing, fail loudly rather than
-            // leaving a roleless account behind silently.
+            // leaving a roleless account behind silently - matches
+            // BecomeHostHandler's identical compensating delete on the same
+            // failure shape.
+            await userManager.DeleteAsync(user);
+
             throw new ValidationException(
                 "Role",
                 string.Join(" ", roleResult.Errors.Select(e => e.Description)));

@@ -5,6 +5,8 @@ using Catalog.Enums;
 using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using System.Data;
 using Unit = Catalog.Entities.Unit;
 
 namespace Catalog.Features.UpdatePricingRule;
@@ -44,7 +46,7 @@ public class UpdatePricingRuleHandler(
             throw new NotFoundException(nameof(Property), unit.PropertyId);
         }
 
-        if (!currentUserProvider.Roles.Contains("Administrator"))
+        if (!currentUserProvider.Roles.Contains(AuthorizationPolicies.Administrator))
         {
             hostAuthorization.RequireOwnership(property.HostId, nameof(Property), property.Id);
         }
@@ -54,26 +56,45 @@ public class UpdatePricingRuleHandler(
             throw new ValidationException(nameof(request.RuleType), "RuleType cannot be changed once a rule is created.");
         }
 
-        List<PricingRule> existingSameType = await dbContext.PricingRules
-            .Where(r => r.UnitId == rule.UnitId && r.RuleType == rule.RuleType && r.Id != rule.Id)
-            .ToListAsync(cancellationToken);
+        // Same TOCTOU this ADR-0012/#9 fix closed on the create path -
+        // CreatePricingRuleHandler's own comment covers the full reasoning
+        // (still no GIST constraint, matching ADR-0012's low-frequency/
+        // single-host reasoning). No ChangeTracker.Clear() here, unlike
+        // Create: `rule` is already loaded and tracked above (needed for
+        // the ownership check before this point), and re-running the
+        // ApplyXxx setter calls on a retry is idempotent - they overwrite
+        // with the same request-derived values, they don't accumulate -
+        // so there's nothing a cleared tracker would need to protect
+        // against here.
+        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
-        switch (rule.RuleType)
+        await strategy.ExecuteAsync(async () =>
         {
-            case PricingRuleType.DateRangeOverride:
-                ApplyDateRangeOverride(rule, request, existingSameType);
-                break;
-            case PricingRuleType.DayOfWeekMultiplier:
-                ApplyDayOfWeekMultiplier(rule, request, existingSameType);
-                break;
-            case PricingRuleType.LengthOfStayDiscount:
-                ApplyLengthOfStayDiscount(rule, request, existingSameType);
-                break;
-            default:
-                throw new ValidationException(nameof(request.RuleType), "Unsupported RuleType.");
-        }
+            await using IDbContextTransaction transaction =
+                await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+            List<PricingRule> existingSameType = await dbContext.PricingRules
+                .Where(r => r.UnitId == rule.UnitId && r.RuleType == rule.RuleType && r.Id != rule.Id)
+                .ToListAsync(cancellationToken);
+
+            switch (rule.RuleType)
+            {
+                case PricingRuleType.DateRangeOverride:
+                    ApplyDateRangeOverride(rule, request, existingSameType);
+                    break;
+                case PricingRuleType.DayOfWeekMultiplier:
+                    ApplyDayOfWeekMultiplier(rule, request, existingSameType);
+                    break;
+                case PricingRuleType.LengthOfStayDiscount:
+                    ApplyLengthOfStayDiscount(rule, request, existingSameType);
+                    break;
+                default:
+                    throw new ValidationException(nameof(request.RuleType), "Unsupported RuleType.");
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
 
         return new UpdatePricingRuleResponse { PricingRuleId = rule.Id };
     }

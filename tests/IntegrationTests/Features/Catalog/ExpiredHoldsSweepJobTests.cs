@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using NpgsqlTypes;
+using SeedWork.Enums;
+using SeedWork.ValueObjects;
 namespace IntegrationTests.Features.Catalog;
 
 [Collection("Integration Tests")]
@@ -34,7 +36,9 @@ public class ExpiredHoldsSweepJobTests(IntegrationTestWebApplicationFactory fact
             UnitId = Guid.NewGuid(),
             Status = "held",
             StayRange = new NpgsqlRange<DateOnly>(DateOnly.FromDateTime(now.UtcDateTime), true, DateOnly.FromDateTime(now.UtcDateTime).AddDays(2), false),
-            HoldExpiresAt = now.AddMinutes(-1)
+            HoldExpiresAt = now.AddMinutes(-1),
+            TotalPrice = Money.Of(100m, Currency.KWD),
+            Subtotal = 100m
         };
 
         UnitAvailabilityHold stillLiveHeld = new UnitAvailabilityHold
@@ -43,7 +47,9 @@ public class ExpiredHoldsSweepJobTests(IntegrationTestWebApplicationFactory fact
             UnitId = Guid.NewGuid(),
             Status = "held",
             StayRange = new NpgsqlRange<DateOnly>(DateOnly.FromDateTime(now.UtcDateTime), true, DateOnly.FromDateTime(now.UtcDateTime).AddDays(2), false),
-            HoldExpiresAt = now.AddMinutes(5)
+            HoldExpiresAt = now.AddMinutes(5),
+            TotalPrice = Money.Of(100m, Currency.KWD),
+            Subtotal = 100m
         };
 
         // A 'booked' row whose HoldExpiresAt happens to be in the past is
@@ -55,7 +61,9 @@ public class ExpiredHoldsSweepJobTests(IntegrationTestWebApplicationFactory fact
             UnitId = Guid.NewGuid(),
             Status = "booked",
             StayRange = new NpgsqlRange<DateOnly>(DateOnly.FromDateTime(now.UtcDateTime), true, DateOnly.FromDateTime(now.UtcDateTime).AddDays(2), false),
-            HoldExpiresAt = now.AddMinutes(-1)
+            HoldExpiresAt = now.AddMinutes(-1),
+            TotalPrice = Money.Of(100m, Currency.KWD),
+            Subtotal = 100m
         };
 
         await SeedDatabaseAsync(expiredHeld, stillLiveHeld, expiredButBooked);

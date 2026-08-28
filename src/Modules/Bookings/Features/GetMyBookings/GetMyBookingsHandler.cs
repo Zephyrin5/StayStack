@@ -44,8 +44,8 @@ public class GetMyBookingsHandler(
                     CheckIn = b.CheckIn,
                     CheckOut = b.CheckOut,
                     GuestCount = b.GuestCount,
-                    TotalPrice = b.TotalPrice,
-                    Currency = b.Currency,
+                    TotalPrice = b.TotalPrice.Amount,
+                    Currency = b.TotalPrice.Currency,
                     BookingStatus = b.BookingStatus,
                     CreatedAt = b.CreatedAt
                 })

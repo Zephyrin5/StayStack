@@ -7,6 +7,20 @@ namespace Catalog.Entities;
 
 public sealed class Unit : Entity, IAggregateRoot
 {
+    // EF Core's constructor-binding convention can't bind a parameter typed
+    // as a ComplexProperty (Money) back to the entity's own mapped complex
+    // property - see Booking's identical constructor pair for the full
+    // explanation and docs/adr/0015. This parameterless constructor is
+    // EF's materialization fallback only; Create() below still goes
+    // through the full validated constructor for every write. Name/
+    // CancellationPolicy get real (not null!) empty/default placeholders
+    // only to satisfy the non-nullable-reference-type compiler check - EF
+    // overwrites every property here immediately after construction.
+    private Unit()
+    {
+        Name = LocalizedText.Restore(new Dictionary<string, string>());
+        CancellationPolicy = CancellationPolicy.CreateDefault();
+    }
 
     // See Property.cs for why materialization goes through a real
     // constructor rather than a parameterless one + `required`/`null!`.
@@ -15,8 +29,7 @@ public sealed class Unit : Entity, IAggregateRoot
         Guid propertyId,
         LocalizedText name,
         int maxOccupancy,
-        decimal basePrice,
-        Currency currency,
+        Money basePrice,
         CancellationPolicy cancellationPolicy)
     {
         Id = id;
@@ -24,14 +37,12 @@ public sealed class Unit : Entity, IAggregateRoot
         Name = name;
         MaxOccupancy = maxOccupancy;
         BasePrice = basePrice;
-        Currency = currency;
         CancellationPolicy = cancellationPolicy;
     }
     public Guid PropertyId { get; private set; }
     public LocalizedText Name { get; private set; }
     public int MaxOccupancy { get; private set; }
-    public decimal BasePrice { get; private set; }
-    public Currency Currency { get; private set; }
+    public Money BasePrice { get; private set; }
 
     // One current value, like BasePrice/Currency - not a variable set of
     // co-existing host-authored rows the way PricingRule is, so it's
@@ -53,18 +64,21 @@ public sealed class Unit : Entity, IAggregateRoot
         Guard.Against.NegativeOrZero(basePrice);
 
         return new Unit(
-            Guid.CreateVersion7(), propertyId, name, maxOccupancy, basePrice, currency,
+            Guid.CreateVersion7(), propertyId, name, maxOccupancy, Money.Of(basePrice, currency),
             cancellationPolicy ?? CancellationPolicy.CreateDefault());
     }
 
     // A real mutation with its own invariant, not just a settable property -
     // this is where price changes get funneled through once the admin
     // Catalog endpoints exist, rather than each caller re-deriving the
-    // "must be positive" rule for itself.
+    // "must be positive" rule for itself. Takes a bare decimal, not Money,
+    // to keep UpdateUnitHandler's existing two-call shape (SetBasePrice then
+    // SetCurrency) working unchanged - both funnel into the one BasePrice
+    // field underneath.
     public void SetBasePrice(decimal price)
     {
         Guard.Against.NegativeOrZero(price);
-        BasePrice = price;
+        BasePrice = Money.Of(price, BasePrice.Currency);
     }
 
     public void Rename(LocalizedText name)
@@ -85,7 +99,7 @@ public sealed class Unit : Entity, IAggregateRoot
     // retroactively change what a guest already locked in.
     public void SetCurrency(Currency currency)
     {
-        Currency = currency;
+        BasePrice = Money.Of(BasePrice.Amount, currency);
     }
 
     // Only governs bookings confirmed after this call - an existing

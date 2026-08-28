@@ -4,6 +4,7 @@ using Catalog.Features.GetPriceCalendar;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.DependencyInjection;
 using NpgsqlTypes;
+using SeedWork.Enums;
 using SeedWork.ValueObjects;
 namespace IntegrationTests.Features.Catalog;
 
@@ -41,7 +42,8 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         HybridCache cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
-        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache);
+        TimeProvider timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache, timeProvider);
 
         GetPriceCalendarRequest request = new GetPriceCalendarRequest
         {
@@ -94,7 +96,9 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
             Id = Guid.NewGuid(),
             UnitId = unit.Id,
             Status = "held",
-            StayRange = new NpgsqlRange<DateOnly>(from, true, new DateOnly(2026, 9, 3), false) // [Sept 1, Sept 3)
+            StayRange = new NpgsqlRange<DateOnly>(from, true, new DateOnly(2026, 9, 3), false), // [Sept 1, Sept 3)
+            TotalPrice = Money.Of(100m, Currency.KWD),
+            Subtotal = 100m
         };
 
         await SeedDatabaseAsync(unit, hold);
@@ -102,7 +106,8 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         HybridCache cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
-        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache);
+        TimeProvider timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache, timeProvider);
 
         GetPriceCalendarRequest request = new GetPriceCalendarRequest { UnitId = unit.Id, From = from, To = to };
 
@@ -139,7 +144,9 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
             UnitId = unit.Id,
             Status = "held",
             StayRange = new NpgsqlRange<DateOnly>(from, true, to, false),
-            HoldExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+            HoldExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            TotalPrice = Money.Of(100m, Currency.KWD),
+            Subtotal = 100m
         };
 
         await SeedDatabaseAsync(unit, expiredHold);
@@ -147,7 +154,8 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         HybridCache cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
-        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache);
+        TimeProvider timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache, timeProvider);
 
         GetPriceCalendarRequest request = new GetPriceCalendarRequest { UnitId = unit.Id, From = from, To = to };
 
@@ -172,7 +180,9 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
             Id = Guid.NewGuid(),
             UnitId = unit.Id,
             Status = "released",
-            StayRange = new NpgsqlRange<DateOnly>(from, true, to, false)
+            StayRange = new NpgsqlRange<DateOnly>(from, true, to, false),
+            TotalPrice = Money.Of(100m, Currency.KWD),
+            Subtotal = 100m
         };
 
         await SeedDatabaseAsync(unit, releasedHold);
@@ -180,7 +190,8 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         HybridCache cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
-        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache);
+        TimeProvider timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache, timeProvider);
 
         GetPriceCalendarRequest request = new GetPriceCalendarRequest { UnitId = unit.Id, From = from, To = to };
 
@@ -207,7 +218,8 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         HybridCache cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
-        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache);
+        TimeProvider timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache, timeProvider);
 
         GetPriceCalendarRequest request = new GetPriceCalendarRequest { UnitId = unit.Id, From = from, To = to };
 
@@ -236,7 +248,8 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         HybridCache cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
-        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache);
+        TimeProvider timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache, timeProvider);
 
         GetPriceCalendarRequest request = new GetPriceCalendarRequest { UnitId = unit.Id, From = from, To = to };
 
@@ -266,7 +279,8 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         HybridCache cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
-        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache);
+        TimeProvider timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache, timeProvider);
 
         GetPriceCalendarRequest request = new GetPriceCalendarRequest { UnitId = unit.Id, From = from, To = to };
 
@@ -284,7 +298,8 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         HybridCache cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
-        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache);
+        TimeProvider timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache, timeProvider);
 
         GetPriceCalendarRequest request = new GetPriceCalendarRequest
         {
@@ -314,7 +329,8 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         HybridCache cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
-        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache);
+        TimeProvider timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        GetPriceCalendarHandler handler = new GetPriceCalendarHandler(context, cache, timeProvider);
 
         GetPriceCalendarRequest request = new GetPriceCalendarRequest { UnitId = unit.Id, From = from, To = to };
 
@@ -328,7 +344,9 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
             Id = Guid.NewGuid(),
             UnitId = unit.Id,
             Status = "booked",
-            StayRange = new NpgsqlRange<DateOnly>(from, true, to, false)
+            StayRange = new NpgsqlRange<DateOnly>(from, true, to, false),
+            TotalPrice = Money.Of(100m, Currency.KWD),
+            Subtotal = 100m
         };
         await SeedDatabaseAsync(newHold);
 

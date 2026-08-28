@@ -1,4 +1,4 @@
-using SeedWork.Enums;
+using SeedWork.ValueObjects;
 namespace Bookings.Contracts;
 
 /// <summary>
@@ -49,8 +49,7 @@ public interface IBookingLookup
 public record BookingSummary
 {
     public Guid Id { get; init; }
-    public decimal TotalPrice { get; init; }
-    public Currency Currency { get; init; }
+    public Money TotalPrice { get; init; }
 
     // True only while Pending - the one state a transaction can actually
     // be initiated from. Exposed as a bool rather than the real

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Persistence;
 using Transactions.Entities;
 namespace Transactions.Entities.Configurations;
 
@@ -9,9 +10,8 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
     {
         builder.HasKey(t => t.Id);
 
-        builder.Property(t => t.Amount).HasColumnType("numeric(10,2)").IsRequired();
-        builder.Property(t => t.RefundAmount).HasColumnType("numeric(10,2)");
-        builder.Property(t => t.Currency).HasConversion<string>().HasMaxLength(3).IsFixedLength().IsRequired();
+        builder.ComplexProperty(t => t.Amount, money => money.ConfigureMoney("amount"));
+        builder.Property(t => t.RefundAmount).HasColumnType("numeric(12,3)");
 
         // Stored as text, not the integer enum value - same reasoning as
         // Booking.BookingStatus: legible in psql, safe against the enum's

@@ -53,7 +53,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             UnitId = unit.Id,
             CheckIn = today,
             CheckOut = today.AddDays(3),
-            GuestCount = 2
+            GuestCount = 2,
+            HolderToken = Guid.NewGuid().ToString()
         };
 
         // Act
@@ -76,8 +77,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         // Price/currency snapshotted at hold time (100/night * 3 nights),
         // not left to be recomputed from a possibly-changed unit price
         // later at confirm time.
-        Assert.Equal(300m, persistedHold.TotalPrice);
-        Assert.Equal(SeedWork.Enums.Currency.KWD, persistedHold.Currency);
+        Assert.Equal(300m, persistedHold.TotalPrice.Amount);
+        Assert.Equal(SeedWork.Enums.Currency.KWD, persistedHold.TotalPrice.Currency);
 
         // TimeProvider-derived, not DateTime.UtcNow - deterministic given
         // the FakeTimeProvider above.
@@ -97,7 +98,9 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         {
             Id = Guid.NewGuid(),
             UnitId = unit.Id,
-            StayRange = new NpgsqlRange<DateOnly>(today, true, today.AddDays(2), false) // Aug 20 -> Aug 22
+            StayRange = new NpgsqlRange<DateOnly>(today, true, today.AddDays(2), false), // Aug 20 -> Aug 22
+            TotalPrice = Money.Of(100m, Currency.KWD),
+            Subtotal = 100m
         };
 
         await SeedDatabaseAsync(unit, existingHold);
@@ -113,7 +116,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             UnitId = unit.Id,
             CheckIn = today.AddDays(2), // Aug 22 (Same day previous hold ends)
             CheckOut = today.AddDays(4), // Aug 24
-            GuestCount = 2
+            GuestCount = 2,
+            HolderToken = Guid.NewGuid().ToString()
         };
 
         // Act
@@ -143,7 +147,9 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             Status = "held",
             StayRange = new NpgsqlRange<DateOnly>(today, true, today.AddDays(2), false),
             HoldExpiresAt = fixedInstant.AddMinutes(-1),
-            CreatedAt = fixedInstant.AddMinutes(-16)
+            CreatedAt = fixedInstant.AddMinutes(-16),
+            TotalPrice = Money.Of(100m, Currency.KWD),
+            Subtotal = 100m
         };
 
         await SeedDatabaseAsync(unit, expiredHold);
@@ -159,7 +165,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             UnitId = unit.Id,
             CheckIn = today,
             CheckOut = today.AddDays(2),
-            GuestCount = 2
+            GuestCount = 2,
+            HolderToken = Guid.NewGuid().ToString()
         };
 
         // Act
@@ -190,7 +197,9 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         {
             Id = Guid.NewGuid(),
             UnitId = unit.Id,
-            StayRange = new NpgsqlRange<DateOnly>(today, today.AddDays(2))
+            StayRange = new NpgsqlRange<DateOnly>(today, today.AddDays(2)),
+            TotalPrice = Money.Of(100m, Currency.KWD),
+            Subtotal = 100m
         };
 
         await SeedDatabaseAsync(unit, existingHold);
@@ -206,7 +215,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             UnitId = unit.Id,
             CheckIn = today,
             CheckOut = today.AddDays(2),
-            GuestCount = 2
+            GuestCount = 2,
+            HolderToken = Guid.NewGuid().ToString()
         };
 
         // Act & Assert
@@ -238,7 +248,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             UnitId = unit.Id,
             CheckIn = today,
             CheckOut = today.AddDays(3),
-            GuestCount = 2
+            GuestCount = 2,
+            HolderToken = Guid.NewGuid().ToString()
         };
 
         // Act
@@ -271,7 +282,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             UnitId = unit.Id,
             CheckIn = today,
             CheckOut = today.AddDays(2), // Thu, Fri
-            GuestCount = 2
+            GuestCount = 2,
+            HolderToken = Guid.NewGuid().ToString()
         };
 
         // Act
@@ -304,7 +316,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             UnitId = unit.Id,
             CheckIn = today,
             CheckOut = today.AddDays(7),
-            GuestCount = 2
+            GuestCount = 2,
+            HolderToken = Guid.NewGuid().ToString()
         };
 
         // Act
@@ -332,11 +345,207 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             UnitId = Guid.NewGuid(), // Non-existent UnitId
             CheckIn = today,
             CheckOut = today.AddDays(2),
-            GuestCount = 1
+            GuestCount = 1,
+            HolderToken = Guid.NewGuid().ToString()
         };
 
         // Act & Assert
         await Assert.ThrowsAsync<NotFoundException>(() =>
             handler.Handle(command, CancellationToken.None).AsTask());
+    }
+
+    [Fact]
+    public async Task Handle_CheckInBeyondMaxLeadTime_ThrowsArgumentException()
+    {
+        // Without this, an anonymous caller could hold a unit for [today,
+        // today+3650) and the exclusion constraint would faithfully enforce
+        // that decade-long block - see HoldAvailabilityHandler's own
+        // MaxLeadTimeDays constant.
+        Unit unit = CreateTestUnit();
+        await SeedDatabaseAsync(unit);
+
+        DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
+        DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(fixedInstant);
+        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+
+        HoldAvailabilityRequest command = new HoldAvailabilityRequest
+        {
+            UnitId = unit.Id,
+            CheckIn = today.AddDays(731),
+            CheckOut = today.AddDays(733),
+            GuestCount = 1,
+            HolderToken = Guid.NewGuid().ToString()
+        };
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            handler.Handle(command, CancellationToken.None).AsTask());
+    }
+
+    [Fact]
+    public async Task Handle_SixthActiveHoldForSameSession_ThrowsTooManyActiveHoldsException()
+    {
+        Unit unit = CreateTestUnit(maxCapacity: 10);
+        await SeedDatabaseAsync(unit);
+
+        DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
+        DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
+        string holderToken = Guid.NewGuid().ToString();
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(fixedInstant);
+        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+
+        // Five non-overlapping ranges on the same unit, same session token -
+        // all should succeed, filling the cap exactly.
+        for (int i = 0; i < 5; i++)
+        {
+            HoldAvailabilityRequest request = new HoldAvailabilityRequest
+            {
+                UnitId = unit.Id,
+                CheckIn = today.AddDays(i * 3),
+                CheckOut = today.AddDays(i * 3 + 2),
+                GuestCount = 1,
+                HolderToken = holderToken
+            };
+            await handler.Handle(request, CancellationToken.None);
+        }
+
+        // A 6th, on a range that doesn't even overlap the first five -
+        // the cap is per-session, not per-unit/range, so a clean exclusion-
+        // constraint check would otherwise let this through.
+        HoldAvailabilityRequest sixthRequest = new HoldAvailabilityRequest
+        {
+            UnitId = unit.Id,
+            CheckIn = today.AddDays(100),
+            CheckOut = today.AddDays(102),
+            GuestCount = 1,
+            HolderToken = holderToken
+        };
+
+        await Assert.ThrowsAsync<TooManyActiveHoldsException>(() =>
+            handler.Handle(sixthRequest, CancellationToken.None).AsTask());
+    }
+
+    [Fact]
+    public async Task Handle_AfterFiveSuccessfulBookings_SixthHoldStillSucceeds()
+    {
+        // Regression test: the active-hold count previously included
+        // 'booked' holds, which never revert to 'held' for a successfully
+        // completed booking (ConfirmHoldAsync sets 'booked' and nothing
+        // ever clears it on that path - see ReconcileOrphanedBookedHoldsJob,
+        // which depends on exactly that persistence). That meant a real
+        // customer would be permanently locked out of new holds on this
+        // browser after their 5th ever completed booking. 'booked' rows
+        // must never count toward the cap.
+        Unit unit = CreateTestUnit(maxCapacity: 10);
+        await SeedDatabaseAsync(unit);
+
+        DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
+        DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
+        string holderToken = Guid.NewGuid().ToString();
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+
+        // Five already-'booked' holds under the same session token,
+        // simulating five completed bookings - none of these are "active"
+        // in any meaningful sense; the customer already has real bookings,
+        // not open holds.
+        for (int i = 0; i < 5; i++)
+        {
+            context.Add(new UnitAvailabilityHold
+            {
+                Id = Guid.NewGuid(),
+                UnitId = unit.Id,
+                Status = "booked",
+                StayRange = new NpgsqlRange<DateOnly>(today.AddDays(i * 3), true, today.AddDays(i * 3 + 2), false),
+                BookedAt = fixedInstant,
+                HolderToken = holderToken,
+                TotalPrice = Money.Of(200m, Currency.KWD),
+                Subtotal = 200m
+            });
+        }
+
+        await context.SaveChangesAsync();
+
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(fixedInstant);
+        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+
+        HoldAvailabilityRequest sixthRequest = new HoldAvailabilityRequest
+        {
+            UnitId = unit.Id,
+            CheckIn = today.AddDays(100),
+            CheckOut = today.AddDays(102),
+            GuestCount = 1,
+            HolderToken = holderToken
+        };
+
+        HoldAvailabilityResponse result = await handler.Handle(sixthRequest, CancellationToken.None);
+
+        Assert.NotEqual(Guid.Empty, result.HoldId);
+    }
+
+    [Fact]
+    public async Task Handle_WithExpiredHeldRowsOnDifferentUnits_DoesNotCountThemTowardTheCap()
+    {
+        // Regression test: the inline per-unit cleanup DELETE only ever
+        // touches the unit being held right now, so an expired 'held' row
+        // on a *different* unit survives until ExpiredHoldsSweepJob happens
+        // to reap it (up to 5 minutes later). The active-hold count must
+        // exclude expired rows itself rather than relying on that cleanup -
+        // otherwise a guest who starts and abandons checkout on five
+        // different units is locked out of a sixth for up to 15 minutes
+        // with zero live holds.
+        Unit unit = CreateTestUnit(maxCapacity: 10);
+        await SeedDatabaseAsync(unit);
+
+        DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
+        DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
+        string holderToken = Guid.NewGuid().ToString();
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+
+        for (int i = 0; i < 5; i++)
+        {
+            context.Add(new UnitAvailabilityHold
+            {
+                Id = Guid.NewGuid(),
+                UnitId = Guid.NewGuid(), // a different unit each time
+                Status = "held",
+                StayRange = new NpgsqlRange<DateOnly>(today, true, today.AddDays(2), false),
+                HoldExpiresAt = fixedInstant.AddMinutes(-1), // already expired
+                HolderToken = holderToken,
+                TotalPrice = Money.Of(100m, Currency.KWD),
+                Subtotal = 100m
+            });
+        }
+
+        await context.SaveChangesAsync();
+
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(fixedInstant);
+        HoldAvailabilityHandler handler = new HoldAvailabilityHandler(context, timeProvider);
+
+        HoldAvailabilityRequest sixthRequest = new HoldAvailabilityRequest
+        {
+            UnitId = unit.Id,
+            CheckIn = today,
+            CheckOut = today.AddDays(2),
+            GuestCount = 1,
+            HolderToken = holderToken
+        };
+
+        HoldAvailabilityResponse result = await handler.Handle(sixthRequest, CancellationToken.None);
+
+        Assert.NotEqual(Guid.Empty, result.HoldId);
     }
 }

@@ -5,6 +5,8 @@ using Catalog.Enums;
 using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using System.Data;
 using Unit = Catalog.Entities.Unit;
 
 namespace Catalog.Features.CreatePricingRule;
@@ -36,27 +38,58 @@ public class CreatePricingRuleHandler(
             throw new NotFoundException(nameof(Property), unit.PropertyId);
         }
 
-        if (!currentUserProvider.Roles.Contains("Administrator"))
+        if (!currentUserProvider.Roles.Contains(AuthorizationPolicies.Administrator))
         {
             hostAuthorization.RequireOwnership(property.HostId, nameof(Property), property.Id);
         }
 
-        List<PricingRule> existingSameType = await dbContext.PricingRules
-            .Where(r => r.UnitId == request.UnitId && r.RuleType == request.RuleType)
-            .ToListAsync(cancellationToken);
+        // ADR-0012 deliberately doesn't back this with a GIST exclusion
+        // constraint (pricing-rule authoring is a low-frequency, single-
+        // host action, unlike guests racing for the same unit) - but the
+        // check-then-insert below is still a genuine read-then-write race
+        // in application memory with nothing at the database enforcing it.
+        // Serializable isolation closes that without contradicting ADR-0012:
+        // still no GIST constraint, still plain EF, just a transaction
+        // strong enough that two concurrent conflicting inserts can't both
+        // pass their own overlap check. A losing transaction fails with
+        // Postgres' 40001 (serialization_failure), which EnableRetryOnFailure
+        // (see NpgsqlDbContextOptionsExtensions) is configured to retry
+        // rather than surface as an unhandled 500. ChangeTracker.Clear() at
+        // the top of the retried delegate is required here - unlike
+        // HoldAvailabilityHandler's raw-Dapper transaction, this one calls
+        // dbContext.Add()/SaveChangesAsync(), and a retried delegate would
+        // otherwise re-add a second entity on top of the first attempt's
+        // still-tracked (but rolled-back) one.
+        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
-        PricingRule rule = request.RuleType switch
+        Guid pricingRuleId = await strategy.ExecuteAsync(async () =>
         {
-            PricingRuleType.DateRangeOverride => CreateDateRangeOverride(request, existingSameType),
-            PricingRuleType.DayOfWeekMultiplier => CreateDayOfWeekMultiplier(request, existingSameType),
-            PricingRuleType.LengthOfStayDiscount => CreateLengthOfStayDiscount(request, existingSameType),
-            _ => throw new ValidationException(nameof(request.RuleType), "Unsupported RuleType.")
-        };
+            dbContext.ChangeTracker.Clear();
 
-        dbContext.PricingRules.Add(rule);
-        await dbContext.SaveChangesAsync(cancellationToken);
+            await using IDbContextTransaction transaction =
+                await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
-        return new CreatePricingRuleResponse { PricingRuleId = rule.Id };
+            List<PricingRule> existingSameType = await dbContext.PricingRules
+                .Where(r => r.UnitId == request.UnitId && r.RuleType == request.RuleType)
+                .ToListAsync(cancellationToken);
+
+            PricingRule rule = request.RuleType switch
+            {
+                PricingRuleType.DateRangeOverride => CreateDateRangeOverride(request, existingSameType),
+                PricingRuleType.DayOfWeekMultiplier => CreateDayOfWeekMultiplier(request, existingSameType),
+                PricingRuleType.LengthOfStayDiscount => CreateLengthOfStayDiscount(request, existingSameType),
+                _ => throw new ValidationException(nameof(request.RuleType), "Unsupported RuleType.")
+            };
+
+            dbContext.PricingRules.Add(rule);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+
+            return rule.Id;
+        });
+
+        return new CreatePricingRuleResponse { PricingRuleId = pricingRuleId };
     }
 
     private static PricingRule CreateDateRangeOverride(CreatePricingRuleRequest request, IReadOnlyList<PricingRule> existing)

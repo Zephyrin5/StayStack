@@ -60,4 +60,33 @@ public class HoldAvailabilityRequestValidatorTests
 
         result.ShouldHaveValidationErrorFor(x => x.GuestCount);
     }
+
+    [Fact]
+    public void Validate_ShouldNotHaveError_ForCheckOut_WhenStayIsExactlyMaxNights()
+    {
+        HoldAvailabilityRequest request = CreateValidRequest() with
+        {
+            CheckOut = Today.AddDays(HoldAvailabilityRequestValidator.MaxStayNights)
+        };
+
+        var result = _sut.TestValidate(request);
+
+        result.ShouldNotHaveValidationErrorFor(x => x.CheckOut);
+    }
+
+    [Fact]
+    public void Validate_ShouldHaveError_ForCheckOut_WhenStayExceedsMaxNights()
+    {
+        // Without this, an anonymous caller could hold a unit for a decade
+        // in one request - see HoldAvailabilityHandler's own MaxLeadTimeDays
+        // guard for the other half of that same bound.
+        HoldAvailabilityRequest request = CreateValidRequest() with
+        {
+            CheckOut = Today.AddDays(HoldAvailabilityRequestValidator.MaxStayNights + 1)
+        };
+
+        var result = _sut.TestValidate(request);
+
+        result.ShouldHaveValidationErrorFor(x => x.CheckOut);
+    }
 }

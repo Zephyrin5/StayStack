@@ -1,4 +1,5 @@
 using SeedWork.Enums;
+using SeedWork.ValueObjects;
 using Transactions.Entities;
 using Transactions.Exceptions;
 namespace UnitTests.Entities;
@@ -7,7 +8,7 @@ public class TransactionTests
 {
     private static Transaction CreateValidTransaction()
     {
-        return Transaction.Create(Guid.NewGuid(), 100m, Currency.KWD);
+        return Transaction.Create(Guid.NewGuid(), Money.Of(100m, Currency.KWD));
     }
 
     [Fact]
@@ -15,12 +16,11 @@ public class TransactionTests
     {
         Guid bookingId = Guid.NewGuid();
 
-        Transaction transaction = Transaction.Create(bookingId, 100m, Currency.KWD);
+        Transaction transaction = Transaction.Create(bookingId, Money.Of(100m, Currency.KWD));
 
         Assert.NotEqual(Guid.Empty, transaction.Id);
         Assert.Equal(bookingId, transaction.BookingId);
-        Assert.Equal(100m, transaction.Amount);
-        Assert.Equal(Currency.KWD, transaction.Currency);
+        Assert.Equal(Money.Of(100m, Currency.KWD), transaction.Amount);
         Assert.Equal(TransactionStatus.Pending, transaction.TransactionStatus);
         Assert.Null(transaction.FailureReason);
     }
@@ -28,7 +28,7 @@ public class TransactionTests
     [Fact]
     public void Create_ShouldThrow_WhenBookingIdIsEmpty()
     {
-        Assert.ThrowsAny<ArgumentException>(() => Transaction.Create(Guid.Empty, 100m, Currency.KWD));
+        Assert.ThrowsAny<ArgumentException>(() => Transaction.Create(Guid.Empty, Money.Of(100m, Currency.KWD)));
     }
 
     [Theory]
@@ -36,7 +36,7 @@ public class TransactionTests
     [InlineData(-1)]
     public void Create_ShouldThrow_WhenAmountIsNotPositive(decimal amount)
     {
-        Assert.ThrowsAny<ArgumentException>(() => Transaction.Create(Guid.NewGuid(), amount, Currency.KWD));
+        Assert.ThrowsAny<ArgumentException>(() => Transaction.Create(Guid.NewGuid(), Money.Of(amount, Currency.KWD)));
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public class TransactionTests
         Transaction transaction = CreateValidTransaction();
         transaction.MarkSucceeded();
 
-        transaction.MarkRefundPending(60m);
+        transaction.MarkRefundPending(Money.Of(60m, Currency.KWD));
 
         Assert.Equal(TransactionStatus.RefundPending, transaction.TransactionStatus);
         Assert.Equal(60m, transaction.RefundAmount);
@@ -105,7 +105,7 @@ public class TransactionTests
         Transaction transaction = CreateValidTransaction();
         transaction.MarkSucceeded();
 
-        transaction.MarkRefundPending(0m);
+        transaction.MarkRefundPending(Money.Of(0m, Currency.KWD));
 
         Assert.Equal(0m, transaction.RefundAmount);
     }
@@ -118,7 +118,7 @@ public class TransactionTests
 
         transaction.MarkRefundPending(transaction.Amount);
 
-        Assert.Equal(transaction.Amount, transaction.RefundAmount);
+        Assert.Equal(transaction.Amount.Amount, transaction.RefundAmount);
     }
 
     [Fact]
@@ -127,7 +127,7 @@ public class TransactionTests
         Transaction transaction = CreateValidTransaction();
         transaction.MarkSucceeded();
 
-        Assert.ThrowsAny<ArgumentException>(() => transaction.MarkRefundPending(transaction.Amount + 1m));
+        Assert.ThrowsAny<ArgumentException>(() => transaction.MarkRefundPending(transaction.Amount + Money.Of(1m, Currency.KWD)));
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public class TransactionTests
         Transaction transaction = CreateValidTransaction();
         transaction.MarkSucceeded();
 
-        Assert.ThrowsAny<ArgumentException>(() => transaction.MarkRefundPending(-1m));
+        Assert.ThrowsAny<ArgumentException>(() => transaction.MarkRefundPending(Money.Of(-1m, Currency.KWD)));
     }
 
     [Fact]
@@ -144,7 +144,7 @@ public class TransactionTests
     {
         Transaction transaction = CreateValidTransaction();
 
-        Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkRefundPending(50m));
+        Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkRefundPending(Money.Of(50m, Currency.KWD)));
     }
 
     [Fact]
@@ -153,7 +153,16 @@ public class TransactionTests
         Transaction transaction = CreateValidTransaction();
         transaction.MarkFailed("Card declined");
 
-        Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkRefundPending(50m));
+        Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkRefundPending(Money.Of(50m, Currency.KWD)));
+    }
+
+    [Fact]
+    public void MarkRefundPending_ShouldThrow_WhenCurrencyDoesNotMatch()
+    {
+        Transaction transaction = CreateValidTransaction();
+        transaction.MarkSucceeded();
+
+        Assert.Throws<CurrencyMismatchException>(() => transaction.MarkRefundPending(Money.Of(50m, Currency.USD)));
     }
 
     [Fact]
@@ -161,7 +170,7 @@ public class TransactionTests
     {
         Transaction transaction = CreateValidTransaction();
         transaction.MarkSucceeded();
-        transaction.MarkRefundPending(50m);
+        transaction.MarkRefundPending(Money.Of(50m, Currency.KWD));
 
         transaction.MarkRefunded();
 
@@ -182,7 +191,7 @@ public class TransactionTests
     {
         Transaction transaction = CreateValidTransaction();
         transaction.MarkSucceeded();
-        transaction.MarkRefundPending(50m);
+        transaction.MarkRefundPending(Money.Of(50m, Currency.KWD));
 
         transaction.MarkRefundFailed("Original card closed");
 

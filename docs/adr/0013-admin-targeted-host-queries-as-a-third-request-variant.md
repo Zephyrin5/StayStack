@@ -8,7 +8,7 @@ Admin user/role management needed a way for an Administrator to browse into a sp
 portal - their properties and bookings - the way that host would see them. Every host-management
 *write* endpoint (`CreateUnitHandler`, `UpdatePropertyHandler`, all four pricing-rule handlers, etc.)
 already lets an Administrator act on any host's resources, via the same
-`if (!Roles.Contains("Administrator")) RequireOwnership(...)` bypass on every one of them - so no new
+`if (!Roles.Contains(AuthorizationPolicies.Administrator)) RequireOwnership(...)` bypass on every one of them - so no new
 write surface was needed. But the *read* side had no equivalent: `GetMyPropertiesHandler` and
 `GetHostBookingsHandler` both resolve `hostId` exclusively from the caller's own token via
 `IHostAuthorization.RequireHostId()`, with no parameter to target a different host at all.
@@ -54,3 +54,9 @@ admin's view of the same rows have no reason to look different.
 - Any future "let an admin view another host/customer's data" need should default to this same shape:
   a new request taking the target id from the route, `Administrator`-only policy, existence validated
   via the owning module's lookup contract - not a parameter bolted onto the self-scoped request.
+- **Correction:** the `TelemetryPipelineBehavior` per-type-traces argument above (Alternatives considered)
+  is currently moot, not just theoretical - `ConfigureObservabilityServices`, the call that registers
+  `TelemetryPipelineBehavior` at all, is commented out in `Program.cs` ("Disabled until Grafana is
+  configured"). Nothing is currently collecting per-request-type telemetry. The trust-boundary argument
+  (derived-from-token vs. client-supplied-and-verified) is what's actually carrying this decision today
+  and is sufficient on its own - see the identical correction on [ADR-0007](0007-separate-requests-for-public-vs-owner-scoped-queries.md).

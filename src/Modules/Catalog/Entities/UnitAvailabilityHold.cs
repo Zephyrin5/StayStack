@@ -1,5 +1,5 @@
 using NpgsqlTypes;
-using SeedWork.Enums;
+using SeedWork.ValueObjects;
 namespace Catalog.Entities;
 
 /// <summary>
@@ -37,14 +37,37 @@ public sealed class UnitAvailabilityHold
     public DateTimeOffset? HoldExpiresAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 
+    // Set only when Status transitions to "booked" (HoldConfirmation.
+    // ConfirmHoldAsync), cleared back to null on release - the grace-period
+    // anchor Bookings.Jobs.ReconcileOrphanedBookedHoldsJob uses to find a
+    // 'booked' hold with no matching booking (a process crash between
+    // ConfirmHoldAsync and the Booking insert, see docs/adr/0003). Never set
+    // at creation time, unlike CreatedAt.
+    public DateTimeOffset? BookedAt { get; set; }
+
+    // An opaque per-browser correlator, not an identity - see
+    // Api.Security.HoldSessionCookie and docs/adr/0016. Null for any hold
+    // predating this column.
+    public string? HolderToken { get; set; }
+
     // Snapshotted from the unit at hold-creation time, not read live at
     // confirm time - Unit.BasePrice can change (SetBasePrice) between a
     // customer holding a range and confirming it; the price they saw when
-    // they held it is the price they get.
-    public decimal TotalPrice { get; set; }
-    public Currency Currency { get; set; }
+    // they held it is the price they get. The one Money-typed (currency-
+    // carrying) field on this entity - Subtotal/LengthOfStayDiscountAmount
+    // below are plain decimals in this same currency by construction (a
+    // hold has exactly one currency), not independently-currencied amounts,
+    // matching how PricingRule.OverridePrice stays a plain decimal for the
+    // same reason (see docs/adr/0015).
+    public Money TotalPrice { get; set; }
 
-    // Part of the same snapshot as TotalPrice/Currency, for the same
+    // The pre-discount total, snapshotted directly rather than left for a
+    // caller to reconstruct via TotalPrice + LengthOfStayDiscountAmount -
+    // that reconstruction is exactly the rounding bug docs/adr/0015 exists
+    // to close, since each side was independently rounded.
+    public decimal Subtotal { get; set; }
+
+    // Part of the same snapshot as TotalPrice/Subtotal, for the same
     // reason - a redeemed promo code is exclusive of the length-of-stay
     // discount rather than stacking with it (see ConfirmBookingHandler),
     // so confirming a hold needs to be able to undo just this portion of

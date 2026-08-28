@@ -1,6 +1,7 @@
 using Catalog.Entities;
 using Catalog.Enums;
 using SeedWork.Enums;
+using SeedWork.ValueObjects;
 using PromotionRedemption = Catalog.Contracts.PromotionRedemption;
 namespace UnitTests.Contracts.Catalog;
 
@@ -14,15 +15,17 @@ namespace UnitTests.Contracts.Catalog;
 // namespace-shadowing bug earlier in this codebase.
 public class PromotionRedemptionComputeDiscountAmountTests
 {
+    private static Money Kwd(decimal amount) => Money.Of(amount, Currency.KWD);
+
     [Fact]
     public void ComputeDiscountAmount_ShouldApplyPercentage_OfSubtotal()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
             Guid.NewGuid(), "CODE", PromotionDiscountType.Percentage, 20m, null, null, null);
 
-        decimal discount = PromotionRedemption.ComputeDiscountAmount(promotion, 200m);
+        Money discount = PromotionRedemption.ComputeDiscountAmount(promotion, Kwd(200m));
 
-        Assert.Equal(40m, discount);
+        Assert.Equal(Kwd(40m), discount);
     }
 
     [Fact]
@@ -31,9 +34,9 @@ public class PromotionRedemptionComputeDiscountAmountTests
         Promotion promotion = Promotion.CreateHostPromotion(
             Guid.NewGuid(), "CODE", PromotionDiscountType.Percentage, 100m, null, null, null);
 
-        decimal discount = PromotionRedemption.ComputeDiscountAmount(promotion, 50m);
+        Money discount = PromotionRedemption.ComputeDiscountAmount(promotion, Kwd(50m));
 
-        Assert.Equal(50m, discount);
+        Assert.Equal(Kwd(50m), discount);
     }
 
     [Fact]
@@ -42,9 +45,9 @@ public class PromotionRedemptionComputeDiscountAmountTests
         Promotion promotion = Promotion.CreateHostPromotion(
             Guid.NewGuid(), "CODE", PromotionDiscountType.FixedAmount, 15m, Currency.KWD, null, null);
 
-        decimal discount = PromotionRedemption.ComputeDiscountAmount(promotion, 200m);
+        Money discount = PromotionRedemption.ComputeDiscountAmount(promotion, Kwd(200m));
 
-        Assert.Equal(15m, discount);
+        Assert.Equal(Kwd(15m), discount);
     }
 
     [Fact]
@@ -53,9 +56,9 @@ public class PromotionRedemptionComputeDiscountAmountTests
         Promotion promotion = Promotion.CreateHostPromotion(
             Guid.NewGuid(), "CODE", PromotionDiscountType.FixedAmount, 500m, Currency.KWD, null, null);
 
-        decimal discount = PromotionRedemption.ComputeDiscountAmount(promotion, 200m);
+        Money discount = PromotionRedemption.ComputeDiscountAmount(promotion, Kwd(200m));
 
-        Assert.Equal(200m, discount);
+        Assert.Equal(Kwd(200m), discount);
     }
 
     [Fact]
@@ -64,8 +67,8 @@ public class PromotionRedemptionComputeDiscountAmountTests
         Promotion promotion = Promotion.CreateHostPromotion(
             Guid.NewGuid(), "CODE", PromotionDiscountType.FixedAmount, 15m, Currency.KWD, null, null);
 
-        decimal discount = PromotionRedemption.ComputeDiscountAmount(promotion, 0m);
+        Money discount = PromotionRedemption.ComputeDiscountAmount(promotion, Kwd(0m));
 
-        Assert.Equal(0m, discount);
+        Assert.Equal(Kwd(0m), discount);
     }
 }

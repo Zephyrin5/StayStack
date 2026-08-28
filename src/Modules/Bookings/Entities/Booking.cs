@@ -1,15 +1,32 @@
 using Ardalis.GuardClauses;
 using Bookings.Contracts;
 using SeedWork.Abstractions;
-using SeedWork.Enums;
 using SeedWork.Interfaces;
 using SeedWork.ValueObjects;
 namespace Bookings.Entities;
 
 public sealed class Booking : Entity, IAggregateRoot
 {
-    // See Property.cs (Catalog) for why materialization goes through a
-    // real constructor rather than a parameterless one + `required`/`null!`.
+    // EF Core's constructor-binding convention (see Property.cs for why
+    // materialization normally goes through the real constructor below)
+    // can't bind a parameter typed as a ComplexProperty back to the
+    // entity's own mapped complex property - it only matches parameters
+    // against directly-mapped scalar/converted properties by name, and
+    // TotalPrice (Money) spans two columns. A documented EF limitation, not
+    // something to configure around (see docs/adr/0015). This parameterless
+    // constructor exists solely as EF's materialization fallback for reads;
+    // Create() below still goes through the full validated constructor for
+    // every write, unconditionally. GuestName/GuestEmail get real (not
+    // null!) empty-string defaults only to satisfy the non-nullable-
+    // reference-type compiler check - EF overwrites every property here via
+    // its own property-setting the instant this returns, before the entity
+    // is ever visible to application code.
+    private Booking()
+    {
+        GuestName = string.Empty;
+        GuestEmail = string.Empty;
+    }
+
     private Booking(
         Guid id,
         Guid unitId,
@@ -21,8 +38,8 @@ public sealed class Booking : Entity, IAggregateRoot
         DateOnly checkIn,
         DateOnly checkOut,
         int guestCount,
-        decimal totalPrice,
-        Currency currency,
+        Money totalPrice,
+        decimal subtotal,
         BookingStatus bookingStatus,
         CancellationPolicy cancellationPolicy)
     {
@@ -37,7 +54,7 @@ public sealed class Booking : Entity, IAggregateRoot
         CheckOut = checkOut;
         GuestCount = guestCount;
         TotalPrice = totalPrice;
-        Currency = currency;
+        Subtotal = subtotal;
         BookingStatus = bookingStatus;
         CancellationPolicy = cancellationPolicy;
     }
@@ -62,8 +79,17 @@ public sealed class Booking : Entity, IAggregateRoot
     public DateOnly CheckOut { get; private set; }
     public int GuestCount { get; private set; }
 
-    public decimal TotalPrice { get; private set; }
-    public Currency Currency { get; private set; }
+    // The one Money-typed (currency-carrying) field on this entity -
+    // Subtotal below is a plain decimal in this same currency by
+    // construction (a booking has exactly one currency), matching
+    // UnitAvailabilityHold.Subtotal's own reasoning (see docs/adr/0015).
+    public Money TotalPrice { get; private set; }
+
+    // Snapshotted directly from the hold's own Subtotal at confirm time
+    // (ConfirmBookingHandler), not reconstructed - see
+    // ConfirmedHold.Subtotal's own doc comment for why reconstruction was
+    // the actual rounding bug this closes.
+    public decimal Subtotal { get; private set; }
 
     // Named BookingStatus, not Status - Status is already claimed by the
     // inherited Entity.Status (EntityStatus: soft-delete state), a
@@ -97,8 +123,8 @@ public sealed class Booking : Entity, IAggregateRoot
         DateOnly checkIn,
         DateOnly checkOut,
         int guestCount,
-        decimal totalPrice,
-        Currency currency,
+        Money totalPrice,
+        decimal subtotal,
         CancellationPolicy cancellationPolicy)
     {
         Guard.Against.Default(id);
@@ -111,19 +137,23 @@ public sealed class Booking : Entity, IAggregateRoot
         Guard.Against.InvalidInput(checkOut, nameof(checkOut),
             c => c > checkIn, "Check-out must be after check-in.");
         Guard.Against.NegativeOrZero(guestCount);
-        Guard.Against.Negative(totalPrice);
+        Guard.Against.Negative(totalPrice.Amount);
+        Guard.Against.Negative(subtotal);
         Guard.Against.Null(cancellationPolicy);
 
         return new Booking(
             id, unitId, holdId, customerId, guestName, guestEmail, guestPhone,
-            checkIn, checkOut, guestCount, totalPrice, currency, BookingStatus.Pending, cancellationPolicy);
+            checkIn, checkOut, guestCount, totalPrice, subtotal, BookingStatus.Pending, cancellationPolicy);
     }
 
-    // A real mutation with its own invariant (can't cancel twice, can't
-    // cancel a booking that's already run its course), not just a settable
-    // property - matches Unit.SetBasePrice's reasoning. No caller wired up
-    // to this yet (out of scope for this increment), but the entity's
-    // lifecycle shouldn't wait for the endpoint that exercises it.
+    // Idempotent - a repeated cancel (retried request, double-click) is a
+    // no-op rather than an error. Deliberately has no "already run its
+    // course" check: whether a booking is still reachable for cancellation
+    // at all is BookingAccessChecker's call (the guest-checkout management
+    // token stays valid through CheckOut + 90 days specifically so a stay
+    // can still be cancelled shortly after checkout for a refund) - Cancel()
+    // being invoked at all already means that check passed, so re-deriving
+    // a stricter date rule here would just contradict it.
     public void Cancel()
     {
         if (BookingStatus == BookingStatus.Cancelled)
