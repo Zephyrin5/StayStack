@@ -86,6 +86,20 @@ than adding raw migration SQL.
   `40001` (serialization_failure) in `EnableRetryOnFailure`'s `errorCodesToAdd` alongside the existing
   `40P01` (deadlock) - without it, a genuine conflict here surfaces as an unhandled 500 instead of a
   retried transaction, the opposite of the intended fix.
+- **`UpdatePricingRuleHandler` had the identical fix applied, but its retry path was genuinely broken until a
+  concurrency test (not a single-threaded one - see this ADR's own reasoning for why that distinction
+  matters) actually exercised it.** Its `existingSameType` query has no `AsNoTracking()`: on a retry after a
+  real `40001`, EF's identity map hands back whatever instance of a sibling row is already tracked from the
+  prior, rolled-back attempt - with that attempt's stale, pre-conflict values - instead of the row the
+  repeated `SELECT` just fetched. A genuine write-skew race (two existing rules, each updated concurrently
+  into a range that only conflicts with the *other's new* state, never its own original one - the textbook
+  case Serializable exists to catch, that Read Committed or Repeatable Read would let through) reproduced
+  this directly: the losing side's retry saw the sibling's superseded range and incorrectly succeeded. Fixed
+  by adding `AsNoTracking()` to that one query - it's read-only data for the overlap check, never mutated,
+  so it never needed the identity map at all. `CreatePricingRuleHandler` was never at risk of this specific
+  failure mode (`ChangeTracker.Clear()` at the top of its own retry delegate already discards any stale
+  tracked entries before `existingSameType` runs), which is exactly why only one of the two handlers needed
+  this fix.
 - **Both pricing paths now agree structurally *and* arithmetically.** The shared `PricingCalculator`
   already guaranteed `GetPriceCalendarHandler` and `HoldAvailabilityHandler` could never disagree on
   *which* rule applies - it didn't guarantee they'd land on the same final number, since neither path

@@ -70,12 +70,27 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
         // unhandled 500 instead of retrying the whole transaction from
         // scratch. See docs/adr/0010 for why this actually happens under
         // concurrent contention on the same range, not just in theory.
+        //
+        // Serializable, not the default Read Committed, for the same
+        // reason CreatePricingRuleHandler/UpdatePricingRuleHandler need it
+        // (docs/adr/0012): the per-session cap below is a COUNT-then-INSERT
+        // against a shared predicate (holder_token = @HolderToken), and
+        // under Read Committed, N concurrent holds from the same session on
+        // N different (non-conflicting) units can all COUNT before any of
+        // them commits their own INSERT, oversubscribing the cap - proven
+        // empirically via HoldAvailabilityConcurrencyTests
+        // (Hold_ConcurrentRequestsSharingTheSameHolderToken_
+        // NeverExceedTheSessionCap), which measured 9 successful holds
+        // against a cap of 5 before this was added. No EF change-tracking
+        // risk on retry here the way UpdatePricingRuleHandler had - this
+        // transaction is pure Dapper, so every retry re-issues a real SQL
+        // round trip with no client-side identity map to go stale.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
         (Guid HoldId, DateTimeOffset HoldExpiresAt) result = await strategy.ExecuteAsync(async () =>
         {
             await using IDbContextTransaction transaction =
-                await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             IDbConnection connection = dbContext.Database.GetDbConnection();
 
             DateTimeOffset now = timeProvider.GetUtcNow();

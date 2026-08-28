@@ -176,4 +176,68 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         int holdCount = await context.UnitAvailabilityHolds.CountAsync(h => h.UnitId == unit.Id, TestContext.Current.CancellationToken);
         Assert.Equal(2, holdCount);
     }
+
+    [Fact]
+    public async Task Hold_ConcurrentRequestsSharingTheSameHolderToken_NeverExceedTheSessionCap()
+    {
+        // The per-session cap (MaxActiveHoldsPerSession, 5) runs as a plain
+        // COUNT-then-INSERT inside a transaction with no isolation level
+        // override (Postgres' default, Read Committed) and no explicit
+        // row locking - unlike PricingRuleConcurrencyTests' Serializable
+        // transactions. Distinct target units means the exclusion
+        // constraint can never be why any of these requests fail, so this
+        // isolates the cap check specifically: if Read Committed lets two
+        // concurrent transactions both COUNT before either commits its own
+        // INSERT, the cap can be oversold. Only a real concurrent test can
+        // tell the difference between "correctly enforced" and "happens to
+        // look correct because nothing has ever actually raced it".
+        const int cap = 5;
+        Unit[] units = await Task.WhenAll(Enumerable.Range(0, cap + 4).Select(_ => SeedUnitAsync()));
+        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        using HttpClient client = factory.CreateClient();
+
+        // A single sequential warm-up request establishes the hold-session
+        // cookie on this client (and consumes the first of the cap's 5
+        // slots) before any concurrent request fires - otherwise every
+        // "concurrent" request below would race to mint its own fresh
+        // token instead of sharing one, which would test nothing at all.
+        HttpResponseMessage warmUp = await client.PostAsJsonAsync("/api/catalog/holds", new HoldAvailabilityRequest
+        {
+            UnitId = units[0].Id,
+            CheckIn = today,
+            CheckOut = today.AddDays(2),
+            GuestCount = 2
+        }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, warmUp.StatusCode);
+
+        Task<HttpResponseMessage>[] tasks =
+        [
+            .. units.Skip(1).Select(unit => client.PostAsJsonAsync("/api/catalog/holds", new HoldAvailabilityRequest
+            {
+                UnitId = unit.Id,
+                CheckIn = today,
+                CheckOut = today.AddDays(2),
+                GuestCount = 2
+            }, TestContext.Current.CancellationToken))
+        ];
+
+        HttpResponseMessage[] responses = await Task.WhenAll(tasks);
+
+        int totalSucceeded = 1 + responses.Count(r => r.StatusCode == HttpStatusCode.OK);
+        int totalRejected = responses.Count(r => r.StatusCode == HttpStatusCode.TooManyRequests);
+
+        Assert.Equal(units.Length, totalSucceeded + totalRejected);
+        Assert.True(totalSucceeded <= cap,
+            $"Session cap of {cap} was oversold under real concurrency: {totalSucceeded} holds actually succeeded.");
+
+        // Cross-checked against the database, not just HTTP status codes -
+        // the actual invariant this cap exists to protect.
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        int actualActiveHoldCount = await context.UnitAvailabilityHolds
+            .CountAsync(h => units.Select(u => u.Id).Contains(h.UnitId), TestContext.Current.CancellationToken);
+        Assert.True(actualActiveHoldCount <= cap,
+            $"Session cap of {cap} was oversold under real concurrency: {actualActiveHoldCount} rows actually persisted.");
+    }
 }

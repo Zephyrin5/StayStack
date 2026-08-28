@@ -60,12 +60,28 @@ public class UpdatePricingRuleHandler(
         // CreatePricingRuleHandler's own comment covers the full reasoning
         // (still no GIST constraint, matching ADR-0012's low-frequency/
         // single-host reasoning). No ChangeTracker.Clear() here, unlike
-        // Create: `rule` is already loaded and tracked above (needed for
-        // the ownership check before this point), and re-running the
-        // ApplyXxx setter calls on a retry is idempotent - they overwrite
-        // with the same request-derived values, they don't accumulate -
-        // so there's nothing a cleared tracker would need to protect
-        // against here.
+        // Create, and deliberately not - `rule` was loaded once, before the
+        // retry strategy even starts (needed for the ownership check
+        // above), and stays the SAME tracked instance across every retry;
+        // clearing it would detach it, silently breaking SaveChangesAsync's
+        // ability to see rule.SetDateRange/SetOverridePrice's mutations at
+        // all on a retried attempt.
+        //
+        // AsNoTracking() below is the actual fix a previous version of
+        // this comment claimed wasn't needed. existingSameType IS a fresh
+        // query every retry, but without AsNoTracking(), EF's identity map
+        // returns whatever instance of a sibling row is ALREADY tracked
+        // from a prior (rolled-back) attempt - with that attempt's stale,
+        // pre-conflict property values - instead of the row a repeated
+        // SELECT just actually fetched. A retry after a genuine 40001
+        // would silently keep checking a sibling's OLD state, defeating
+        // the entire point of retrying under Serializable isolation.
+        // Confirmed empirically via PricingRuleConcurrencyTests' write-skew
+        // case: without this, the losing side's retry incorrectly
+        // succeeded against a sibling's already-superseded range. Safe to
+        // add - existingSameType is read-only data for the overlap check
+        // below, never mutated, so it has no business touching the
+        // tracker/identity map in the first place.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
         await strategy.ExecuteAsync(async () =>
@@ -74,6 +90,7 @@ public class UpdatePricingRuleHandler(
                 await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
             List<PricingRule> existingSameType = await dbContext.PricingRules
+                .AsNoTracking()
                 .Where(r => r.UnitId == rule.UnitId && r.RuleType == rule.RuleType && r.Id != rule.Id)
                 .ToListAsync(cancellationToken);
 
