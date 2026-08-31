@@ -1,10 +1,13 @@
 using Availability.Contracts;
 using Bookings.Entities;
+using Bookings.Outbox;
+using Bookings.Serialization;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using BuildingBlocks.Security;
 using Catalog.Contracts;
 using Mediator;
+using Outbox;
 using Promotions.Contracts;
 using SeedWork.ValueObjects;
 using System.Text.Json;
@@ -12,6 +15,7 @@ namespace Bookings.Features.ConfirmBooking;
 
 public class ConfirmBookingHandler(
     AppBookingsDbContext dbContext,
+    BookingsOutboxDispatcher dispatcher,
     IHoldConfirmation holdConfirmation,
     IPromotionRedemption promotionRedemption,
     IUnitLookup unitLookup,
@@ -56,33 +60,34 @@ public class ConfirmBookingHandler(
             // bug docs/adr/0015 exists to close: two independently-rounded
             // numbers added back together to recover a third.
             Money couponBase = Money.Of(hold.Subtotal, hold.TotalPrice.Currency);
+            PromotionRedemptionResult? redemption = null;
 
             try
             {
-                PromotionRedemptionResult redemption = await promotionRedemption.RedeemAsync(
+                redemption = await promotionRedemption.RedeemAsync(
                     request.PromoCode, hold.UnitId, request.GuestEmail, couponBase,
                     bookingId, cancellationToken);
-
-                redeemedDiscountAmount = redemption.DiscountAmount;
-                totalPrice = couponBase - redemption.DiscountAmount;
             }
             catch (Exception redemptionException)
             {
-                // The hold is already 'booked' at this point and nothing
-                // else will ever confirm it into a real Booking - same
-                // orphaned-inventory risk ConfirmBookingHandler's own
-                // booking-save failure below compensates for, just one step
-                // earlier.
-                try
-                {
-                    await holdConfirmation.ReleaseHoldAsync(request.HoldId, cancellationToken);
-                }
-                catch (Exception releaseException)
-                {
-                    throw new AggregateException(
-                        "Promo code redemption failed, and compensating hold release also failed.",
-                        redemptionException, releaseException);
-                }
+                // A genuinely broken code (doesn't exist, expired, wrong
+                // currency, cap exhausted, already used by this email) -
+                // RedeemAsync itself failed, so it never created a
+                // redemption to reverse. The hold is already 'booked' at
+                // this point and nothing else will ever confirm it into a
+                // real Booking - releasing it here means the guest has to
+                // re-hold before trying again, but that's the correct cost
+                // for a code that was never valid in the first place.
+                // Enqueued via the outbox (see docs/adr/0003) rather than a
+                // direct call that could itself be silently lost.
+                OutboxMessage releaseHoldRow = dispatcher.Enqueue(
+                    new ReleaseHoldOutboxMessage(request.HoldId), BookingsJsonSerializerContext.Default.ReleaseHoldOutboxMessage);
+                OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
+                    new ReverseRedemptionOutboxMessage(bookingId), BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
+
+                await dbContext.SaveChangesAsync(cancellationToken);
+                await dispatcher.TryDispatchAsync(releaseHoldRow, cancellationToken);
+                await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
 
                 if (redemptionException is PromotionInvalidException promotionInvalidException)
                 {
@@ -102,6 +107,44 @@ public class ConfirmBookingHandler(
 
                 throw;
             }
+
+            Money discountedPrice = couponBase - redemption.DiscountAmount;
+
+            // The redeemed discount always applies against couponBase (the
+            // pre-LOS-discount subtotal, see comment above) - if it's
+            // smaller than the LOS discount it just replaced, that
+            // arithmetic alone can land at or above hold.TotalPrice, the
+            // LOS-discounted total HoldAvailabilityHandler already quoted
+            // the guest. Rejected outright rather than silently falling
+            // back to the LOS price: RedeemAsync above already consumed the
+            // code (redemption cap slot, guest-email reuse guard), and
+            // applying it anyway for zero actual benefit would both
+            // overcharge the guest relative to the quote and burn their
+            // code for nothing.
+            //
+            // Handled here, deliberately outside the try/catch above and
+            // its hold-release - unlike a genuinely broken code, this one
+            // IS valid (RedeemAsync just succeeded), and the guest did
+            // nothing wrong trying it. Only the redemption it just created
+            // gets reversed; the hold stays 'booked' so a retried Confirm
+            // (no code, or a better one) can still use it, rather than
+            // making the guest lose their 15-minute window and, with the
+            // exclusion constraint (docs/adr/0010), possibly the dates
+            // themselves to someone else in the meantime.
+            if (discountedPrice.Amount >= hold.TotalPrice.Amount)
+            {
+                OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
+                    new ReverseRedemptionOutboxMessage(bookingId), BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
+                await dbContext.SaveChangesAsync(cancellationToken);
+                await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
+
+                throw new ValidationException(
+                    JsonNamingPolicy.CamelCase.ConvertName(nameof(request.PromoCode)),
+                    "This code doesn't provide additional savings for your current stay.");
+            }
+
+            redeemedDiscountAmount = redemption.DiscountAmount;
+            totalPrice = discountedPrice;
         }
 
         // Only a guest-checkout booking gets one - an authenticated
@@ -162,47 +205,39 @@ public class ConfirmBookingHandler(
 
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (Exception bookingSaveException)
+        catch (Exception)
         {
-            // Best-effort compensation: revert the hold back to 'held', and
-            // give back the redeemed code (if any), so neither is left
-            // permanently consumed by a Booking that was never actually
-            // created. Same idiom as BecomeHostHandler's rollback on its
-            // second write failing, generalized to N compensating actions
-            // instead of just one - a bare `throw;` after only the first
-            // failure would silently lose why the booking save failed in
-            // the first place, the one piece of information most needed to
-            // diagnose stuck state.
-            List<Exception> compensationFailures = [];
+            // Best-effort compensation, now durable via the outbox instead
+            // of a direct call per action (see docs/adr/0003): revert the
+            // hold back to 'held', and give back the redeemed code (if any),
+            // so neither is left permanently consumed by a Booking that was
+            // never actually created.
+            //
+            // ChangeTracker.Clear() first - the failed Booking/
+            // BookingManagementToken insert above is still tracked Added,
+            // and would otherwise be re-attempted (and likely re-fail) by
+            // the SaveChangesAsync below.
+            dbContext.ChangeTracker.Clear();
 
-            try
-            {
-                await holdConfirmation.ReleaseHoldAsync(request.HoldId, cancellationToken);
-            }
-            catch (Exception releaseException)
-            {
-                compensationFailures.Add(releaseException);
-            }
+            OutboxMessage releaseHoldRow = dispatcher.Enqueue(
+                new ReleaseHoldOutboxMessage(request.HoldId), BookingsJsonSerializerContext.Default.ReleaseHoldOutboxMessage);
+            OutboxMessage? reverseRedemptionRow = redeemedDiscountAmount is not null
+                ? dispatcher.Enqueue(
+                    new ReverseRedemptionOutboxMessage(bookingId), BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage)
+                : null;
 
-            if (redeemedDiscountAmount is not null)
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            await dispatcher.TryDispatchAsync(releaseHoldRow, cancellationToken);
+            if (reverseRedemptionRow is not null)
             {
-                try
-                {
-                    await promotionRedemption.ReverseRedemptionAsync(bookingId, cancellationToken);
-                }
-                catch (Exception reverseRedemptionException)
-                {
-                    compensationFailures.Add(reverseRedemptionException);
-                }
+                await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
             }
 
-            if (compensationFailures.Count > 0)
-            {
-                throw new AggregateException(
-                    "Booking save failed, and compensating action(s) also failed.",
-                    [bookingSaveException, .. compensationFailures]);
-            }
-
+            // The original failure, preserved - now that compensating is a
+            // durable local write rather than two independent cross-module
+            // calls that could each fail unpredictably, there's no second
+            // failure mode left here worth an AggregateException for.
             throw;
         }
 
