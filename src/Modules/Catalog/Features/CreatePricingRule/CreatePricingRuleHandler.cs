@@ -43,23 +43,20 @@ public class CreatePricingRuleHandler(
             hostAuthorization.RequireOwnership(property.HostId, nameof(Property), property.Id);
         }
 
-        // ADR-0012 deliberately doesn't back this with a GIST exclusion
-        // constraint (pricing-rule authoring is a low-frequency, single-
-        // host action, unlike guests racing for the same unit) - but the
-        // check-then-insert below is still a genuine read-then-write race
-        // in application memory with nothing at the database enforcing it.
-        // Serializable isolation closes that without contradicting ADR-0012:
-        // still no GIST constraint, still plain EF, just a transaction
-        // strong enough that two concurrent conflicting inserts can't both
-        // pass their own overlap check. A losing transaction fails with
-        // Postgres' 40001 (serialization_failure), which EnableRetryOnFailure
-        // (see NpgsqlDbContextOptionsExtensions) is configured to retry
-        // rather than surface as an unhandled 500. ChangeTracker.Clear() at
-        // the top of the retried delegate is required here - unlike
-        // HoldAvailabilityHandler's raw-Dapper transaction, this one calls
-        // dbContext.Add()/SaveChangesAsync(), and a retried delegate would
-        // otherwise re-add a second entity on top of the first attempt's
-        // still-tracked (but rolled-back) one.
+        // ADR-0012 deliberately skips a GIST exclusion constraint here
+        // (low-frequency, single-host action, unlike guests racing for a
+        // unit) - but the check-then-insert below is still a genuine
+        // read-then-write race with nothing at the database enforcing it.
+        // Serializable isolation closes that without contradicting
+        // ADR-0012: still no GIST constraint, just a transaction strong
+        // enough that two concurrent conflicting inserts can't both pass
+        // their own overlap check. A losing transaction fails with
+        // Postgres' 40001, which EnableRetryOnFailure is configured to
+        // retry rather than surface as a 500. ChangeTracker.Clear() is
+        // required here (unlike HoldAvailabilityHandler's raw-Dapper
+        // transaction) - this one calls dbContext.Add(), and a retried
+        // delegate would otherwise re-add a second entity on top of the
+        // first attempt's still-tracked, rolled-back one.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
         Guid pricingRuleId = await strategy.ExecuteAsync(async () =>

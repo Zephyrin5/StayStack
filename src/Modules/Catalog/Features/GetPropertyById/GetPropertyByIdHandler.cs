@@ -17,13 +17,11 @@ public class GetPropertyByIdHandler(AppCatalogDbContext dbContext, HybridCache c
         return await cache.GetOrCreateAsync(
             $"property:{request.PropertyId}",
             async ct => await LoadFromDatabaseAsync(request.PropertyId, ct),
-            // Short TTL rather than event-driven invalidation across every
-            // Update/Delete Unit/Property handler - same accepted tradeoff
-            // as GetPriceCalendarHandler's own cache: a host's just-saved
-            // edit being briefly stale on the public property page is
-            // acceptable, and doesn't touch anything booking-correctness-
-            // critical (price/policy at booking time still comes from a
-            // fresh, uncached lookup - see HoldAvailabilityHandler and
+            // Short TTL, not event-driven invalidation - same tradeoff as
+            // GetPriceCalendarHandler's own cache: a host's just-saved edit
+            // being briefly stale here is acceptable, and doesn't touch
+            // booking-correctness (price/policy at booking time comes from
+            // a fresh, uncached lookup - HoldAvailabilityHandler,
             // ConfirmBookingHandler).
             new HybridCacheEntryOptions
             {

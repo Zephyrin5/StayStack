@@ -19,8 +19,6 @@ public class CreateUnitHandler(
 {
     public async ValueTask<CreateUnitResponse> Handle(CreateUnitRequest request, CancellationToken cancellationToken)
     {
-        // Unlike the previous AnyAsync existence check, this needs the
-        // full entity now - HostId is required to verify ownership below.
         Property? property = await dbContext.Properties
             .SingleOrDefaultAsync(p => p.Id == request.PropertyId, cancellationToken);
 
@@ -30,9 +28,8 @@ public class CreateUnitHandler(
         }
 
         // Administrators may create a Unit under any Property; a Host may
-        // only do so under their own. Safe to branch on role here,
-        // unlike CreatePropertyRequest's old HostId field - this decides
-        // whether to run an extra check, not whether to trust
+        // only do so under their own. Branching on role here is safe - it
+        // decides whether to run an extra check, not whether to trust
         // client-supplied data over the token.
         if (!currentUserProvider.Roles.Contains(AuthorizationPolicies.Administrator))
         {

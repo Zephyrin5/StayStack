@@ -28,14 +28,12 @@ public class GetPriceCalendarHandler(
             async ct => await LoadFromDatabaseAsync(request, ct),
             new HybridCacheEntryOptions
             {
-                // Short TTL rather than event-driven invalidation - a hold
-                // created moments ago being briefly invisible on someone
-                // else's calendar view is an acceptable tradeoff for not
-                // needing a cache-invalidation event bus this early.
-                // Revisit if that staleness window ever becomes a real
-                // complaint; it does NOT affect correctness of the actual
-                // booking - the exclusion constraint is what prevents
-                // double-booking, not this cache.
+                // Short TTL, not event-driven invalidation - a hold created
+                // moments ago being briefly invisible elsewhere is an
+                // acceptable tradeoff for not needing a cache-invalidation
+                // event bus yet. Doesn't affect booking correctness - the
+                // exclusion constraint prevents double-booking, not this
+                // cache.
                 Expiration = TimeSpan.FromSeconds(30),
                 LocalCacheExpiration = TimeSpan.FromSeconds(30)
             },
@@ -55,33 +53,26 @@ public class GetPriceCalendarHandler(
         }
 
         // No longer joins unit_availability_holds directly - that table
-        // moved to the Availability module (see docs/adr/0004), so a raw
-        // SQL join against it by table name would be exactly the boundary
-        // violation ADR-0004 exists to prevent, no matter how proven the
-        // query shape already was. Availability answers "which ranges are
-        // blocking this unit" through IUnitAvailabilityLookup instead; the
-        // per-day containment check below is cheap enough in C# (a handful
-        // of ranges against at most a few dozen calendar days) that it
-        // isn't worth trying to push back into one SQL statement.
+        // moved to the Availability module (docs/adr/0004), so a raw SQL
+        // join by table name would be the exact boundary violation
+        // ADR-0004 exists to prevent. Availability answers "which ranges
+        // are blocking this unit" through IUnitAvailabilityLookup instead;
+        // the per-day containment check below is cheap enough in C# that
+        // it isn't worth pushing back into one SQL statement.
         //
         // Column aliases are cased to match PriceCalendarDayRow's property
-        // names exactly (Dapper matches case-insensitively but does NOT
-        // strip underscores) - a deliberate per-query choice rather than
-        // introducing a project-wide snake_case type map for this first
-        // handwritten Dapper query.
-        // Raw SQL against `units` (an Entity-derived, soft-delete-governed
-        // table) bypasses EF's ApplySoftDeleteQueryFilter entirely, so the
-        // status predicate has to be restated by hand here - see
-        // docs/adr/0014's Tier 3 rule. Without it an archived unit's
-        // calendar was still returned and priced. EntityStatus.Status is
-        // stored as its raw integer ordinal, not a string via
-        // HasConversion<string>() (unlike Currency) - confirmed against
-        // EF's own generated SQL elsewhere (`WHERE p.status <> 2`). Passed
-        // as a parameter derived from the enum itself, not a hardcoded `2`
-        // literal in the SQL text - this codebase just renumbered Currency
-        // specifically because hardcoded ordinals are unsafe to depend on
-        // (docs/adr/0015), and EntityStatus has no HasConversion<string>()
-        // protection against the same risk if it's ever reordered.
+        // names exactly - Dapper matches case-insensitively but does NOT
+        // strip underscores.
+        //
+        // Raw SQL against `units` (Entity-derived, soft-delete-governed)
+        // bypasses EF's ApplySoftDeleteQueryFilter, so the status predicate
+        // is restated by hand - see docs/adr/0014's Tier 3 rule; without it
+        // an archived unit's calendar was still returned and priced.
+        // EntityStatus.Status is stored as a raw integer ordinal, not via
+        // HasConversion<string>() like Currency, so ArchivedStatus is
+        // passed as a parameter derived from the enum rather than a
+        // hardcoded `2` literal - the same ordinal-safety reasoning
+        // docs/adr/0015 already applies to Currency.
         const string sql = """
                            SELECT
                                d::date AS "Date",

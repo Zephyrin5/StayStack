@@ -16,20 +16,17 @@ public class GetPropertiesHandler(
     {
         // Every filter/pagination field that changes the result has to be
         // part of the key - an incomplete key would serve one search's
-        // results back for a different one. A 30s staleness window here
-        // only ever means a listing briefly under- or over-represents live
-        // availability, never an actual double-booking - the exclusion
-        // constraint HoldAvailabilityHandler writes through is what
-        // guarantees that, not this cache. Same accepted tradeoff as
+        // results back for another. A 30s staleness window only means a
+        // listing briefly under/over-represents availability, never a
+        // double-booking - the exclusion constraint HoldAvailabilityHandler
+        // writes through guarantees that, not this cache. Same tradeoff as
         // GetPriceCalendarHandler's own cache.
         //
-        // City is normalized (trimmed/lowercased) the same way the ILIKE
-        // query below normalizes it, and the same normalized value is used
-        // for both - otherwise "Kuwait City" and "kuwait city" (or with
-        // stray whitespace) fragment across separate cache entries for what
-        // the query itself treats as an identical search, and an
-        // unnormalized freeform field is unbounded cache-key cardinality
-        // for no reason.
+        // City is normalized the same way the ILIKE query below normalizes
+        // it, and the same value is used for both - otherwise "Kuwait City"
+        // and "kuwait city" fragment across separate cache entries for what
+        // the query treats as identical, and an unnormalized freeform field
+        // is unbounded cache-key cardinality for no reason.
         string? normalizedCity = request.City?.Trim().ToLowerInvariant();
         string cacheKey = $"properties:{normalizedCity}:{request.PropertyType}:{request.Guests}:" +
                           $"{request.CheckIn:yyyyMMdd}:{request.CheckOut:yyyyMMdd}:{request.Page}:{request.PageSize}";
@@ -52,24 +49,20 @@ public class GetPropertiesHandler(
 
         if (normalizedCity is not null)
         {
-            // Case-insensitive contains, not exact match - City is
-            // freeform text on both sides (a host types it when creating a
-            // property, a guest types it here), so exact equality would
-            // reject "kuwait city" against a stored "Kuwait City" and
-            // reject any partial search entirely. EscapeLikePattern guards
-            // against a search term that itself contains '%'/'_'/'\' being
-            // misread as ILIKE wildcards rather than literal characters.
+            // Case-insensitive contains, not exact match - City is freeform
+            // text on both sides, so exact equality would reject "kuwait
+            // city" against a stored "Kuwait City" and reject partial
+            // search entirely. EscapeLikePattern guards against a search
+            // term containing '%'/'_'/'\' being misread as ILIKE wildcards.
             string pattern = $"%{EscapeLikePattern(normalizedCity)}%";
-            // The 3-arg overload, not the 2-arg one - Npgsql's translation
-            // of the 2-arg EF.Functions.ILike emits `ESCAPE ''` (escape
-            // processing disabled entirely), not backslash-as-default, so
-            // EscapeLikePattern's backslashes would be read as literal
-            // characters instead of escapes without passing one explicitly
-            // here. Null-forgiving on p.City, not a null guard - ILIKE
-            // against a NULL column translates to SQL NULL (falsy in
-            // WHERE), so Postgres already excludes properties with no City
-            // correctly on its own; the compiler just can't see that C#
-            // never touches the value.
+            // The 3-arg overload, not the 2-arg one - Npgsql's 2-arg
+            // EF.Functions.ILike emits `ESCAPE ''` (escaping disabled
+            // entirely), so EscapeLikePattern's backslashes would be read
+            // literally without passing one explicitly. Null-forgiving on
+            // p.City, not a null guard - ILIKE against NULL translates to
+            // SQL NULL (falsy in WHERE), so Postgres already excludes
+            // City-less properties correctly; the compiler just can't see
+            // that.
             query = query.Where(p => EF.Functions.ILike(p.City!, pattern, "\\"));
         }
 
@@ -80,12 +73,12 @@ public class GetPropertiesHandler(
 
         if (request.Guests is not null || (request.CheckIn is not null && request.CheckOut is not null))
         {
-            // Built as one composable query over Units, not two separate
-            // property-level Where clauses - capacity and availability
-            // must both hold for the SAME unit. Two independent Any()
-            // checks would let a property match via one unit that fits the
-            // guest count and a different unit that's free for the dates,
-            // even if no single unit satisfies both.
+            // One composable query over Units, not two separate
+            // property-level Where clauses - capacity and availability must
+            // both hold for the SAME unit. Two independent Any() checks
+            // would match a property via one unit that fits the guest
+            // count and a different unit free for the dates, even if no
+            // single unit satisfies both.
             var matchingUnitsQuery = dbContext.Units.AsNoTracking();
 
             if (request.Guests is not null)
@@ -93,24 +86,20 @@ public class GetPropertiesHandler(
                 matchingUnitsQuery = matchingUnitsQuery.Where(u => u.MaxOccupancy >= request.Guests.Value);
             }
 
-            // Materialized here rather than left as a composed subquery -
-            // unit_availability_holds moved to the Availability module (see
-            // docs/adr/0004), so the per-date check below can no longer be
-            // a local correlated Any() against it. One extra round trip:
-            // resolve capacity-matching candidate unit ids first, then ask
-            // Availability which of those have a blocking hold/booking for
-            // the requested dates.
+            // Materialized here, not left as a composed subquery -
+            // unit_availability_holds moved to the Availability module
+            // (docs/adr/0004), so the per-date check can no longer be a
+            // local correlated Any(). One extra round trip: resolve
+            // capacity-matching candidate unit ids, then ask Availability
+            // which have a blocking hold/booking for the dates.
             //
             // Unbounded by anything other than how many units match Guests -
-            // fine at this app's current scale (see docs/adr/0004's
-            // Consequences for the round-trip cost this was already weighed
-            // against), but there's no cap here the way
-            // ReconcileOrphanedBookedHoldsJob's own candidate query has one
-            // (MaxResultsPerRun). A city/property-type-agnostic Guests-only
-            // search against tens of thousands of units would send an
-            // equally large id array to Availability and build an equally
-            // large IN/ANY clause here - not urgent today, worth a cap if
-            // this app's unit count ever gets there.
+            // fine at current scale (docs/adr/0004's Consequences already
+            // weighs this round-trip cost), but unlike
+            // ReconcileOrphanedBookedHoldsJob's own candidate query, there's
+            // no cap here. A Guests-only search against tens of thousands
+            // of units would send an equally large id array to Availability -
+            // not urgent today, worth a cap if unit count grows.
             List<Guid> candidateUnitIds = await matchingUnitsQuery
                 .Select(u => u.Id)
                 .ToListAsync(cancellationToken);

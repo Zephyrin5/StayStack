@@ -10,15 +10,12 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
     public async Task<UnitSummary?> GetUnitAsync(Guid unitId, CancellationToken cancellationToken)
     {
         // Materialize first, map after - see docs/adr/0006. Left-joined
-        // with Properties (not an inner join) - a handful of integration
-        // tests elsewhere in this codebase seed a bare Unit against a
-        // throwaway PropertyId with no matching Property row, a shortcut
-        // that predates PropertyId/HostId existing on UnitSummary at all.
-        // An inner join would silently drop those units out of every
-        // result here; HostId just comes back default (Guid.Empty) for
-        // that synthetic case instead - never a real production state
-        // (CreateUnitHandler always targets a real Property), so it's not
-        // a case any real caller of this lookup needs to handle specially.
+        // with Properties, not inner - some integration tests seed a bare
+        // Unit against a throwaway PropertyId with no matching Property
+        // row. An inner join would silently drop those units from every
+        // result; HostId just comes back default (Guid.Empty) for that
+        // synthetic case instead - never a real production state, since
+        // CreateUnitHandler always targets a real Property.
         var row = await (
             from unit in dbContext.Units.AsNoTracking()
             where unit.Id == unitId

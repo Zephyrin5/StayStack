@@ -5,26 +5,24 @@ namespace Catalog.Domain;
 
 // Pure, no DB/DI dependency - the one place pricing-rule resolution is
 // implemented, called by both HoldAvailabilityHandler (the actual charged
-// price, snapshotted onto a hold) and GetPriceCalendarHandler (the public
-// preview), so the two can never structurally disagree. See docs/adr/0012.
+// price) and GetPriceCalendarHandler (the public preview), so the two can
+// never structurally disagree. See docs/adr/0012.
 //
-// Operates in Money throughout (docs/adr/0015) - every nightly price is
-// rounded to its own currency's precision as soon as it's resolved (Money's
-// arithmetic operators round on every result), rather than accumulating
-// full-precision decimals and rounding once at the end. This makes each
-// night's price the same number a caller would ever actually display or
-// charge, and closes the exact bug ConfirmBookingHandler used to have
-// reconstructing a pre-discount subtotal by adding two independently-
-// rounded numbers back together - see StayPriceBreakdown.Subtotal, snapshotted
-// directly instead of ever needing that reconstruction again.
+// Operates in Money throughout (docs/adr/0015) - every nightly price
+// rounds to its currency's precision as soon as it's resolved, rather
+// than accumulating full-precision decimals and rounding once at the end.
+// This makes each night's price the same number ever actually charged,
+// and is why StayPriceBreakdown.Subtotal is snapshotted directly rather
+// than reconstructed by adding two independently-rounded numbers back
+// together.
 public static class PricingCalculator
 {
-    // Resolution order for a single night: an active date-range override
-    // (if any) is the absolute price - no multiplier stacks on top of it.
-    // Otherwise, BasePrice x any active day-of-week multiplier matching
-    // that weekday (or just BasePrice if none matches). Length-of-stay
-    // discount is deliberately NOT applied here - it's a whole-stay
-    // concept a single calendar day doesn't have; see ResolveStayTotal.
+    // Resolution order for one night: an active date-range override (if
+    // any) is the absolute price, no multiplier stacks on top. Otherwise
+    // BasePrice x any matching day-of-week multiplier (or plain
+    // BasePrice). Length-of-stay discount is deliberately not applied
+    // here - a whole-stay concept a single day doesn't have; see
+    // ResolveStayTotal.
     public static Money ResolveNightlyPrice(Money basePrice, DateOnly date, IReadOnlyList<PricingRule> rules)
     {
         // Constructed as [LowerBound, UpperBound) everywhere a DateRange is
@@ -48,12 +46,11 @@ public static class PricingCalculator
     }
 
     // Total for the half-open stay [checkIn, checkOut): sums the nightly
-    // price for every night, then applies a length-of-stay discount (if an
-    // active rule's MinNights is met) to that subtotal. Returns the
-    // breakdown, not just the final total - a redeemed promo code is
-    // exclusive of the LOS discount rather than stacking with it (see
-    // ConfirmBookingHandler), which means callers on that path need to be
-    // able to undo just the LOS portion, not only read the final number.
+    // price, then applies a length-of-stay discount (if an active rule's
+    // MinNights is met). Returns the breakdown, not just the total - a
+    // redeemed promo code is exclusive of the LOS discount rather than
+    // stacking with it (ConfirmBookingHandler), so callers there need to
+    // be able to undo just the LOS portion.
     public static StayPriceBreakdown ResolveStayTotal(
         Money basePrice, DateOnly checkIn, DateOnly checkOut, IReadOnlyList<PricingRule> rules)
     {

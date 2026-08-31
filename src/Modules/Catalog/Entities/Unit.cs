@@ -7,15 +7,13 @@ namespace Catalog.Entities;
 
 public sealed class Unit : Entity, IAggregateRoot
 {
-    // EF Core's constructor-binding convention can't bind a parameter typed
-    // as a ComplexProperty (Money) back to the entity's own mapped complex
-    // property - see Booking's identical constructor pair for the full
-    // explanation and docs/adr/0015. This parameterless constructor is
+    // EF can't bind a ComplexProperty (Money) parameter back to the
+    // entity's own mapped complex property - see Booking's identical
+    // constructor pair for the full explanation and docs/adr/0015. This is
     // EF's materialization fallback only; Create() below still goes
-    // through the full validated constructor for every write. Name/
-    // CancellationPolicy get real (not null!) empty/default placeholders
-    // only to satisfy the non-nullable-reference-type compiler check - EF
-    // overwrites every property here immediately after construction.
+    // through the real constructor for every write. Name/CancellationPolicy
+    // get real placeholders only to satisfy the non-nullable-reference-type
+    // check - EF overwrites them immediately after construction.
     private Unit()
     {
         Name = LocalizedText.Restore(new Dictionary<string, string>());
@@ -69,12 +67,10 @@ public sealed class Unit : Entity, IAggregateRoot
     }
 
     // A real mutation with its own invariant, not just a settable property -
-    // this is where price changes get funneled through once the admin
-    // Catalog endpoints exist, rather than each caller re-deriving the
-    // "must be positive" rule for itself. Takes a bare decimal, not Money,
-    // to keep UpdateUnitHandler's existing two-call shape (SetBasePrice then
-    // SetCurrency) working unchanged - both funnel into the one BasePrice
-    // field underneath.
+    // callers don't re-derive the "must be positive" rule for themselves.
+    // Takes a bare decimal, not Money, to keep UpdateUnitHandler's two-call
+    // shape (SetBasePrice then SetCurrency) working - both funnel into the
+    // one BasePrice field.
     public void SetBasePrice(decimal price)
     {
         Guard.Against.NegativeOrZero(price);

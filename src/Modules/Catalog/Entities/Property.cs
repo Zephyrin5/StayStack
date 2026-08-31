@@ -7,14 +7,13 @@ namespace Catalog.Entities;
 public sealed class Property : Entity
 {
 
-    // EF Core materializes through this constructor rather than a
-    // parameterless one plus reflection-set properties - it binds column
-    // values to parameters by matching names (case-insensitively), a
-    // built-in, well-supported EF Core feature. This is what actually
-    // resolves the conflict between `required` and private setters: there
-    // is no parameterless constructor for `required` to reason about, and
-    // no `null!` suppression is needed either, since every property gets a
-    // real, compiler-verified value right here, before the object exists.
+    // EF Core materializes through this constructor, not a parameterless
+    // one plus reflection-set properties - it binds column values to
+    // parameters by name, a built-in EF feature. This resolves the
+    // conflict between `required` and private setters: no parameterless
+    // constructor for `required` to reason about, and no `null!`
+    // suppression needed, since every property gets a real,
+    // compiler-verified value here.
     private Property(Guid id, Guid hostId, PropertyType propertyType, LocalizedText name, string? city)
     {
         Id = id;
