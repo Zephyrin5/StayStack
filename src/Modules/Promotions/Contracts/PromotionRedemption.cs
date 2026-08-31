@@ -39,13 +39,11 @@ internal class PromotionRedemption(
 
         if (promotion.HostId is not null)
         {
-            // Resolved through Catalog.Contracts.IUnitLookup rather than
-            // reading Unit/Property directly - this module has no
-            // reference to Catalog or AppCatalogDbContext at all (see
-            // docs/adr/0004's Promotions-extraction note). UnitSummary
+            // Resolved through IUnitLookup rather than reading Unit/Property
+            // directly - this module has no reference to Catalog or
+            // AppCatalogDbContext at all (docs/adr/0004). UnitSummary
             // already carries HostId (added for Reviews' own cross-module
-            // need), so this is one call instead of the two local EF reads
-            // (Unit, then Property) this lookup used to be.
+            // need), so this is one call instead of two local EF reads.
             UnitSummary unit = await unitLookup.GetUnitAsync(unitId, cancellationToken)
                                 ?? throw new NotFoundException("Unit", unitId);
 
