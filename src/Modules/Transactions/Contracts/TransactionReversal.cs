@@ -42,6 +42,18 @@ internal class TransactionReversal(AppTransactionsDbContext dbContext) : ITransa
         }
     }
 
+    public async Task<Money?> GetSucceededTransactionAmountAsync(Guid bookingId, CancellationToken cancellationToken)
+    {
+        // Same query ReverseTransactionAsync itself uses to decide whether
+        // there's anything to do - exposed as a standalone read so a caller
+        // can ask the same question before dispatch, not just infer it from
+        // whatever ReverseTransactionAsync eventually did.
+        Transaction? transaction = await dbContext.Transactions.AsNoTracking()
+            .SingleOrDefaultAsync(t => t.BookingId == bookingId && t.TransactionStatus == TransactionStatus.Succeeded, cancellationToken);
+
+        return transaction?.Amount;
+    }
+
     public async Task<TransactionRefundSnapshot?> GetRefundSnapshotAsync(Guid bookingId, CancellationToken cancellationToken)
     {
         // RefundAmount is only ever set by MarkRefundPending, which is only

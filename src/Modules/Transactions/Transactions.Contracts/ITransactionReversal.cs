@@ -33,6 +33,25 @@ public interface ITransactionReversal
     Task<decimal?> ReverseTransactionAsync(Guid bookingId, Money refundAmount, CancellationToken cancellationToken);
 
     /// <summary>
+    ///     The Amount of this booking's Succeeded transaction, if any -
+    ///     checked *before* attempting a reversal, unlike
+    ///     GetRefundSnapshotAsync below (which only finds something once a
+    ///     reversal has already started). Lets a caller like
+    ///     CancelBookingHandler know deterministically, at response-build
+    ///     time, whether there's real money to refund - independent of
+    ///     whether ReverseTransactionAsync's own outbox dispatch has
+    ///     actually completed by then. Without this, a response built only
+    ///     from GetRefundSnapshotAsync is indistinguishable between "there
+    ///     was never anything to refund" and "there is, but the inline
+    ///     dispatch attempt hasn't landed yet" - both read back null. Null
+    ///     for the same reasons ReverseTransactionAsync is a no-op: no
+    ///     transaction at all, still Pending, or already past Succeeded
+    ///     (Failed, or already RefundPending/Refunded/RefundFailed from an
+    ///     earlier reversal that already ran).
+    /// </summary>
+    Task<Money?> GetSucceededTransactionAmountAsync(Guid bookingId, CancellationToken cancellationToken);
+
+    /// <summary>
     ///     The refund already recorded against this booking, if any - what
     ///     CancelBookingHandler reports back on an idempotent re-cancel
     ///     instead of calling ReverseTransactionAsync a second time, which
