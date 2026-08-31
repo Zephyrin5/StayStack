@@ -93,9 +93,16 @@ public class TransactionsOutboxDispatcherTests : IDisposable
         // The message itself must be resolved (not just dead-lettered) -
         // otherwise SweepDeadLetteredAsync would keep retrying
         // ConfirmPaymentAsync on it, which could confirm the booking after
-        // the transaction was already marked for refund.
-        Assert.Equal(10, message.Attempts);
-        Assert.NotNull(message.ProcessedAt);
-        Assert.Null(message.DeadLetteredAt);
+        // the transaction was already marked for refund. Reloaded rather
+        // than read off the original `message` reference - ClaimAndDispatchAsync
+        // always re-claims by id through its own query (see
+        // TryDispatchAsync's own doc comment), and now clears the change
+        // tracker before doing so, so it's no longer guaranteed to be
+        // mutating the same tracked instance the caller happens to hold.
+        OutboxMessage reloadedMessage = await _dbContext.TransactionsOutboxMessages.AsNoTracking()
+            .SingleAsync(m => m.Id == message.Id, TestContext.Current.CancellationToken);
+        Assert.Equal(10, reloadedMessage.Attempts);
+        Assert.NotNull(reloadedMessage.ProcessedAt);
+        Assert.Null(reloadedMessage.DeadLetteredAt);
     }
 }

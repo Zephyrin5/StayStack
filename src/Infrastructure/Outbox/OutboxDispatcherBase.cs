@@ -236,6 +236,22 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
 
         (OutboxMessage? claimed, bool justDeadLettered) = await strategy.ExecuteAsync(async () =>
         {
+            // First line of every attempt, including retries - a rolled-back
+            // DB transaction does not undo this DbContext's in-memory change
+            // tracking, and EF's identity resolution means the query below
+            // would otherwise hand back whatever entity a *previous*,
+            // rolled-back attempt already mutated (e.g. still showing
+            // ProcessedAt set) instead of the row's real, current database
+            // state. Without this, a transient failure that happens after
+            // `candidate` was mutated but before the commit lands makes the
+            // very next attempt misread its own stale in-memory write as
+            // "already processed by someone else" and bail out - the row
+            // never actually gets marked processed, and the next relay poll
+            // dispatches it again for real. Same pattern already used in
+            // ConfirmBookingHandler/BecomeHostHandler's own compensating
+            // paths.
+            DbContext.ChangeTracker.Clear();
+
             await using IDbContextTransaction transaction = await DbContext.Database.BeginTransactionAsync(cancellationToken);
 
             // FOR UPDATE SKIP LOCKED is Postgres syntax - Sqlite (what the
@@ -390,7 +406,17 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
     protected virtual Task OnDeadLetteredAsync(OutboxMessage message, CancellationToken cancellationToken) =>
         Task.CompletedTask;
 
+    // Past tense, deliberately - not a claim about the row's current state.
+    // A module's own OnDeadLetteredAsync override (see
+    // TransactionsOutboxDispatcher's) can resolve the row further in the
+    // same commit this log is reporting on - e.g. compensating and then
+    // setting ProcessedAt/clearing DeadLetteredAt again, so it no longer
+    // matches a `WHERE dead_lettered_at IS NOT NULL` query at all by the
+    // time anyone reads this line next to the table. "is dead-lettered"
+    // would flatly contradict what's actually in the row at that point;
+    // "was dead-lettered" just records that this dispatch attempt crossed
+    // the retry threshold, true regardless of what happened afterward.
     [LoggerMessage(LogLevel.Error,
-        "Outbox message {MessageId} ({MessageType}, module {Module}) is dead-lettered after {Attempts} attempts. Last error: {LastError}")]
+        "Outbox message {MessageId} ({MessageType}, module {Module}) was dead-lettered after {Attempts} attempts. Last error: {LastError}")]
     private static partial void LogDeadLettered(ILogger logger, string module, string messageType, Guid messageId, int attempts, string? lastError);
 }
