@@ -12,36 +12,31 @@ namespace Bookings.Jobs;
 ///     <list type="bullet">
 ///         <item>
 ///             IPromotionRedemption.RedeemAsync commits atomically to
-///             Promotions' own database (redemption cap incremented, the row
-///             inserted) entirely independent of anything Bookings does
-///             afterward - a process crash between that commit and Bookings
-///             ever getting a chance to create the Booking or enqueue a
-///             compensating ReverseRedemptionOutboxMessage leaves the
-///             redemption permanently consumed - cap decremented, guest
-///             email marked used - against a booking that was never
+///             Promotions' own database, independent of anything Bookings
+///             does afterward - a process crash between that commit and
+///             Bookings creating the Booking or enqueueing a compensating
+///             ReverseRedemptionOutboxMessage leaves the redemption
+///             permanently consumed against a booking that was never
 ///             created. Not an ordinary exception (those are already
-///             compensated by ConfirmBookingHandler's own catch blocks, see
+///             compensated by ConfirmBookingHandler's own catch blocks,
 ///             docs/adr/0003) - this is only for the case those can't run
 ///             for at all.
 ///         </item>
 ///         <item>
 ///             CancelBookingHandler enqueues a ReverseRedemptionOutboxMessage
-///             whose retries can be exhausted (dead-lettered) before it ever
-///             completes - here the booking row does exist, it's just
-///             Cancelled with a redemption that's still active behind it.
-///             The outbox's own hourly SweepDeadLetteredAsync already
-///             retries a dead-lettered row forever, so this only matters
-///             once that keeps failing - same relationship
-///             ReconcileOrphanedBookedHoldsJob has to OutboxRelayJob's own
-///             retry loop.
+///             whose retries can be exhausted before it completes - here
+///             the booking row exists, it's just Cancelled with a
+///             redemption still active behind it. SweepDeadLetteredAsync
+///             already retries a dead-lettered row hourly, so this only
+///             matters once that keeps failing.
 ///         </item>
 ///     </list>
-///     Deliberately owned by Bookings, not Promotions: it's Bookings that
-///     knows what "orphaned" means here (a redemption whose BookingId has no
-///     live Booking row). Reads Promotions' candidate booking ids through
-///     IRedemptionLookup rather than joining promotion_redemptions directly
-///     by table name - a raw cross-module join would be exactly the kind of
-///     boundary violation docs/adr/0004 exists to prevent.
+///     Owned by Bookings, not Promotions - Bookings knows what "orphaned"
+///     means here (a redemption whose BookingId has no live Booking row).
+///     Reads candidate booking ids through IRedemptionLookup rather than
+///     joining promotion_redemptions directly - a raw cross-module join
+///     would be exactly the boundary violation docs/adr/0004 exists to
+///     prevent.
 /// </summary>
 public partial class ReconcileOrphanedPromotionRedemptionsJob(
     AppBookingsDbContext dbContext,
@@ -84,17 +79,16 @@ public partial class ReconcileOrphanedPromotionRedemptionsJob(
         }
 
         // Intentionally does NOT restate the soft-delete predicate the way
-        // a Tier 3 query joining an Entity-derived table normally would
-        // (see docs/adr/0014) - an archived/soft-deleted booking still
-        // happened, and should still protect its redemption from being
-        // reversed out from under it. The soft-delete filter governs
-        // visibility, not whether the booking exists.
+        // a Tier 3 query normally would (docs/adr/0014) - an archived
+        // booking still happened, and should still protect its redemption
+        // from reversal. The soft-delete filter governs visibility, not
+        // whether the booking exists.
         //
         // BookingStatus != Cancelled, not just "any booking row exists" -
         // a Cancelled booking still has a row, but its redemption is
-        // exactly the second orphan case this job covers (see class doc
-        // comment): a dead-lettered ReverseRedemptionOutboxMessage that's
-        // been retried by the sweep without success.
+        // exactly the second orphan case this job covers: a dead-lettered
+        // ReverseRedemptionOutboxMessage the sweep has retried without
+        // success.
         List<Guid> liveBookingIds = await dbContext.Bookings
             .Where(b => staleRedemptionBookingIds.Contains(b.Id) && b.BookingStatus != BookingStatus.Cancelled)
             .Select(b => b.Id)

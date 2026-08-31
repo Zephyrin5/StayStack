@@ -13,13 +13,12 @@ namespace Bookings.Features.Common;
 /// </summary>
 internal static class BookingAccessChecker
 {
-    // A leaked management link shouldn't stay valid forever - bounded to the
-    // reservation lifecycle plus a grace window long enough to cover
-    // post-stay disputes and the review window (GetBookingForManagementHandler's
-    // own CanReview flag), rather than a fixed TTL from issuance the way a
-    // refresh token gets: HoldAvailabilityHandler places no upper bound on
-    // how far out CheckIn can be booked, so a CreatedAt-based expiry could
-    // lapse before the stay itself even happens.
+    // A leaked management link shouldn't stay valid forever - bounded to
+    // the reservation lifecycle plus a grace window covering post-stay
+    // disputes and the review window, rather than a fixed TTL from
+    // issuance like a refresh token: HoldAvailabilityHandler places no
+    // upper bound on how far out CheckIn can be booked, so a
+    // CreatedAt-based expiry could lapse before the stay even happens.
     private const int ManagementTokenLifetimeDaysAfterCheckOut = 90;
 
     /// <summary>
@@ -27,15 +26,13 @@ internal static class BookingAccessChecker
     ///     CustomerId (authenticated) or a matching, not-yet-expired
     ///     BookingManagementToken hash (guest checkout) - null otherwise.
     ///     Doesn't distinguish "doesn't exist" from "isn't yours" (nor from
-    ///     "token expired") in its return, same "doesn't exist and
-    ///     exists-but-isn't-yours must look identical" reasoning as
+    ///     "token expired"), same reasoning as
     ///     IHostAuthorization.RequireOwnership. A guest-checkout booking
-    ///     (CustomerId null) can only ever be resolved via the token path -
-    ///     an anonymous caller with no token, an authenticated caller whose
-    ///     id doesn't match, and a caller with a correct but expired token
-    ///     all get null the same way. The authenticated-CustomerId path has
-    ///     no expiry of its own - it's account-based proof of ownership, not
-    ///     a bearer credential that could leak.
+    ///     (CustomerId null) can only be resolved via the token path - no
+    ///     token, a mismatched id, and a correct-but-expired token all get
+    ///     null the same way. The authenticated-CustomerId path has no
+    ///     expiry of its own - account-based proof of ownership, not a
+    ///     bearer credential that could leak.
     /// </summary>
     public static async Task<Booking?> ResolveAsync(
         AppBookingsDbContext dbContext,

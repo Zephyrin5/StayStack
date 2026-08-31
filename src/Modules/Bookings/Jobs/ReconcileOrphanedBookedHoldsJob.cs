@@ -10,34 +10,31 @@ namespace Bookings.Jobs;
 ///     with nothing that will ever release it:
 ///     <list type="bullet">
 ///         <item>
-///             ConfirmBookingHandler's first write
-///             (IHoldConfirmation.ConfirmHoldAsync) marks a hold 'booked'
-///             before the Booking row that's supposed to follow it even
-///             exists. A process death in that narrow window - not an
-///             ordinary exception, those are already compensated by
+///             ConfirmBookingHandler's first write (ConfirmHoldAsync) marks
+///             a hold 'booked' before the Booking row that's supposed to
+///             follow it exists. A process death in that narrow window -
+///             not an ordinary exception, those are already compensated by
 ///             ConfirmBookingHandler's own catch blocks - leaves the hold
-///             with no matching bookings.hold_id row at all.
+///             with no matching bookings.hold_id row.
 ///         </item>
 ///         <item>
-///             CancelBookingHandler enqueues a ReleaseHoldOutboxMessage (see
-///             docs/adr/0003) whose retries can be exhausted (dead-lettered)
-///             before it ever completes - here the booking row does exist,
-///             it's just Cancelled with a hold that's still 'booked' behind
-///             it. Widened to catch this alongside the no-booking-row case
-///             below - the outbox's own OutboxRelayJob already covers the
-///             common retry case, this only matters once that's exhausted.
+///             CancelBookingHandler enqueues a ReleaseHoldOutboxMessage
+///             (docs/adr/0003) whose retries can be exhausted before it
+///             completes - here the booking row exists, it's just
+///             Cancelled with a hold still 'booked' behind it.
+///             OutboxRelayJob already covers the common retry case; this
+///             only matters once that's exhausted.
 ///         </item>
 ///     </list>
 ///     Either way, ExpiredHoldsSweepJob only ever looks at 'held' rows, so
 ///     nothing else would ever find these.
 ///
-///     Deliberately owned by Bookings, not Availability: it's Bookings that
-///     knows what "orphaned" means here. Reads Availability's candidate hold
-///     ids through IHoldLookup rather than joining unit_availability_holds
-///     directly by table name - a raw cross-module join would be exactly
-///     the kind of boundary violation docs/adr/0004 exists to prevent, even
-///     though this job happens to live on the "allowed to call Availability"
-///     side of that boundary.
+///     Owned by Bookings, not Availability - Bookings is what knows what
+///     "orphaned" means here. Reads candidate hold ids through IHoldLookup
+///     rather than joining unit_availability_holds directly - a raw
+///     cross-module join would be exactly the boundary violation
+///     docs/adr/0004 exists to prevent, even on the "allowed to call
+///     Availability" side.
 /// </summary>
 public partial class ReconcileOrphanedBookedHoldsJob(
     AppBookingsDbContext dbContext,
@@ -51,13 +48,11 @@ public partial class ReconcileOrphanedBookedHoldsJob(
     // that this never races a request that's still legitimately in flight.
     private static readonly TimeSpan Grace = TimeSpan.FromMinutes(10);
 
-    // A successfully-booked hold stays 'booked' forever (it's the confirmed
-    // booking's own permanent double-booking guard) - without a lower bound
-    // too, this job's candidate query would match every booking ever made
-    // and grow without limit as the app ages. Two days is generous margin
-    // over the 5-minute run cadence - wide enough to still catch a crash
-    // orphan even if the scheduler itself was down for a while, without
-    // scanning this app's entire history every run.
+    // A successfully-booked hold stays 'booked' forever - without a lower
+    // bound too, the candidate query would match every booking ever made
+    // and grow unbounded. Two days is generous margin over the 5-minute
+    // cadence - wide enough to catch a crash orphan even after scheduler
+    // downtime, without scanning the app's entire history every run.
     private static readonly TimeSpan ReconciliationWindow = TimeSpan.FromDays(2);
 
     // A hard ceiling independent of the window above, in case an unexpected
@@ -80,23 +75,21 @@ public partial class ReconcileOrphanedBookedHoldsJob(
             return;
         }
 
-        // The window's own tradeoff (see ReconciliationWindow above) means an
-        // orphan older than earliestBookedAt is silently unreachable to this
-        // job forever, not just delayed - hitting the cap is the only signal
-        // that orphans are arriving faster than this job clears them, which
-        // is exactly when that tradeoff starts costing real orphans instead
-        // of just being a safe margin.
+        // The window's tradeoff (ReconciliationWindow above) means an
+        // orphan older than earliestBookedAt is unreachable forever, not
+        // just delayed - hitting the cap is the only signal orphans are
+        // arriving faster than this job clears them, exactly when that
+        // tradeoff starts costing real orphans.
         if (staleBookedHoldIds.Count == MaxResultsPerRun)
         {
             LogResultsCapped(logger, MaxResultsPerRun);
         }
 
         // Intentionally does NOT restate the soft-delete predicate the way
-        // a Tier 3 query joining an Entity-derived table normally would
-        // (see docs/adr/0014) - an archived/soft-deleted booking still
-        // happened, and should still protect its hold from being released
-        // out from under it. The soft-delete filter governs visibility, not
-        // whether the booking exists.
+        // a Tier 3 query normally would (docs/adr/0014) - an archived
+        // booking still happened, and should still protect its hold from
+        // release. The soft-delete filter governs visibility, not whether
+        // the booking exists.
         //
         // BookingStatus != Cancelled, not just "any booking row exists" -
         // a Cancelled booking still has a row, but its hold is exactly the

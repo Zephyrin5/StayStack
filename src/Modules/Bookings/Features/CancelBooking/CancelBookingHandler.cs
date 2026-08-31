@@ -93,19 +93,14 @@ public class CancelBookingHandler(
             await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
         }
 
-        // Checked *first*, and preferred over anything computed fresh below -
-        // this is the authoritative record of what was actually applied
-        // when the reversal ran, whenever that was (this request's own
-        // inline dispatch, an earlier recancel's, or the relay job's delayed
-        // retry). Once this exists, the transaction has already moved past
-        // Succeeded (RefundPending/Refunded/RefundFailed), so a
-        // Succeeded-only check below would read that as "nothing to
-        // refund" - a booking that was genuinely refunded reporting no
-        // refund on an idempotent recancel, which is exactly the bug this
-        // ordering closes. RefundPercent is derived from the snapshot's own
-        // ratio rather than resolved fresh, so it always matches whatever
-        // amount actually landed even if today's cancellation-policy
-        // resolution would differ.
+        // Checked first, preferred over anything computed below - the
+        // authoritative record of what was actually applied when the
+        // reversal ran, whenever that was. Once this exists, the
+        // transaction has moved past Succeeded, so a Succeeded-only check
+        // below would misread it as "nothing to refund" - a genuinely
+        // refunded booking reporting no refund on an idempotent recancel.
+        // RefundPercent is derived from the snapshot's own ratio, not
+        // resolved fresh, so it always matches what actually landed.
         TransactionRefundSnapshot? refundSnapshot =
             await transactionReversal.GetRefundSnapshotAsync(booking.Id, cancellationToken);
 
@@ -145,22 +140,18 @@ public class CancelBookingHandler(
         }
 
         // A Succeeded transaction exists but nothing has reversed it yet -
-        // a refund is guaranteed (idempotent, retried by
-        // OutboxRelayJob/SweepDeadLetteredAsync until it lands), but the
-        // exact figure still has to be resolved here since no snapshot
-        // exists to read it back from.
+        // a refund is guaranteed, but the figure still has to be resolved
+        // here since no snapshot exists yet.
         //
-        // Anchored to when this booking was actually cancelled, not to
-        // `today` - on a fresh cancel those are the same moment (this
-        // request just set BookingStatus to Cancelled above), but on a
-        // recancel whose earlier dispatch hasn't landed, using `today`
-        // could have crossed a cancellation-policy tier boundary since the
-        // original cancel and report a different percent than the one
-        // already baked into the still-queued ReverseTransactionOutboxMessage
-        // payload. booking.ModifiedAt reflects the SaveChangesAsync that
-        // ran Cancel() - nothing legitimately touches a Cancelled booking
-        // afterward, so it's a reliable stand-in for "the original
-        // cancellation date" here.
+        // Anchored to when this booking was actually cancelled, not
+        // `today` - on a fresh cancel those are the same moment, but on a
+        // recancel whose earlier dispatch hasn't landed, `today` could
+        // cross a tier boundary since the original cancel and disagree
+        // with the amount already baked into the queued
+        // ReverseTransactionOutboxMessage payload. booking.ModifiedAt
+        // reflects the SaveChangesAsync that ran Cancel() - nothing else
+        // touches a Cancelled booking - so it's a reliable stand-in for
+        // the original cancellation date.
         DateOnly cancelledOn = DateOnly.FromDateTime((booking.ModifiedAt ?? timeProvider.GetUtcNow()).UtcDateTime);
         (Money pendingRefundAmount, decimal pendingRefundPercent) = ComputeRefund(cancelledOn);
 

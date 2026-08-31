@@ -7,20 +7,16 @@ namespace Bookings.Entities;
 
 public sealed class Booking : Entity, IAggregateRoot
 {
-    // EF Core's constructor-binding convention (see Property.cs for why
-    // materialization normally goes through the real constructor below)
-    // can't bind a parameter typed as a ComplexProperty back to the
+    // EF can't bind a ComplexProperty (Money) parameter back to the
     // entity's own mapped complex property - it only matches parameters
     // against directly-mapped scalar/converted properties by name, and
-    // TotalPrice (Money) spans two columns. A documented EF limitation, not
-    // something to configure around (see docs/adr/0015). This parameterless
-    // constructor exists solely as EF's materialization fallback for reads;
-    // Create() below still goes through the full validated constructor for
-    // every write, unconditionally. GuestName/GuestEmail get real (not
-    // null!) empty-string defaults only to satisfy the non-nullable-
-    // reference-type compiler check - EF overwrites every property here via
-    // its own property-setting the instant this returns, before the entity
-    // is ever visible to application code.
+    // TotalPrice spans two columns. See Property.cs's identical
+    // constructor pair and docs/adr/0015. This parameterless constructor
+    // is EF's materialization fallback only; Create() below still goes
+    // through the real constructor for every write. GuestName/GuestEmail
+    // get real empty-string defaults only to satisfy the
+    // non-nullable-reference-type check - EF overwrites them immediately
+    // after construction.
     private Booking()
     {
         GuestName = string.Empty;
@@ -96,15 +92,14 @@ public sealed class Booking : Entity, IAggregateRoot
     // different axis entirely from this business lifecycle state.
     public BookingStatus BookingStatus { get; private set; }
 
-    // Snapshotted from the unit's *current* policy at confirm time (see
-    // ConfirmBookingHandler), same "the terms they saw are the terms they
-    // get" reasoning as TotalPrice/Currency - a host tightening their
-    // policy afterward can't retroactively worsen an already-confirmed
-    // guest's terms. Nullable only because a Booking confirmed before this
-    // feature existed has no snapshot to read back - never null for
-    // anything created through Create() below. CancelBookingHandler falls
-    // back to CancellationPolicy.CreateDefault() for that historical case
-    // rather than fabricating a specific retroactive claim.
+    // Snapshotted from the unit's *current* policy at confirm time, same
+    // "the terms they saw are the terms they get" reasoning as
+    // TotalPrice/Currency - a host tightening their policy afterward can't
+    // retroactively worsen an already-confirmed guest's terms. Nullable
+    // only because a Booking confirmed before this feature existed has no
+    // snapshot - never null for anything created through Create() below.
+    // CancelBookingHandler falls back to CancellationPolicy.CreateDefault()
+    // for that case rather than fabricating a retroactive claim.
     public CancellationPolicy? CancellationPolicy { get; private set; }
 
     // Takes its id rather than generating one internally - a redeemed promo
@@ -147,13 +142,12 @@ public sealed class Booking : Entity, IAggregateRoot
     }
 
     // Idempotent - a repeated cancel (retried request, double-click) is a
-    // no-op rather than an error. Deliberately has no "already run its
-    // course" check: whether a booking is still reachable for cancellation
-    // at all is BookingAccessChecker's call (the guest-checkout management
-    // token stays valid through CheckOut + 90 days specifically so a stay
-    // can still be cancelled shortly after checkout for a refund) - Cancel()
-    // being invoked at all already means that check passed, so re-deriving
-    // a stricter date rule here would just contradict it.
+    // no-op, not an error. Deliberately no "already run its course" check:
+    // whether a booking is still reachable for cancellation is
+    // BookingAccessChecker's call (the guest-checkout management token
+    // stays valid through CheckOut + 90 days so a stay can still be
+    // cancelled shortly after checkout) - Cancel() being invoked already
+    // means that check passed.
     public void Cancel()
     {
         if (BookingStatus == BookingStatus.Cancelled)
