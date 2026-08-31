@@ -225,11 +225,10 @@ public class UserManagementTests(IntegrationTestWebApplicationFactory factory)
         // Full cleanup, not just the one call under test - secondExtraAdminId
         // is still an Administrator at this point. Leaving it would make
         // admin@staystack.com no longer "the last remaining Administrator"
-        // for the rest of this shared-database test collection, silently
+        // for the rest of this shared-database collection, silently
         // breaking RemoveRole_ShouldReturn400_WhenRemovingTheLastAdministrator
-        // (and every other test that signs in as the seeded admin expecting
-        // Administrator privileges) depending on run order - this is exactly
-        // the failure mode that motivated this comment.
+        // (and any test expecting the seeded admin to have Administrator
+        // privileges) depending on run order.
         await _client.SendAsync(
             Authorized(HttpMethod.Delete, $"/api/users/{secondExtraAdminId}/roles/Administrator", adminToken),
             TestContext.Current.CancellationToken);

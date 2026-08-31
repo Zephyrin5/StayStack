@@ -153,25 +153,23 @@ public class PricingRuleConcurrencyTests(IntegrationTestWebApplicationFactory fa
     public async Task UpdatePricingRule_ConcurrentUpdatesThatWouldOnlyConflictWithEachOthersNewState_ExactlyOneSucceeds()
     {
         // The write-skew case Serializable isolation exists to catch, that
-        // a weaker isolation level (Read Committed, Repeatable Read) would
-        // let through: two existing, non-overlapping rules (A and B), each
-        // updated concurrently to a new range that only overlaps the
-        // OTHER's *current* range, not its own original one. Checked
-        // against a snapshot taken before either write, both updates look
-        // individually valid - only a real serializable conflict check
-        // (not a per-row lock, since A and B are different rows entirely)
-        // can catch that applying both together produces two overlapping
-        // rules.
+        // a weaker level (Read Committed, Repeatable Read) would let
+        // through: two non-overlapping rules (A, B), each updated
+        // concurrently to a range that only overlaps the OTHER's current
+        // range, not its own. Checked against a snapshot taken before
+        // either write, both updates look individually valid - only a
+        // real serializable conflict check (not a per-row lock, since A
+        // and B are different rows) can catch that applying both together
+        // produces overlapping rules.
         (string hostToken, Guid unitId) = await SeedHostWithUnitAsync();
 
         // A wide gap between the two original ranges (Jan and March,
-        // nothing in Feb) is what makes this a genuine write-skew case
-        // rather than an ordinary conflict: each update's new range is
-        // deliberately chosen to avoid the *other* rule's ORIGINAL range
-        // entirely (so a check against a pre-race snapshot finds nothing),
-        // while the two NEW ranges overlap each other in February. A naive
+        // nothing in Feb) is what makes this genuine write-skew, not an
+        // ordinary conflict: each update's new range avoids the OTHER
+        // rule's ORIGINAL range (so a pre-race snapshot check finds
+        // nothing), while the two NEW ranges overlap in February. A naive
         // Read Committed check-then-write would let both through, since
-        // each only ever compares itself against the other's stale data.
+        // each only compares itself against stale data.
         CreatePricingRuleResponse ruleA = await CreateDateRangeOverrideAsync(hostToken, unitId, new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 10), 150m);
         CreatePricingRuleResponse ruleB = await CreateDateRangeOverrideAsync(hostToken, unitId, new DateOnly(2026, 3, 1), new DateOnly(2026, 3, 10), 150m);
 

@@ -9,11 +9,11 @@ using System.Net;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Auth;
 
-// Cookie-mode auth (?useCookies=true) - see Api.Security.AuthCookies and
-// the plan this session's summary references. WebApplicationFactory's
-// default CreateClient() has cookie handling enabled, so a single
-// HttpClient instance reused across calls in one test carries the cookie
-// jar automatically, exactly like a browser tab would.
+// Cookie-mode auth (?useCookies=true) - see Api.Security.AuthCookies.
+// WebApplicationFactory's default CreateClient() has cookie handling
+// enabled, so a single HttpClient instance reused across calls in one
+// test carries the cookie jar automatically, exactly like a browser tab
+// would.
 [Collection("Integration Tests")]
 public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
 {
