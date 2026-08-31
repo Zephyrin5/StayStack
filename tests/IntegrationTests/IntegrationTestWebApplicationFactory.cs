@@ -45,15 +45,12 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
         // TickerQDbContext can't go through the RemoveAll<DbContextOptions<...>>
         // + fresh AddDbContext override every other module's context uses
         // below - AddOperationalStore registers it through its own internal
-        // wiring rather than a plain AddDbContext<TickerQDbContext> call, so
-        // RemoveAll<DbContextOptions<TickerQDbContext>> has nothing of
-        // TickerQ's own to actually remove (confirmed: resolving
-        // TickerQDbContext after that override still produced a context
-        // with no connection string at all). Feeding the container's
-        // connection string in through configuration instead means
-        // JobsServicesRegistration's own configuration.GetConnectionString
-        // call - the same one that runs in production - picks it up
-        // naturally, with no need to fight TickerQ's registration mechanism.
+        // wiring, so RemoveAll<DbContextOptions<TickerQDbContext>> has
+        // nothing to remove (confirmed: resolving it after that override
+        // still produced a context with no connection string). Feeding the
+        // container's connection string through configuration instead
+        // means JobsServicesRegistration's own GetConnectionString call -
+        // the same one that runs in production - picks it up naturally.
         builder.ConfigureAppConfiguration((_, configBuilder) =>
         {
             configBuilder.AddInMemoryCollection([
@@ -63,26 +60,20 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
 
         builder.ConfigureServices(services =>
         {
-            // Production registration (ConfigureIdentityServices /
-            // ConfigureCatalogServices / ConfigureHostsServices) always
-            // registers these three DbContexts now, regardless of
-            // environment - it has no "am I under test" awareness to get
-            // wrong. Overriding them here is this test host's job, using
-            // the same RemoveAll<DbContextOptions<...>> + fresh
-            // AddDbContext pattern ASP.NET Core's own WebApplicationFactory
-            // docs recommend: RemoveAll first because a second AddDbContext
-            // call alone wouldn't replace the DbContextOptions<T> the first
-            // one already registered.
+            // Production registration always registers these DbContexts
+            // now, regardless of environment - it has no "am I under test"
+            // awareness to get wrong. Overriding them here is this test
+            // host's job, using the RemoveAll<DbContextOptions<...>> +
+            // fresh AddDbContext pattern ASP.NET Core's own docs recommend:
+            // RemoveAll first, since a second AddDbContext alone wouldn't
+            // replace the options the first one already registered.
             //
-            // Reusing ConfigureStayStackDefaults (the same helper every
-            // module's real registration goes through) instead of a
-            // hand-rolled UseNpgsql/UseSnakeCaseNamingConvention here is
-            // deliberate too: it's what keeps this test config from being
-            // able to drift out of sync with production config, which is
-            // exactly what happened the first time this was wired up by
-            // hand (the hand-rolled version was missing the snake_case
-            // convention the hand-written Dapper SQL and Postgres exclusion
-            // constraints depend on).
+            // Reusing ConfigureStayStackDefaults, not a hand-rolled
+            // UseNpgsql/UseSnakeCaseNamingConvention, keeps this test
+            // config from drifting out of sync with production - a
+            // hand-rolled version once missed the snake_case convention
+            // the hand-written Dapper SQL and Postgres exclusion
+            // constraints depend on.
             services.RemoveAll<DbContextOptions<AppIdentityDbContext>>();
             services.AddDbContext<AppIdentityDbContext>(options =>
                 options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "identity", false));
@@ -116,11 +107,10 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
                 options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "reviews", false));
 
             // Build a temporary provider just to apply each module's real
-            // migrations before any test runs. All five share one physical
-            // database in this container, which Migrate() handles safely
-            // regardless of call order - each module tracks its own applied
-            // migrations in its own history table (see
-            // ConfigureStayStackDefaults), rather than checking whether the
+            // migrations before any test runs. All modules share one
+            // physical database, which Migrate() handles safely regardless
+            // of call order - each tracks its own applied migrations in
+            // its own history table, rather than checking whether the
             // database itself already exists the way EnsureCreated() does.
             ServiceProvider sp = services.BuildServiceProvider();
             using IServiceScope scope = sp.CreateScope();

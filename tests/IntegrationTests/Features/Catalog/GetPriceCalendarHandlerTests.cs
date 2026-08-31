@@ -355,11 +355,11 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
 
         GetPriceCalendarRequest request = new GetPriceCalendarRequest { UnitId = unit.Id, From = from, To = to };
 
-        // 1. First invocation -> Hits DB & populates cache
         GetPriceCalendarResponse initialResponse = await handler.Handle(request, CancellationToken.None);
         Assert.All(initialResponse.Days, d => Assert.True(d.IsAvailable));
 
-        // 2. Add a new hold directly to DB after initial call
+        // A new hold added directly to the DB after the initial call - not
+        // through the handler, so the cache has no way to know about it.
         UnitAvailabilityHold newHold = new UnitAvailabilityHold
         {
             Id = Guid.NewGuid(),
@@ -371,10 +371,10 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         };
         await SeedHoldAsync(newHold);
 
-        // 3. Second invocation -> Should serve stale cached response (all available) within TTL
+        // Still serves the cached (all-available) response despite the DB
+        // change, within the cache's TTL.
         GetPriceCalendarResponse cachedResponse = await handler.Handle(request, CancellationToken.None);
 
-        // Assert cached response is returned despite DB change
         Assert.All(cachedResponse.Days, d => Assert.True(d.IsAvailable));
     }
 }
