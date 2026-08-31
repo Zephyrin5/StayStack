@@ -17,6 +17,7 @@
     <ItemGroup>
         <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
         <ProjectReference Include="..\..\Infrastructure\Persistence\Persistence.csproj"/>
+        <ProjectReference Include="..\..\Infrastructure\Outbox\Outbox.csproj"/>
         <ProjectReference Include="..\..\Modules\Hosts\Hosts.Contracts\Hosts.Contracts.csproj"/>
     </ItemGroup>
 

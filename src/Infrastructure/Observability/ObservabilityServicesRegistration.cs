@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Observability.Configurations;
+using Outbox;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
@@ -76,6 +77,7 @@ public static class ObservabilityServicesRegistration
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation()
                 .AddMeter(CommandTelemetry.SourceName)
+                .AddMeter(OutboxTelemetry.MeterName)
                 .AddConsoleExporter()
                 .AddOtlpExporter(otlp =>
                 {

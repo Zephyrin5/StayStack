@@ -1,23 +1,39 @@
 using Availability.Contracts;
+using Bookings.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using TickerQ.Utilities.Base;
 namespace Bookings.Jobs;
 
 /// <summary>
-///     The backstop docs/adr/0003 anticipated but the original sweep jobs
-///     never targeted: ConfirmBookingHandler's first write
-///     (IHoldConfirmation.ConfirmHoldAsync) marks a hold 'booked' before the
-///     Booking row that's supposed to follow it even exists. A process death
-///     in that narrow window - not an ordinary exception, those are already
-///     compensated by ConfirmBookingHandler's own catch blocks - leaves the
-///     hold stuck 'booked' forever; ExpiredHoldsSweepJob only ever looks at
-///     'held' rows, so nothing else would ever find it.
+///     A backstop for two distinct ways a hold can end up stuck 'booked'
+///     with nothing that will ever release it:
+///     <list type="bullet">
+///         <item>
+///             ConfirmBookingHandler's first write
+///             (IHoldConfirmation.ConfirmHoldAsync) marks a hold 'booked'
+///             before the Booking row that's supposed to follow it even
+///             exists. A process death in that narrow window - not an
+///             ordinary exception, those are already compensated by
+///             ConfirmBookingHandler's own catch blocks - leaves the hold
+///             with no matching bookings.hold_id row at all.
+///         </item>
+///         <item>
+///             CancelBookingHandler enqueues a ReleaseHoldOutboxMessage (see
+///             docs/adr/0003) whose retries can be exhausted (dead-lettered)
+///             before it ever completes - here the booking row does exist,
+///             it's just Cancelled with a hold that's still 'booked' behind
+///             it. Widened to catch this alongside the no-booking-row case
+///             below - the outbox's own OutboxRelayJob already covers the
+///             common retry case, this only matters once that's exhausted.
+///         </item>
+///     </list>
+///     Either way, ExpiredHoldsSweepJob only ever looks at 'held' rows, so
+///     nothing else would ever find these.
 ///
 ///     Deliberately owned by Bookings, not Availability: it's Bookings that
-///     knows what "orphaned" means here (a hold with no matching
-///     bookings.hold_id row). Reads Availability's candidate hold ids
-///     through IHoldLookup rather than joining unit_availability_holds
+///     knows what "orphaned" means here. Reads Availability's candidate hold
+///     ids through IHoldLookup rather than joining unit_availability_holds
 ///     directly by table name - a raw cross-module join would be exactly
 ///     the kind of boundary violation docs/adr/0004 exists to prevent, even
 ///     though this job happens to live on the "allowed to call Availability"
@@ -81,12 +97,18 @@ public partial class ReconcileOrphanedBookedHoldsJob(
         // happened, and should still protect its hold from being released
         // out from under it. The soft-delete filter governs visibility, not
         // whether the booking exists.
-        List<Guid> holdIdsWithBookings = await dbContext.Bookings
-            .Where(b => staleBookedHoldIds.Contains(b.HoldId))
+        //
+        // BookingStatus != Cancelled, not just "any booking row exists" -
+        // a Cancelled booking still has a row, but its hold is exactly the
+        // second orphan case this job now covers (see class doc comment):
+        // a dead-lettered ReleaseHoldOutboxMessage that will never retry
+        // again on its own.
+        List<Guid> holdIdsWithLiveBookings = await dbContext.Bookings
+            .Where(b => staleBookedHoldIds.Contains(b.HoldId) && b.BookingStatus != BookingStatus.Cancelled)
             .Select(b => b.HoldId)
             .ToListAsync(cancellationToken);
 
-        IEnumerable<Guid> orphanedHoldIds = staleBookedHoldIds.Except(holdIdsWithBookings);
+        IEnumerable<Guid> orphanedHoldIds = staleBookedHoldIds.Except(holdIdsWithLiveBookings);
 
         foreach (Guid holdId in orphanedHoldIds)
         {

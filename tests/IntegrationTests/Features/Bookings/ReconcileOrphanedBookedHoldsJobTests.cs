@@ -58,6 +58,21 @@ public class ReconcileOrphanedBookedHoldsJobTests(IntegrationTestWebApplicationF
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
     }
 
+    private async Task SeedCancelledBookingForHoldAsync(Guid holdId, Guid unitId)
+    {
+        Booking booking = Booking.Create(
+            Guid.CreateVersion7(), unitId, holdId, null,
+            "Jane Guest", "jane@example.com", null,
+            DateOnly.FromDateTime(DateTime.UtcNow), DateOnly.FromDateTime(DateTime.UtcNow).AddDays(2),
+            2, Money.Of(200m, Currency.KWD), 200m, CancellationPolicy.CreateDefault());
+        booking.Cancel();
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        context.Bookings.Add(booking);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
     private async Task<string> GetHoldStatusAsync(Guid holdId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
@@ -104,6 +119,25 @@ public class ReconcileOrphanedBookedHoldsJobTests(IntegrationTestWebApplicationF
         await RunJobAsync(now);
 
         Assert.Equal("booked", await GetHoldStatusAsync(hold.Id));
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_ReleasesOrphanedBookedHold_BehindACancelledBooking()
+    {
+        // The widened case docs/adr/0003 added: CancelBookingHandler's own
+        // ReleaseHoldOutboxMessage can exhaust its retries and get
+        // dead-lettered before ever completing - unlike the no-booking-row
+        // case above, a booking row genuinely exists here, it's just
+        // Cancelled with a hold still 'booked' behind it. This job is the
+        // backstop once the outbox's own OutboxRelayJob retries are spent.
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        UnitAvailabilityHold hold = CreateBookedHold(bookedAt: now.AddMinutes(-20));
+        await SeedHoldAsync(hold);
+        await SeedCancelledBookingForHoldAsync(hold.Id, hold.UnitId);
+
+        await RunJobAsync(now);
+
+        Assert.Equal("held", await GetHoldStatusAsync(hold.Id));
     }
 
     [Fact]

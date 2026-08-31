@@ -22,12 +22,16 @@
         <PackageReference Include="FastEndpoints.Generator"/>
         <PackageReference Include="Mediator.Abstractions"/>
         <PackageReference Include="Microsoft.EntityFrameworkCore"/>
+        <!-- For OutboxRelayJob - same TickerFunction source generator
+             Bookings/Catalog/Identity already use for their own jobs. -->
+        <PackageReference Include="TickerQ"/>
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\..\Core\SeedWork\SeedWork.csproj"/>
         <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
         <ProjectReference Include="..\..\Infrastructure\Persistence\Persistence.csproj"/>
+        <ProjectReference Include="..\..\Infrastructure\Outbox\Outbox.csproj"/>
         <ProjectReference Include="..\Bookings\Bookings.Contracts\Bookings.Contracts.csproj"/>
         <ProjectReference Include="Transactions.Contracts\Transactions.Contracts.csproj"/>
     </ItemGroup>

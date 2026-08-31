@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.EntityFrameworkCore"/>
+        <!-- FromSqlRaw/GetTableName/GetSchema (ClaimAndDispatchAsync's own
+             FOR UPDATE SKIP LOCKED claim query) are relational-provider
+             APIs, not part of the core package. -->
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Relational"/>
+    </ItemGroup>
+
+</Project>

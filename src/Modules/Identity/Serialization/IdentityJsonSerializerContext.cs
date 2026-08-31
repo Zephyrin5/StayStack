@@ -6,11 +6,13 @@ using Identity.Features.RemoveRole;
 using Identity.Features.SignIn;
 using Identity.Features.SignOut;
 using Identity.Features.SignUp;
+using Identity.Outbox;
 using BuildingBlocks.Pagination;
 using System.Text.Json.Serialization;
 namespace Identity.Serialization;
 
 [JsonSourceGenerationOptions(UseStringEnumConverter = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(DeleteHostOutboxMessage))]
 [JsonSerializable(typeof(SignInRequest))]
 [JsonSerializable(typeof(SignInResponse))]
 [JsonSerializable(typeof(SignUpRequest))]

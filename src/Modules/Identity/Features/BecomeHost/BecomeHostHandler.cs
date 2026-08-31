@@ -4,12 +4,17 @@ using Hosts.Contracts;
 using Identity.Entities;
 using Identity.Exceptions;
 using Identity.Features.Common;
+using Identity.Outbox;
+using Identity.Serialization;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
+using Outbox;
 namespace Identity.Features.BecomeHost;
 
 public class BecomeHostHandler(
+    AppIdentityDbContext dbContext,
     UserManager<ApplicationUser> userManager,
+    IdentityOutboxDispatcher dispatcher,
     ICurrentUserProvider currentUserProvider,
     IHostRegistrar hostRegistrar,
     IAuthTokenProvider authTokenProvider) : IRequestHandler<BecomeHostRequest, BecomeHostResponse>
@@ -56,7 +61,18 @@ public class BecomeHostHandler(
             // a generic "concurrency failure" ValidationException even
             // though a plain retry would now correctly hit the
             // AlreadyAHostException above instead.
-            await hostRegistrar.DeleteAsync(hostId, cancellationToken);
+            //
+            // Enqueued via the outbox instead of a direct DeleteAsync call
+            // (see docs/adr/0003) - ChangeTracker.Clear() first since
+            // UpdateAsync's own failed save can leave `user` tracked with a
+            // stale concurrency token, which would otherwise be
+            // re-attempted (and likely re-fail) by the SaveChangesAsync
+            // below.
+            dbContext.ChangeTracker.Clear();
+            OutboxMessage deleteHostRow = dispatcher.Enqueue(
+                new DeleteHostOutboxMessage(hostId), IdentityJsonSerializerContext.Default.DeleteHostOutboxMessage);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await dispatcher.TryDispatchAsync(deleteHostRow, cancellationToken);
 
             if (updateResult.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.ConcurrencyFailure)))
             {
@@ -88,7 +104,17 @@ public class BecomeHostHandler(
         {
             user.HostId = null;
             await userManager.UpdateAsync(user);
-            await hostRegistrar.DeleteAsync(hostId, cancellationToken);
+
+            // ChangeTracker.Clear() for the same reason as the branch above,
+            // even though this UpdateAsync just succeeded - keeps the two
+            // rollback branches uniform rather than reasoning about tracker
+            // state separately for each.
+            dbContext.ChangeTracker.Clear();
+            OutboxMessage deleteHostRow = dispatcher.Enqueue(
+                new DeleteHostOutboxMessage(hostId), IdentityJsonSerializerContext.Default.DeleteHostOutboxMessage);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await dispatcher.TryDispatchAsync(deleteHostRow, cancellationToken);
+
             throw new ValidationException(
                 "Role",
                 string.Join(" ", roleResult.Errors.Select(e => e.Description)));

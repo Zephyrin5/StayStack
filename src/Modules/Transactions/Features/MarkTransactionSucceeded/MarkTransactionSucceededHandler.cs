@@ -1,13 +1,15 @@
-using Bookings.Contracts;
 using BuildingBlocks.Exceptions;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Outbox;
 using Transactions.Entities;
+using Transactions.Outbox;
+using Transactions.Serialization;
 namespace Transactions.Features.MarkTransactionSucceeded;
 
 public class MarkTransactionSucceededHandler(
     AppTransactionsDbContext dbContext,
-    IBookingPaymentConfirmation bookingPaymentConfirmation)
+    TransactionsOutboxDispatcher dispatcher)
     : IRequestHandler<MarkTransactionSucceededRequest, MarkTransactionSucceededResponse>
 {
     public async ValueTask<MarkTransactionSucceededResponse> Handle(
@@ -19,35 +21,35 @@ public class MarkTransactionSucceededHandler(
                                   ?? throw new NotFoundException(nameof(Transaction), request.TransactionId);
 
         // Marks the transaction itself first - this is the source of
-        // truth for "payment actually succeeded". If the booking-side
-        // write below fails, nothing is lost: the transaction stays
-        // Succeeded and BookingPaymentConfirmation can be retried, unlike
-        // the reverse order which could leave a Confirmed booking behind
-        // a transaction that was never actually recorded as paid. See
-        // docs/adr/0003 for the authoritative-write-first ordering this
-        // follows.
+        // truth for "payment actually succeeded". The booking-side
+        // confirmation below is now an outbox message enqueued in this same
+        // SaveChangesAsync: a crash after this commits leaves both the
+        // Succeeded status and the durable intent to confirm the booking
+        // together, closing the window ADR-0003 originally accepted and
+        // ADR-0003 now closes (a crash between this and the old direct
+        // ConfirmPaymentAsync call used to leave Succeeded + booking
+        // Pending forever, with no retry path - MarkSucceeded's own guard
+        // makes this endpoint reject a retry with 409 once Succeeded is
+        // set).
         transaction.MarkSucceeded();
+
+        OutboxMessage confirmPaymentRow = dispatcher.Enqueue(
+            new ConfirmBookingPaymentOutboxMessage(transaction.Id, transaction.BookingId),
+            TransactionsJsonSerializerContext.Default.ConfirmBookingPaymentOutboxMessage);
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        bool confirmed = await bookingPaymentConfirmation.ConfirmPaymentAsync(transaction.BookingId, cancellationToken);
+        // The confirmed-vs-refund-pending branch that used to live here now
+        // lives in TransactionsOutboxDispatcher.TryHandleAsync, since it
+        // depends on ConfirmPaymentAsync's result - see its own comment.
+        await dispatcher.TryDispatchAsync(confirmPaymentRow, cancellationToken);
 
-        if (!confirmed)
-        {
-            // The booking was already cancelled by the time this payment
-            // resolved - money came in for something nobody wants anymore.
-            // The payment succeeding is still a fact (TransactionStatus
-            // stays Succeeded above, it isn't undone), it just immediately
-            // needs reversing rather than being left to look like ordinary
-            // completed revenue. Full refund, not a cancellation-policy-
-            // graduated one: unlike CancelBookingHandler's own reversal,
-            // nothing was actually being held against this payment by the
-            // time it cleared - the booking's inventory was already
-            // released, so there's no "compensation for holding it" left
-            // to justify keeping any portion.
-            transaction.MarkRefundPending(transaction.Amount);
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-
+        // transaction.TransactionStatus below reflects whatever the dispatch
+        // above just did (still Succeeded, or moved to RefundPending) - not
+        // a stale read, because the dispatcher loads the same tracked
+        // Transaction instance through this same DbContext (EF's identity
+        // resolution returns the already-tracked object rather than a new
+        // one), so this local reference was mutated in place.
         return new MarkTransactionSucceededResponse
         {
             TransactionId = transaction.Id,

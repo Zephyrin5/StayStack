@@ -6,9 +6,11 @@ using Transactions.Features.MarkTransactionFailed;
 using Transactions.Features.MarkTransactionRefundFailed;
 using Transactions.Features.MarkTransactionRefunded;
 using Transactions.Features.MarkTransactionSucceeded;
+using Transactions.Outbox;
 namespace Transactions.Serialization;
 
 [JsonSourceGenerationOptions(UseStringEnumConverter = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(ConfirmBookingPaymentOutboxMessage))]
 [JsonSerializable(typeof(InitiateTransactionRequest))]
 [JsonSerializable(typeof(InitiateTransactionResponse))]
 [JsonSerializable(typeof(MarkTransactionSucceededRequest))]

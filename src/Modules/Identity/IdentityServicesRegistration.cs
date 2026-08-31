@@ -2,6 +2,7 @@
 using Identity.Configurations;
 using Identity.Entities;
 using Identity.Features.Common;
+using Identity.Outbox;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
@@ -31,6 +32,7 @@ public static class IdentityServicesRegistration
 
         services.Configure<AuthTokenConfiguration>(configuration.GetSection("Auth:Token"));
         services.AddScoped<IAuthTokenProvider, AuthTokenProvider>();
+        services.AddScoped<IdentityOutboxDispatcher>();
 
         // 2. EF Core Database Context Setup
         // Registered unconditionally, including under "Testing" - the test

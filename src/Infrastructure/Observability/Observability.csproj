@@ -16,6 +16,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
+        <ProjectReference Include="..\Outbox\Outbox.csproj"/>
     </ItemGroup>
 
 </Project>

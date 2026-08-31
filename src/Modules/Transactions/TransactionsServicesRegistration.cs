@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Persistence;
 using Persistence.Interceptors;
 using Transactions.Contracts;
+using Transactions.Outbox;
 namespace Transactions;
 
 public static class TransactionsServicesRegistration
@@ -40,6 +41,7 @@ public static class TransactionsServicesRegistration
         });
 
         services.AddScoped<ITransactionReversal, TransactionReversal>();
+        services.AddScoped<TransactionsOutboxDispatcher>();
 
         return services;
     }
