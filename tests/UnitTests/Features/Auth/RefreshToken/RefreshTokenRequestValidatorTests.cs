@@ -16,13 +16,11 @@ public class RefreshTokenRequestValidatorTests
         result.ShouldNotHaveAnyValidationErrors();
     }
 
-    // No "should have error when empty/null" case - RefreshToken is
-    // optional at the DTO level now (cookie-mode callers send no body at
-    // all, see RefreshTokenRequest's own comment), and there's no longer
-    // a NotEmpty rule to assert. RefreshTokenEndpoint resolves the
-    // body-or-cookie fallback itself; see its and RefreshTokenTests.cs's
-    // "ShouldReturn401_WhenTokenIsEmptyAndNoCookiePresent" for where that
-    // case is actually covered now (401, not a 400 validation failure).
+    // No "should error when empty/null" case - RefreshToken is optional at
+    // the DTO level now (cookie-mode callers send no body, see
+    // RefreshTokenRequest's own comment), so there's no NotEmpty rule to
+    // assert. That case is 401, not 400 - covered by
+    // RefreshTokenTests.ShouldReturn401_WhenTokenIsEmptyAndNoCookiePresent.
     [Fact]
     public void Validate_ShouldNotHaveErrors_WhenTokenIsNullOrEmpty()
     {

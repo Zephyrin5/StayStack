@@ -69,11 +69,9 @@ public class RefreshTokenTests(IntegrationTestWebApplicationFactory factory)
     public async Task RefreshToken_ShouldReturn401_WhenTokenIsEmptyAndNoCookiePresent()
     {
         // RefreshToken is optional now (cookie-mode callers send no body -
-        // see RefreshTokenRequest's own comment), so an empty/missing
-        // token with nothing in the cookie jar either is a 401 "invalid
-        // refresh token," not a 400 validation failure - there's no
-        // longer a structural rule that rejects this before it reaches
-        // the handler.
+        // see RefreshTokenRequest's own comment), so an empty token with
+        // nothing in the cookie jar either is a 401 "invalid refresh
+        // token," not a 400 validation failure.
 
         // Arrange
         RefreshTokenRequest refreshRequest = new RefreshTokenRequest { RefreshToken = string.Empty };
