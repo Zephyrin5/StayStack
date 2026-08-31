@@ -40,6 +40,7 @@ public static class PromotionsServicesRegistration
         });
 
         services.AddScoped<IPromotionRedemption, PromotionRedemption>();
+        services.AddScoped<IRedemptionLookup, RedemptionLookup>();
 
         return services;
     }
