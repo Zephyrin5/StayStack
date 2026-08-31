@@ -30,8 +30,23 @@ public class PromotionConfiguration : IEntityTypeConfiguration<Promotion>
         // already normalized to uppercase at creation, so a plain unique
         // index on the stored column is sufficient - no expression index
         // needed. Named explicitly per ADR-0011's gotcha.
+        //
+        // Partial on status <> 2 (EntityStatus.Archived - Postgres can't see
+        // the C# enum name, only the stored int) - "deletion" here is
+        // ApplySoftDeleteQueryFilter's soft archive, not a real row removal,
+        // so an unfiltered unique index would let an archived promotion
+        // permanently reserve its code: CreatePromotionHandler would keep
+        // hitting UniqueViolation -> "already in use" for a code nobody can
+        // see or redeem any more. Safe to let multiple archived rows share a
+        // code - the same soft-delete query filter already makes them
+        // invisible to every ordinary lookup (PromotionRedemption's own
+        // Code == normalizedCode query included), so nothing ever needs to
+        // disambiguate between them. Same partial-index pattern as
+        // UnitAvailabilityHold's holder-token index and
+        // PromotionRedemption's own promotion+email index.
         builder.HasIndex(p => p.Code, "ix_promotions_code")
             .IsUnique()
+            .HasFilter("status <> 2")
             .HasDatabaseName("ix_promotions_code");
 
         builder.HasIndex(p => p.HostId, "ix_promotions_host_id")

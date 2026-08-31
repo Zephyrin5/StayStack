@@ -324,6 +324,27 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task Create_ShouldSucceed_ReusingACode_FromAnArchivedPromotion()
+    {
+        // ix_promotions_code is partial (status <> 2 / EntityStatus.Archived,
+        // see PromotionConfiguration's own comment) precisely so this works -
+        // an unfiltered unique index would have this second Create keep
+        // hitting UniqueViolation forever, since "deletion" here is
+        // Archive(), not a real row removal.
+        (_, string hostToken) = await SeedHostUserAsync();
+        string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
+        CreatePromotionResponse original = await CreateHostPromotionAsync(hostToken, code);
+
+        HttpResponseMessage deleteResponse = await _client.SendAsync(
+            Authorized(HttpMethod.Delete, $"/api/catalog/promotions/{original.PromotionId}", hostToken),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
+
+        CreatePromotionResponse recreated = await CreateHostPromotionAsync(hostToken, code);
+        Assert.NotEqual(original.PromotionId, recreated.PromotionId);
+    }
+
+    [Fact]
     public async Task Delete_ShouldReturn404_ForNonOwningHost()
     {
         (_, string ownerToken) = await SeedHostUserAsync();
