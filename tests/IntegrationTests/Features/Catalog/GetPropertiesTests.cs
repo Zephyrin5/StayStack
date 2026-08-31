@@ -124,10 +124,9 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     }
 
     // Seeded directly through the DbContext, not via HoldAvailabilityEndpoint -
-    // these tests care about GetPropertiesHandler's read-side filtering, not
-    // the hold-creation flow itself, so a direct insert of the row shape it
-    // reads is more direct than going through a 15-minute-expiry hold and
-    // racing the clock.
+    // these tests care about GetPropertiesHandler's read-side filtering,
+    // not hold creation, so a direct insert is simpler than racing a
+    // 15-minute hold's expiry clock.
     private async Task SeedHoldAsync(Guid unitId, DateOnly checkIn, DateOnly checkOut, string status = "booked")
     {
         using IServiceScope scope = factory.Services.CreateScope();
@@ -151,12 +150,9 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     public async Task GetProperties_ShouldReturnCreatedProperty_WithoutAuthentication()
     {
         // Arrange - a unique city, not the "Kuwait City" literal every other
-        // test in this suite reuses. Page 1 of the unfiltered, unbounded
-        // list isn't guaranteed to contain this specific property once
-        // enough other tests (this file and others) have piled up
-        // properties in the same shared collection database - filtering by
-        // a city nothing else uses keeps this assertion independent of how
-        // much other state already exists.
+        // test reuses. The shared collection database accumulates
+        // properties across the whole suite, so filtering by a city
+        // nothing else uses keeps this assertion independent of that state.
         string uniqueCity = $"Test City {Guid.NewGuid()}";
         (string hostAccessToken, Guid hostId) = await SeedHostUserAsync();
         Guid propertyId = await CreatePropertyAsync(hostAccessToken, uniqueCity);
@@ -228,13 +224,12 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(3, page2.TotalCount);
         Assert.Equal(2, page2.Page);
 
-        // No overlap/gap between pages - together they cover exactly the
-        // 3 seeded ids, once each. This is what the Id tiebreaker in
+        // No overlap/gap between pages - together they cover exactly the 3
+        // seeded ids, once each. This is what the Id tiebreaker in
         // GetPropertiesHandler's OrderBy is actually protecting. Set
-        // equality, not sequence equality - deliberately not asserting an
-        // expected order here, since that would mean re-deriving Postgres's
-        // uuid ordering client-side in .NET, which isn't guaranteed to
-        // agree with it.
+        // equality, not sequence equality - asserting an expected order
+        // would mean re-deriving Postgres's uuid ordering client-side, not
+        // guaranteed to agree.
         List<Guid> allIds = [.. page1.Items.Select(p => p.Id), .. page2.Items.Select(p => p.Id)];
         Assert.Equal(3, allIds.Distinct().Count());
         Assert.Equal(new HashSet<Guid> { firstId, secondId, thirdId }, allIds.ToHashSet());
@@ -272,27 +267,23 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     public async Task GetProperties_ShouldReturnPropertiesFromEveryHost_HostIdQueryParamIsNoLongerSupported()
     {
         // GetPropertiesRequest no longer has a HostId field - it used to,
-        // shared with GetMyPropertiesEndpoint, but that made "list
-        // properties for host X" reachable by any anonymous caller who
-        // guessed a host id, not just derived from an authenticated
-        // caller's own token. An unrecognized ?HostId= query param is
-        // simply ignored by binding, not an error - this asserts the
-        // filter genuinely doesn't apply anymore, not just that the
+        // but that made "list properties for host X" reachable by any
+        // anonymous caller who guessed a host id. An unrecognized
+        // ?HostId= query param is ignored by binding, not an error - this
+        // asserts the filter genuinely doesn't apply, not just that the
         // request 400s. See GetMyProperties_ShouldReturnOnlyTheCallersOwnProperties
-        // for the (correct, auth-derived) host-scoped equivalent.
+        // for the auth-derived equivalent.
         // Arrange
         (string firstHostToken, Guid firstHostId) = await SeedHostUserAsync();
         (string secondHostToken, _) = await SeedHostUserAsync();
         Guid firstHostPropertyId = await CreatePropertyAsync(firstHostToken, "Kuwait City");
         Guid secondHostPropertyId = await CreatePropertyAsync(secondHostToken, "Kuwait City");
 
-        // Act - PageSize maxed out, not left at the default 20: property
-        // ids are Guid.CreateVersion7() (time-ordered), and the shared
-        // Testcontainers DB accumulates properties from every other test in
-        // this collection over the run, so relying on the default page size
-        // to still include these two freshly-created ones grows more
-        // fragile the more the suite creates elsewhere - see docs/adr/0008
-        // for why id is the sort tiebreaker to begin with.
+        // Act - PageSize maxed out, not left at the default 20: the shared
+        // Testcontainers DB accumulates properties from every other test
+        // in this collection, so relying on the default page size to
+        // still include these two freshly-created ones grows more fragile
+        // over the run.
         HttpResponseMessage response = await _client.GetAsync(
             $"/api/catalog/properties?HostId={firstHostId}&PageSize={PaginationExtensions.MaxPageSize}", TestContext.Current.CancellationToken);
 
@@ -452,10 +443,9 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     {
         // Guards the composed-subquery shape in GetPropertiesHandler:
         // capacity and availability must both hold for the SAME unit. The
-        // large unit is booked for the requested dates; the only unit
-        // that's free doesn't fit the guest count - so no unit satisfies
-        // both, and the property must not match even though each
-        // condition is independently satisfiable by some unit.
+        // large unit is booked for the requested dates; the only free
+        // unit doesn't fit the guest count - no unit satisfies both, so
+        // the property must not match.
         // Arrange
         (string hostAccessToken, _) = await SeedHostUserAsync();
         string uniqueCity = $"City-{Guid.NewGuid():N}";

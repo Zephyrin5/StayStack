@@ -251,13 +251,11 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(TransactionStatus.RefundPending, await GetTransactionStatusAsync(transactionId));
     }
 
-    // Exercises every tier of the Moderate default policy (see
-    // CancellationPolicy.CreateDefault: 100% at 5+ days out, 50% inside
-    // that window, 0% on check-in day itself) entirely through the real
+    // Exercises every tier of the Moderate default policy (100% at 5+ days
+    // out, 50% inside that window, 0% on check-in day) through the real
     // Hold->Confirm->Cancel HTTP flow - no direct-DB seeding needed, since
-    // HoldAvailabilityHandler only requires CheckIn >= today, no upper
-    // bound, so "cancel today" against a far-future CheckIn already is
-    // "cancel N days before check-in" for whatever N the test picks.
+    // "cancel today" against a far-future CheckIn already is "cancel N
+    // days before check-in" for whatever N the test picks.
     [Theory]
     [InlineData(10, 100)] // 10 days out - the 5-day-or-more tier
     [InlineData(5, 100)] // exactly the 5-day boundary - still the 100% tier
@@ -344,12 +342,11 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task MarkTransactionSucceededAgainstAlreadyCancelledBooking_ShouldMoveTheTransactionStraightToRefundPending()
     {
-        // Arrange - simulates a payment that was still in flight at the
-        // gateway when the customer cancelled, and only resolves
-        // afterward. The webhook (here, the admin stand-in) is reporting a
-        // fact that already happened externally - it can't just be
-        // rejected because the booking moved on, so this has to start a
-        // refund instead of erroring.
+        // Arrange - simulates a payment still in flight at the gateway when
+        // the customer cancelled, resolving only afterward. The webhook is
+        // reporting a fact that already happened - it can't be rejected
+        // because the booking moved on, so this starts a refund instead
+        // of erroring.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         string customerToken = await SeedSignedInCustomerAsync();
@@ -461,13 +458,11 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task CancelBooking_ShouldReturn404_WhenNotAuthenticatedAndNoToken()
     {
-        // The endpoint is public (AllowAnonymous) now - a guest-checkout
-        // caller with no account has to be able to reach it at all, using a
+        // The endpoint is public (AllowAnonymous) - a guest-checkout
+        // caller with no account has to be able to reach it, using a
         // ManagementToken instead of a session. An anonymous caller with
-        // neither an account nor a token gets the same 404 every other
-        // ownership mismatch gets, not 401 - see CancelBookingEndpoint's
-        // own doc comment for why this changed from the old
-        // authentication-required behavior.
+        // neither gets the same 404 every other ownership mismatch gets,
+        // not 401.
         HttpResponseMessage response = await CancelBookingAsync(Guid.NewGuid(), null);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);

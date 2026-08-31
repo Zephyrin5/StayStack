@@ -462,13 +462,12 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     public async Task Handle_AfterFiveSuccessfulBookings_SixthHoldStillSucceeds()
     {
         // Regression test: the active-hold count previously included
-        // 'booked' holds, which never revert to 'held' for a successfully
-        // completed booking (ConfirmHoldAsync sets 'booked' and nothing
-        // ever clears it on that path - see ReconcileOrphanedBookedHoldsJob,
-        // which depends on exactly that persistence). That meant a real
-        // customer would be permanently locked out of new holds on this
-        // browser after their 5th ever completed booking. 'booked' rows
-        // must never count toward the cap.
+        // 'booked' holds, which never revert to 'held' for a completed
+        // booking (ConfirmHoldAsync sets 'booked' and nothing ever clears
+        // it - ReconcileOrphanedBookedHoldsJob depends on that
+        // persistence). That meant a real customer would be locked out of
+        // new holds after their 5th completed booking. 'booked' rows must
+        // never count toward the cap.
         Unit unit = CreateTestUnit(maxCapacity: 10);
         await SeedCatalogAsync(unit);
 
@@ -521,14 +520,12 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     [Fact]
     public async Task Handle_WithExpiredHeldRowsOnDifferentUnits_DoesNotCountThemTowardTheCap()
     {
-        // Regression test: the inline per-unit cleanup DELETE only ever
-        // touches the unit being held right now, so an expired 'held' row
-        // on a *different* unit survives until ExpiredHoldsSweepJob happens
-        // to reap it (up to 5 minutes later). The active-hold count must
-        // exclude expired rows itself rather than relying on that cleanup -
-        // otherwise a guest who starts and abandons checkout on five
-        // different units is locked out of a sixth for up to 15 minutes
-        // with zero live holds.
+        // Regression test: the inline per-unit cleanup DELETE only touches
+        // the unit being held right now, so an expired 'held' row on a
+        // different unit survives until ExpiredHoldsSweepJob reaps it (up
+        // to 5 minutes later). The active-hold count must exclude expired
+        // rows itself, otherwise a guest who abandons checkout on five
+        // different units is locked out of a sixth with zero live holds.
         Unit unit = CreateTestUnit(maxCapacity: 10);
         await SeedCatalogAsync(unit);
 

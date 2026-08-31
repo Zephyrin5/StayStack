@@ -82,15 +82,11 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
     {
         // Same guarantee, but proves the exclusion constraint catches a
         // partial overlap too, not just an identical range - each request
-        // targets a range shifted by one day from the last. The stay
-        // length (concurrentRequests nights) is deliberately long enough
-        // that even the two furthest-apart requests (i=0 and i=9, shifted
-        // 9 days apart) still overlap by a full day - every pair overlaps,
-        // not just adjacent ones, so nothing here can coincidentally
-        // succeed alongside the winner the way a too-short stay length did
-        // when this test was first written (three requests spaced exactly
-        // 3 days apart with a 3-night stay don't actually overlap at all,
-        // touching only at the half-open boundary).
+        // targets a range shifted by one day from the last, long enough
+        // that even the two furthest-apart requests still overlap by a
+        // full day. Every pair overlaps, not just adjacent ones - a
+        // too-short stay length once let a request coincidentally succeed
+        // alongside the winner by only touching at the half-open boundary.
         Unit unit = await SeedUnitAsync();
         DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
 
@@ -122,16 +118,14 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
     public async Task Hold_ConcurrentRequestsForAdjacentNonOverlappingRanges_BothSucceed()
     {
         // The other two tests prove contention is resolved correctly; this
-        // one proves the opposite - that two ranges which only touch at
-        // the [CheckIn, CheckOut) boundary (see HoldAvailabilityHandler's
-        // own half-open comment) are never treated as conflicting, even
-        // when the exclusion constraint is genuinely evaluating concurrent,
-        // not-yet-committed inserts against each other at the database
-        // level. A single-threaded/sequential version of this assertion
-        // wouldn't exercise anything the constraint's own && operator
-        // doesn't already trivially get right - the concurrent race is
-        // what actually tests whether GIST's own visibility handling holds
-        // up under real contention, not just the operator's boundary math.
+        // one proves the opposite - two ranges that only touch at the
+        // [CheckIn, CheckOut) boundary are never treated as conflicting,
+        // even while the exclusion constraint is genuinely evaluating
+        // concurrent, not-yet-committed inserts against each other. A
+        // sequential version of this assertion wouldn't exercise anything
+        // the constraint's && operator doesn't trivially get right - the
+        // race is what actually tests GIST's visibility handling under
+        // real contention.
         Unit unit = await SeedUnitAsync();
         DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
         DateOnly boundary = today.AddDays(5);
@@ -180,17 +174,15 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
     [Fact]
     public async Task Hold_ConcurrentRequestsSharingTheSameHolderToken_NeverExceedTheSessionCap()
     {
-        // The per-session cap (MaxActiveHoldsPerSession, 5) runs as a plain
-        // COUNT-then-INSERT inside a transaction with no isolation level
-        // override (Postgres' default, Read Committed) and no explicit
-        // row locking - unlike PricingRuleConcurrencyTests' Serializable
-        // transactions. Distinct target units means the exclusion
-        // constraint can never be why any of these requests fail, so this
-        // isolates the cap check specifically: if Read Committed lets two
-        // concurrent transactions both COUNT before either commits its own
-        // INSERT, the cap can be oversold. Only a real concurrent test can
-        // tell the difference between "correctly enforced" and "happens to
-        // look correct because nothing has ever actually raced it".
+        // The per-session cap runs as a plain COUNT-then-INSERT under
+        // Postgres' default Read Committed, no explicit row locking -
+        // unlike PricingRuleConcurrencyTests' Serializable transactions.
+        // Distinct target units mean the exclusion constraint can never be
+        // why a request fails, isolating the cap check: if Read Committed
+        // lets two concurrent transactions both COUNT before either
+        // commits its INSERT, the cap can be oversold. Only a real
+        // concurrent test can tell "correctly enforced" apart from
+        // "happens to look correct because nothing has ever raced it".
         const int cap = 5;
         Unit[] units = await Task.WhenAll(Enumerable.Range(0, cap + 4).Select(_ => SeedUnitAsync()));
         DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
