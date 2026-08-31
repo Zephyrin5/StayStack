@@ -87,7 +87,17 @@ public static class IdentityServicesRegistration
             .AddJwtBearer(options =>
             {
                 options.SaveToken = true;
-                options.RequireHttpsMetadata = false;
+
+                // No RequireHttpsMetadata override here, deliberately - it
+                // only governs fetching a discovery document from Authority/
+                // MetadataAddress, neither of which this app sets (tokens
+                // are validated against the local SymmetricSecurityKey
+                // below, no metadata endpoint is ever fetched). Leaving it
+                // unset keeps ASP.NET Core's own default (true) as the
+                // starting point should Authority-based validation ever get
+                // added later, rather than an unconditional `false` set
+                // once for local HTTP testing and silently inherited by
+                // every environment, including production.
 
                 // Without this, the JwtBearer handler silently remaps
                 // well-known short claim names to their long ASP.NET
