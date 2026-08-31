@@ -37,13 +37,11 @@ public record ConfirmedHold
     public int GuestCount { get; init; }
     public Money TotalPrice { get; init; }
 
-    // The pre-discount total, snapshotted on the hold itself (see
-    // UnitAvailabilityHold.Subtotal) rather than left for ConfirmBookingHandler
-    // to reconstruct via TotalPrice + LengthOfStayDiscountAmount - that
-    // reconstruction is exactly the rounding bug docs/adr/0015 exists to
-    // close, since each side was independently rounded. Shares
-    // TotalPrice.Currency, same reasoning as UnitAvailabilityHold's own
-    // Subtotal field.
+    // The pre-discount total, snapshotted on the hold itself rather than
+    // left for ConfirmBookingHandler to reconstruct via TotalPrice +
+    // LengthOfStayDiscountAmount - that reconstruction is exactly the
+    // rounding bug docs/adr/0015 exists to close, since each side was
+    // independently rounded. Shares TotalPrice.Currency.
     public decimal Subtotal { get; init; }
 
     // Same snapshot as TotalPrice/Subtotal, carried through so

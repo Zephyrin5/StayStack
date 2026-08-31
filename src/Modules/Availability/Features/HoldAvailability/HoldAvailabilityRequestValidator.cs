@@ -5,12 +5,10 @@ namespace Availability.Features.HoldAvailability;
 public sealed class HoldAvailabilityRequestValidator : Validator<HoldAvailabilityRequest>
 {
     // A pure request-shape rule (doesn't need "today" or the Unit) - unlike
-    // the lead-time cap below, which does and therefore lives in
-    // HoldAvailabilityHandler's guard clauses instead, per this validator's
-    // own stated scope. Without any bound on either, an anonymous, rate-
-    // limit-aside caller could hold a single unit for up to a decade -
-    // this alone doesn't stop that, but it bounds how much damage one hold
-    // can do.
+    // the lead-time cap, which does and lives in HoldAvailabilityHandler's
+    // guard clauses instead. Without a bound here, an anonymous caller
+    // could hold a single unit for up to a decade - this alone doesn't
+    // stop that, but it bounds how much damage one hold can do.
     public const int MaxStayNights = 90;
 
     public HoldAvailabilityRequestValidator()

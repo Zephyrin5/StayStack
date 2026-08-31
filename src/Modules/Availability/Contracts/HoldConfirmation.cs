@@ -39,12 +39,11 @@ internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider
         // this and the Booking insert that follows in Bookings - see
         // docs/adr/0003 for why this is a cross-module compensating write,
         // not a distributed transaction. The status/expiry check in the
-        // WHERE clause is what makes this safe to call exactly once per
-        // hold: a second call (already-booked or expired hold) returns no
-        // row. @Now (the app's TimeProvider) rather than Postgres' own
-        // now() - the app server and DB server are otherwise two different
-        // clocks comparing the same expiry, and every other hold-adjacent
-        // clock read in this codebase already goes through TimeProvider.
+        // WHERE clause makes this safe to call exactly once per hold: a
+        // second call (already-booked or expired) returns no row. @Now
+        // (the app's TimeProvider), not Postgres' own now() - otherwise
+        // the app server and DB server are two different clocks comparing
+        // the same expiry.
         const string sql = """
                            UPDATE unit_availability_holds
                            SET status = 'booked', booked_at = @Now
@@ -83,14 +82,12 @@ internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider
         }
 
         // hold_expires_at reset to now(), not left at its original value -
-        // otherwise a release that happens well within the original 15-
-        // minute hold window (an immediate cancellation, or a
+        // otherwise an immediate release (a cancellation, or a
         // ConfirmBookingHandler rollback moments after the hold was made)
-        // would leave the range still blocking new holds for however long
-        // was left on that original timer, even though the caller just
-        // explicitly gave the range back. Resetting it makes the row
-        // immediately eligible for both HoldAvailabilityHandler's per-unit
-        // cleanup and ExpiredHoldsSweepJob, instead of waiting it out.
+        // would leave the range blocking new holds for whatever was left
+        // on the original timer, even though the caller just gave it
+        // back. Resetting it makes the row immediately eligible for
+        // cleanup instead of waiting it out.
         const string sql = """
                            UPDATE unit_availability_holds
                            SET status = 'held', hold_expires_at = @Now, booked_at = NULL

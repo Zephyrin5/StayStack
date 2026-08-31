@@ -18,10 +18,9 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
     private static readonly TimeSpan HoldDuration = TimeSpan.FromMinutes(15);
 
     // Lives here, not the validator, since it needs "today" - same
-    // reasoning as the existing CheckIn-in-the-past guard just below.
-    // Without it an anonymous caller could hold a unit for [today,
-    // today+3650) and the exclusion constraint would faithfully enforce
-    // that block for a decade.
+    // reasoning as the CheckIn-in-the-past guard below. Without it an
+    // anonymous caller could hold a unit for [today, today+3650), and the
+    // exclusion constraint would enforce that block for a decade.
     private const int MaxLeadTimeDays = 730;
 
     // Concurrent active (held/booked) holds one hold-session token may
@@ -36,11 +35,10 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
         CancellationToken cancellationToken)
     {
         // One call covers everything this module needs from Catalog: the
-        // unit's max occupancy (for the guard below) and the resolved
-        // price for this exact stay - see Catalog.Contracts.IUnitLookup's
-        // own doc comment for why this replaced two local EF reads
-        // (Units, then PricingRules) this handler used to do directly,
-        // back when it lived in the same module as both tables.
+        // unit's max occupancy (for the guard below) and the resolved price
+        // for this stay - see IUnitLookup's own doc comment for why this is
+        // one round trip instead of two separate EF reads (Units, then
+        // PricingRules).
         StayPricingResult pricing = await unitLookup.ResolveStayPricingAsync(
                                         request.UnitId, request.CheckIn, request.CheckOut, cancellationToken)
                                     ?? throw new NotFoundException("Unit", request.UnitId);
@@ -65,26 +63,24 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
             $"Check-in date cannot be more than {MaxLeadTimeDays} days in the future.");
 
         // Wrapped in the execution strategy, not called bare - a manually
-        // started transaction bypasses EF's own per-operation retry
-        // wrapping, which would otherwise surface a deadlock (40P01) as an
-        // unhandled 500 instead of retrying the whole transaction from
-        // scratch. See docs/adr/0010 for why this actually happens under
-        // concurrent contention on the same range, not just in theory.
+        // started transaction bypasses EF's per-operation retry wrapping,
+        // which would otherwise surface a deadlock (40P01) as an unhandled
+        // 500 instead of retrying. See docs/adr/0010 for why this happens
+        // under concurrent contention on the same range, not just in
+        // theory.
         //
-        // Serializable, not the default Read Committed, for the same
-        // reason CreatePricingRuleHandler/UpdatePricingRuleHandler need it
+        // Serializable, not Read Committed, for the same reason
+        // CreatePricingRuleHandler/UpdatePricingRuleHandler need it
         // (docs/adr/0012): the per-session cap below is a COUNT-then-INSERT
         // against a shared predicate (holder_token = @HolderToken), and
         // under Read Committed, N concurrent holds from the same session on
-        // N different (non-conflicting) units can all COUNT before any of
-        // them commits their own INSERT, oversubscribing the cap - proven
-        // empirically via HoldAvailabilityConcurrencyTests
-        // (Hold_ConcurrentRequestsSharingTheSameHolderToken_
-        // NeverExceedTheSessionCap), which measured 9 successful holds
-        // against a cap of 5 before this was added. No EF change-tracking
-        // risk on retry here the way UpdatePricingRuleHandler had - this
-        // transaction is pure Dapper, so every retry re-issues a real SQL
-        // round trip with no client-side identity map to go stale.
+        // N different units can all COUNT before any commits its own
+        // INSERT, oversubscribing the cap - proven empirically via
+        // HoldAvailabilityConcurrencyTests, which measured 9 successful
+        // holds against a cap of 5 before this was added. No EF
+        // change-tracking risk here on retry - this transaction is pure
+        // Dapper, so every retry re-issues a real SQL round trip with no
+        // identity map to go stale.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
         (Guid HoldId, DateTimeOffset HoldExpiresAt) result = await strategy.ExecuteAsync(async () =>
@@ -96,12 +92,10 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
             DateTimeOffset now = timeProvider.GetUtcNow();
 
             // Stale holds from abandoned checkouts otherwise sit in 'held'
-            // forever (nothing else ever transitions them out), permanently
-            // occupying their slot in the exclusion constraint below even
-            // though GetPriceCalendarHandler already treats them as available.
-            // Scoped to this unit and run right before the INSERT that would
-            // actually be blocked by them - the one case where a stale row's
-            // presence matters.
+            // forever, permanently occupying their slot in the exclusion
+            // constraint below even though GetPriceCalendarHandler already
+            // treats them as available. Scoped to this unit and run right
+            // before the INSERT they'd actually block.
             const string cleanupSql = """
                                       DELETE FROM unit_availability_holds
                                       WHERE unit_id = @UnitId AND status = 'held' AND hold_expires_at <= @Now;
@@ -113,19 +107,16 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
                 transaction.GetDbTransaction(),
                 cancellationToken: cancellationToken));
 
-            // Soft cap, not the real defense (see the class-level doc
-            // comment on MaxActiveHoldsPerSession) - counts this session's
-            // own still-active holds across every unit, not just this one.
-            // 'booked' is deliberately excluded: ConfirmHoldAsync sets it
-            // and nothing ever clears it for a successfully completed
-            // booking (the reconciliation job depends on exactly that
-            // persistence) - counting it here would mean a real customer
-            // permanently loses hold capacity on this browser after their
-            // Nth successful booking, ever. Expired 'held' rows are
-            // excluded too - the inline cleanup DELETE above is scoped to
-            // this unit only, so a stale hold on a different unit would
-            // otherwise count against this session until
-            // ExpiredHoldsSweepJob happens to reap it.
+            // Soft cap, not the real defense (see MaxActiveHoldsPerSession's
+            // own comment) - counts this session's active holds across
+            // every unit. 'booked' is deliberately excluded: ConfirmHoldAsync
+            // sets it and nothing ever clears it (the reconciliation job
+            // depends on that persistence), so counting it would mean a
+            // customer permanently loses hold capacity after their Nth
+            // successful booking. Expired 'held' rows are excluded too -
+            // the cleanup DELETE above is scoped to this unit only, so a
+            // stale hold elsewhere would otherwise count until
+            // ExpiredHoldsSweepJob reaps it.
             const string activeHoldCountSql = """
                                               SELECT count(*) FROM unit_availability_holds
                                               WHERE holder_token = @HolderToken AND status = 'held' AND hold_expires_at > @Now;
@@ -178,15 +169,14 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
             catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.ExclusionViolation)
             {
                 // The database itself rejected the insert - some or all of
-                // the requested range is already held/booked for this
-                // unit. This IS the double-booking guarantee: no rows-
-                // affected check, no manual locking, the constraint does
-                // the work. Not classified as transient (it isn't a
-                // PostgresException the execution strategy retries), so it
-                // propagates straight out of ExecuteAsync instead of being
-                // retried - a real conflict, not a transient one. See
-                // HoldAvailabilityConcurrencyTests for proof this actually
-                // holds under real concurrent requests.
+                // the requested range is already held/booked for this unit.
+                // This IS the double-booking guarantee: no rows-affected
+                // check, no manual locking, the constraint does the work.
+                // Not classified as transient, so it propagates straight
+                // out of ExecuteAsync instead of being retried - a real
+                // conflict, not a transient one. See
+                // HoldAvailabilityConcurrencyTests for proof this holds
+                // under real concurrent requests.
                 await transaction.RollbackAsync(cancellationToken);
                 throw new UnitUnavailableException(request.UnitId);
             }
