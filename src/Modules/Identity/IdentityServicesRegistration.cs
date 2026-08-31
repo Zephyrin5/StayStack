@@ -21,7 +21,6 @@ public static class IdentityServicesRegistration
         IConfiguration configuration,
         IWebHostEnvironment? environment = null)
     {
-        // 1. Bind and validate JwtSettings up front
         AuthTokenConfiguration authTokenSettings = new AuthTokenConfiguration();
         configuration.GetSection("Auth:Token").Bind(authTokenSettings);
 
@@ -34,16 +33,14 @@ public static class IdentityServicesRegistration
         services.AddScoped<IAuthTokenProvider, AuthTokenProvider>();
         services.AddScoped<IdentityOutboxDispatcher>();
 
-        // 2. EF Core Database Context Setup
         // Registered unconditionally, including under "Testing" - the test
-        // host (IntegrationTestWebApplicationFactory) is responsible for
-        // overriding this via services.RemoveAll<DbContextOptions<...>>()
-        // + a fresh AddDbContext call, not for this method knowing it's
-        // being run under tests at all. Production registration code
-        // having no awareness of "am I under test" is the point: every
-        // module used to independently guard this with its own
-        // environment check, which is exactly what made Hosts' guard
-        // wrong in a way nothing caught for a while.
+        // host (IntegrationTestWebApplicationFactory) overrides this via
+        // RemoveAll<DbContextOptions<...>>() + a fresh AddDbContext, not by
+        // this method knowing it's under test. Every module used to guard
+        // this with its own environment check, which is exactly what made
+        // Hosts' guard wrong in a way nothing caught for a while -
+        // production code having no "am I under test" awareness is the
+        // point.
         services.AddDbContext<AppIdentityDbContext>(options =>
         {
             string connectionString = configuration.GetConnectionString("AppConnection")
@@ -55,7 +52,6 @@ public static class IdentityServicesRegistration
                 environment is not null && environment.IsDevelopment());
         });
 
-        // 3. ASP.NET Core Identity Setup
         services
             .AddIdentityCore<ApplicationUser>(options =>
             {
@@ -76,7 +72,6 @@ public static class IdentityServicesRegistration
             .AddSignInManager();
 
 
-        // 4. Authentication & JWT Bearer Setup
         services
             .AddAuthentication(options =>
             {

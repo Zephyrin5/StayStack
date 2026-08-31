@@ -32,12 +32,11 @@ public class AuthTokenProvider(
 
         claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
 
-        // Present only for accounts that have completed BecomeHost - this
-        // is the claim CreateProperty/CreateUnit's future "same host
-        // tenant" authorization policy checks against. No signature change
-        // needed here to support it: GenerateJwtToken already takes the
-        // full ApplicationUser, so every caller (SignIn, Register,
-        // BecomeHost) gets this for free the moment HostId is set.
+        // Present only for accounts that completed BecomeHost - the claim
+        // CreateProperty/CreateUnit's "same host tenant" authorization
+        // policy checks against. GenerateJwtToken already takes the full
+        // ApplicationUser, so every caller gets this for free once HostId
+        // is set.
         if (user.HostId is not null)
         {
             claims.Add(new Claim("host_id", user.HostId.Value.ToString()));
@@ -94,13 +93,12 @@ public class AuthTokenProvider(
         string incomingTokenHash = SecureToken.Hash(refreshToken);
         DateTime now = timeProvider.GetUtcNow().UtcDateTime;
 
-        // A single conditional UPDATE, not a SELECT-then-check-then-UPDATE:
-        // two concurrent callers presenting the same still-valid token can
-        // no longer both observe IsRevoked == false and both rotate it -
-        // only one UPDATE can match `!rt.IsRevoked` before the other
-        // commits, so exactly one succeeds and the other lands in the
-        // rows == 0 branch below, where it's correctly classified as reuse
-        // rather than silently succeeding a second time.
+        // A single conditional UPDATE, not SELECT-then-check-then-UPDATE -
+        // two concurrent callers presenting the same token can no longer
+        // both observe IsRevoked == false and both rotate it. Only one
+        // UPDATE can match `!rt.IsRevoked` before the other commits, so the
+        // loser lands in the rows == 0 branch below and is correctly
+        // classified as reuse.
         int rowsUpdated = await dbContext.RefreshTokens
             .Where(rt => rt.TokenHash == incomingTokenHash && !rt.IsRevoked && rt.ExpiresAt > now)
             .ExecuteUpdateAsync(s => s
@@ -115,11 +113,9 @@ public class AuthTokenProvider(
             return new RefreshTokenValidationResult(consumed.UserId, consumed.Id, consumed.FamilyId);
         }
 
-        // The atomic update matched nothing - find out why, to return the
-        // right error (and, for reuse, revoke the family). A second lookup
-        // rather than folding this into the UPDATE's WHERE clause, since we
-        // need to tell "doesn't exist" apart from "expired" apart from
-        // "already revoked" for the caller.
+        // The atomic update matched nothing - a second lookup (not folded
+        // into the UPDATE's WHERE clause) tells "doesn't exist" apart from
+        // "expired" apart from "already revoked", to return the right error.
         Entities.RefreshToken? existing = await dbContext.RefreshTokens.AsNoTracking()
             .SingleOrDefaultAsync(rt => rt.TokenHash == incomingTokenHash, cancellationToken);
 
@@ -128,11 +124,10 @@ public class AuthTokenProvider(
             throw new InvalidRefreshTokenException();
         }
 
-        // Expiry checked before revocation status: a token that is both
-        // revoked and expired (an old, already-rotated token replayed long
-        // after its own lifetime ran out) is an expired token, not reuse -
-        // checking IsRevoked first would classify that harmless case as an
-        // attack and revoke the entire family over it.
+        // Expiry checked before revocation: a token that's both revoked and
+        // expired (an old, already-rotated token replayed long after its
+        // lifetime ran out) is expired, not reuse - checking IsRevoked
+        // first would misclassify that harmless case as an attack.
         if (existing.ExpiresAt <= now)
         {
             throw new RefreshTokenExpiredException();

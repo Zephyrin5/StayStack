@@ -36,11 +36,10 @@ public class BecomeHostHandler(
             throw new AlreadyAHostException();
         }
 
-        // Cross-module write (AppHostsDbContext + AppIdentityDbContext,
-        // no shared transaction) - see docs/adr/0003 for why this is a
-        // compensating rollback rather than a distributed transaction. A
-        // partially-failed BecomeHost leaves the caller as a fully
-        // functional Customer either way, never in a broken state.
+        // Cross-module write (AppHostsDbContext + AppIdentityDbContext, no
+        // shared transaction) - see docs/adr/0003. A partially-failed
+        // BecomeHost leaves the caller as a fully functional Customer
+        // either way, never broken.
         Guid hostId = await hostRegistrar.RegisterHostAsync(
             request.BusinessName,
             request.ContactEmail,
@@ -51,23 +50,19 @@ public class BecomeHostHandler(
         IdentityResult updateResult = await userManager.UpdateAsync(user);
         if (!updateResult.Succeeded)
         {
-            // UserStore.UpdateAsync already catches EF's own
-            // DbUpdateConcurrencyException internally and surfaces it here
-            // as a failed IdentityResult (ErrorDescriber.ConcurrencyFailure)
-            // rather than throwing - so the compensating delete below
-            // already runs correctly for two concurrent BecomeHost calls on
-            // the same user, no extra try/catch needed. What's worth fixing
-            // is the error the loser sees: without this branch it would get
-            // a generic "concurrency failure" ValidationException even
-            // though a plain retry would now correctly hit the
-            // AlreadyAHostException above instead.
+            // UserStore.UpdateAsync already catches EF's DbUpdateConcurrencyException
+            // and surfaces it as a failed IdentityResult (ConcurrencyFailure)
+            // rather than throwing - the compensating delete below already
+            // handles two concurrent BecomeHost calls correctly. Worth
+            // fixing is the error the loser sees: without this branch, a
+            // plain retry that would now correctly hit AlreadyAHostException
+            // above gets a generic concurrency-failure message instead.
             //
-            // Enqueued via the outbox instead of a direct DeleteAsync call
-            // (see docs/adr/0003) - ChangeTracker.Clear() first since
-            // UpdateAsync's own failed save can leave `user` tracked with a
-            // stale concurrency token, which would otherwise be
-            // re-attempted (and likely re-fail) by the SaveChangesAsync
-            // below.
+            // Enqueued via the outbox (docs/adr/0003) rather than a direct
+            // DeleteAsync - ChangeTracker.Clear() first since UpdateAsync's
+            // failed save leaves `user` tracked with a stale concurrency
+            // token that would otherwise be re-attempted by the
+            // SaveChangesAsync below.
             dbContext.ChangeTracker.Clear();
             OutboxMessage deleteHostRow = dispatcher.Enqueue(
                 new DeleteHostOutboxMessage(hostId), IdentityJsonSerializerContext.Default.DeleteHostOutboxMessage);
@@ -91,12 +86,11 @@ public class BecomeHostHandler(
         }
         catch (InvalidOperationException ex)
         {
-            // UserManager.AddToRoleAsync throws rather than returning a
-            // failed IdentityResult when the role itself doesn't exist
-            // (e.g. seed data drift) - that's the realistic way this step
-            // actually fails, not the "user already in this role" case
-            // Succeeded=false alone would catch, so it's normalized into
-            // the same shape here to reach the one rollback below either way.
+            // AddToRoleAsync throws, rather than returning a failed
+            // IdentityResult, when the role doesn't exist (e.g. seed data
+            // drift) - the realistic failure mode here, not "already in
+            // this role". Normalized into the same shape to reach the one
+            // rollback below either way.
             roleResult = IdentityResult.Failed(new IdentityError { Description = ex.Message });
         }
 
@@ -105,10 +99,9 @@ public class BecomeHostHandler(
             user.HostId = null;
             await userManager.UpdateAsync(user);
 
-            // ChangeTracker.Clear() for the same reason as the branch above,
-            // even though this UpdateAsync just succeeded - keeps the two
-            // rollback branches uniform rather than reasoning about tracker
-            // state separately for each.
+            // Same ChangeTracker.Clear() as the branch above, even though
+            // this UpdateAsync succeeded - keeps both rollback branches
+            // uniform.
             dbContext.ChangeTracker.Clear();
             OutboxMessage deleteHostRow = dispatcher.Enqueue(
                 new DeleteHostOutboxMessage(hostId), IdentityJsonSerializerContext.Default.DeleteHostOutboxMessage);

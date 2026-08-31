@@ -49,22 +49,19 @@ public class SignUpHandler(
         }
         catch (InvalidOperationException ex)
         {
-            // Same reasoning as BecomeHostHandler's identical try/catch:
-            // UserManager.AddToRoleAsync throws rather than returning a
-            // failed IdentityResult when the role itself doesn't exist,
-            // which is the realistic way this fails (seed data drift) -
-            // normalized here so it reaches the ValidationException below
-            // instead of surfacing as an unhandled 500.
+            // Same as BecomeHostHandler's identical try/catch: AddToRoleAsync
+            // throws, rather than returning a failed IdentityResult, when
+            // the role doesn't exist (seed data drift) - normalized here to
+            // reach the ValidationException below instead of an unhandled 500.
             roleResult = IdentityResult.Failed(new IdentityError { Description = ex.Message });
         }
 
         if (!roleResult.Succeeded)
         {
-            // Extremely unlikely once the seed data is in place, but if the
-            // Customer role is ever missing, fail loudly rather than
-            // leaving a roleless account behind silently - matches
-            // BecomeHostHandler's identical compensating delete on the same
-            // failure shape.
+            // Extremely unlikely with seed data in place, but if the
+            // Customer role is ever missing, fail loudly rather than leave a
+            // roleless account behind - matches BecomeHostHandler's
+            // identical compensating delete.
             await userManager.DeleteAsync(user);
 
             throw new ValidationException(

@@ -24,12 +24,10 @@ public class AppIdentityDbContext(DbContextOptions<AppIdentityDbContext> options
 
         builder.Entity<RefreshToken>(entity =>
         {
-            // Sets max length in the database schema (e.g., VARCHAR(64) / NVARCHAR(64))
             entity.Property(e => e.TokenHash)
                 .IsRequired()
                 .HasMaxLength(64);
 
-            // Adds a unique index for lightning-fast lookups
             entity.HasIndex(e => e.TokenHash)
                 .IsUnique();
 
@@ -48,7 +46,6 @@ public class AppIdentityDbContext(DbContextOptions<AppIdentityDbContext> options
         builder.ApplyConfiguration(new UserConfiguration());
         builder.ApplyConfiguration(new UserRoleConfiguration());
 
-        // Convert names to snake case
         builder.Entity<ApplicationUser>().ToTable("users");
         builder.Entity<IdentityRole<Guid>>().ToTable("roles");
         builder.Entity<IdentityUserToken<Guid>>().ToTable("user_tokens");
