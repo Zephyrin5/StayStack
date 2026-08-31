@@ -14,14 +14,11 @@ public class HostConfiguration : IEntityTypeConfiguration<Host>
 
         // DisplayName needs no HasConversion of its own - StayStackDbContext's
         // ConfigureConventions already applies LocalizedTextConverter to
-        // every LocalizedText-typed property model-wide (nullable reference
-        // annotations don't change the CLR type, so this nullable property
-        // matches that convention the same as Property.Name/Unit.Name do).
-        // This used to hand-roll its own converter here, serializing
-        // v.Values (an IReadOnlyDictionary<string,string>) through a
-        // JsonTypeInfo<Dictionary<string,string>> - a runtime type it isn't,
-        // which threw InvalidCastException the moment DisplayName was ever
-        // actually set to a non-null value (nothing had been, until
-        // CreateHostEndpoint). LocalizedTextConverter doesn't have this bug.
+        // every LocalizedText-typed property model-wide, same as
+        // Property.Name/Unit.Name. Don't hand-roll a custom converter here
+        // serializing v.Values directly - an IReadOnlyDictionary<string,string>
+        // isn't the Dictionary<string,string> a JsonTypeInfo<Dictionary<...>>
+        // expects, and throws InvalidCastException the moment DisplayName is
+        // ever actually set.
     }
 }
