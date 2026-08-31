@@ -39,14 +39,12 @@ public class ConfirmBookingHandlerTests : IDisposable
         _dbContext = new AppBookingsDbContext(options);
 
         // Deliberately not calling Database.EnsureCreated() - the bookings
-        // table doesn't exist, so SaveChangesAsync in the handler's booking
-        // insert fails deterministically, simulating the "Catalog write
-        // succeeded, Bookings write failed" window. bookings_outbox_messages
-        // is created by hand instead, matching only what
-        // OutboxMessageConfiguration maps (see AppBookingsDbContext.
-        // BookingsOutboxMessages for the table-name convention), so the
-        // compensating enqueue below can still succeed even though the rest
-        // of the schema doesn't exist.
+        // table doesn't exist, so the handler's booking insert fails
+        // deterministically, simulating "Catalog write succeeded, Bookings
+        // write failed". bookings_outbox_messages is created by hand
+        // instead, matching only what OutboxMessageConfiguration maps, so
+        // the compensating enqueue below can still succeed even though the
+        // rest of the schema doesn't exist.
         _dbContext.Database.ExecuteSqlRaw("""
             CREATE TABLE bookings_outbox_messages (
                 id TEXT NOT NULL PRIMARY KEY,
@@ -140,14 +138,11 @@ public class ConfirmBookingHandlerTests : IDisposable
     public async Task Handle_WhenBookingSaveFailsAndReleaseHoldAlsoFails_StillThrowsTheOriginalFailureAndQueuesTheReleaseForRetry()
     {
         // Arrange - the more interesting failure than the single-write case
-        // above: the compensating release itself fails too (transiently -
-        // e.g. Catalog unreachable). Unlike before the outbox existed, this
-        // is no longer a second failure mode the handler has to wrap into
-        // an AggregateException: the original booking-save failure still
-        // propagates untouched, and the release is left durably queued
-        // (unprocessed, Attempts incremented) for OutboxRelayJob to retry -
-        // it's not silently lost, it's just no longer the handler's problem
-        // to report. See docs/adr/0003.
+        // above: the compensating release itself fails too (transiently).
+        // The original booking-save failure still propagates untouched,
+        // and the release is left durably queued (unprocessed, Attempts
+        // incremented) for OutboxRelayJob to retry - not silently lost,
+        // just no longer the handler's problem to report. See docs/adr/0003.
         Guid holdId = Guid.NewGuid();
         ConfirmedHold hold = CreateHold();
 
@@ -226,21 +221,17 @@ public class ConfirmBookingHandlerPromoPricingTests : IDisposable
     [Fact]
     public async Task Handle_WhenRedeemedDiscountIsSmallerThanTheLengthOfStayDiscountItReplaces_RejectsTheCodeButKeepsTheHold()
     {
-        // Reproduces the reported bug's scenario: a hold quoted at 180 KWD
-        // (200 subtotal, 10% - i.e. 20 KWD - length-of-stay discount already
-        // applied), with a 5 KWD promo redeemed on top. The promo applies
-        // against the pre-LOS subtotal, not the LOS-discounted total (see
-        // ConfirmBookingHandler's own comment on why) - naive arithmetic
-        // gives 200 - 5 = 195, MORE than the 180 KWD the guest already saw
-        // at hold time. Rather than silently falling back to 180 (burning
-        // the guest's code for zero benefit), the code is rejected outright:
-        // the request fails with a promoCode validation error, and the
-        // redemption RedeemAsync already created is reversed. Unlike a
-        // genuinely invalid code, the hold must NOT be released here - the
-        // code itself was real and valid, so the guest shouldn't lose their
-        // 15-minute hold (and, with the exclusion constraint, possibly the
-        // dates themselves) just for trying a code that didn't happen to
-        // beat their LOS discount.
+        // Reproduces the reported bug: a hold quoted at 180 KWD (200
+        // subtotal, 20 KWD LOS discount already applied), with a 5 KWD
+        // promo redeemed on top. The promo applies against the pre-LOS
+        // subtotal - naive arithmetic gives 200 - 5 = 195, MORE than the
+        // 180 KWD the guest already saw. Rather than silently falling back
+        // to 180 (burning the code for zero benefit), the code is rejected
+        // outright: a promoCode validation error, and the redemption
+        // already created is reversed. Unlike a genuinely invalid code,
+        // the hold must NOT be released - the code was real and valid, so
+        // the guest shouldn't lose their 15-minute hold just for trying
+        // one that didn't beat their LOS discount.
         Guid holdId = Guid.NewGuid();
         ConfirmedHold hold = new ConfirmedHold
         {
