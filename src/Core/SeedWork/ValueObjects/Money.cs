@@ -3,22 +3,19 @@ namespace SeedWork.ValueObjects;
 
 /// <summary>
 ///     A currency amount, always already rounded to its own currency's
-///     minor-unit precision (CurrencyMinorUnits) - constructing one that
-///     isn't is not possible through Of, and every arithmetic operator
-///     re-rounds its result, so a Money value in the wild is always a real,
-///     payable amount, never an intermediate unrounded fraction. See
-///     docs/adr/0015 for why this exists and the deliberate domain-only
-///     scope boundary (response DTOs stay plain decimal + Currency).
+///     minor-unit precision (CurrencyMinorUnits) - Of is the only
+///     constructor, and every operator re-rounds its result, so a Money
+///     value in the wild is never an unrounded intermediate. See
+///     docs/adr/0015 for the domain-only scope boundary (response DTOs
+///     stay plain decimal + Currency).
 ///
-///     Because every operator rounds its own result, Money arithmetic is
-///     NOT associative the way plain decimal is: `money * a / b` and
-///     `money * (a / b)` can produce different values, since the first
-///     rounds once after the multiplication (at a value scaled by `a`) and
-///     the second rounds the division first, in plain decimal, then rounds
-///     once more after one Money multiplication. Prefer collapsing a
-///     percentage/fraction to a single plain-decimal factor first (`money *
-///     (percent / 100m)`), matching PricingCalculator's own shape, rather
-///     than chaining Money operators end to end.
+///     Because every operator rounds, Money arithmetic is NOT associative
+///     like plain decimal: `money * a / b` and `money * (a / b)` can
+///     differ, since the first rounds once after multiplying by `a`, the
+///     second rounds the division first in plain decimal, then rounds once
+///     more. Prefer collapsing a percentage to a single plain-decimal
+///     factor first (`money * (percent / 100m)`) rather than chaining
+///     Money operators.
 /// </summary>
 public readonly record struct Money
 {

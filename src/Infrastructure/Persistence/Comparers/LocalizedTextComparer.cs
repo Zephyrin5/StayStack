@@ -3,7 +3,8 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 using SeedWork.ValueObjects;
 namespace Persistence.Comparers;
 
-// The Comparer: Ensures EF Core detects changes inside the JSON
+// Deep-equality comparer so EF Core detects in-place JSON mutations, not
+// just reference changes.
 [UsedImplicitly]
 public class LocalizedTextComparer() : ValueComparer<LocalizedText>(
     (c1, c2) => object.Equals(c1, c2),

@@ -73,15 +73,11 @@ public sealed class LocalizedText : IEquatable<LocalizedText>
 
     public override int GetHashCode()
     {
-        // Order-independent (consistent with Equals's order-independent
-        // dictionary comparison), but not via commutative addition/XOR over
-        // per-pair combines - that construction lets two different
-        // dictionaries collide by construction (e.g. {a:b, c:d} vs
-        // {a:d, c:b}, since combine(a,b)+combine(c,d) can equal
-        // combine(a,d)+combine(c,b)). Sorting by key first and feeding a
-        // single HashCode accumulator removes that specific collision while
-        // staying independent of insertion order, which is all Equals
-        // actually requires.
+        // Order-independent, matching Equals - but not via commutative
+        // XOR/add over per-pair combines, which lets different dictionaries
+        // collide (combine(a,b)+combine(c,d) can equal combine(a,d)+combine(c,b)).
+        // Sorting by key first and feeding one HashCode accumulator avoids
+        // that while staying insertion-order independent.
         HashCode hash = new HashCode();
         foreach ((string key, string value) in _values.OrderBy(kv => kv.Key, StringComparer.Ordinal))
         {

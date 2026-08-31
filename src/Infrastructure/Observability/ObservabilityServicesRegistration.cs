@@ -49,11 +49,10 @@ public static class ObservabilityServicesRegistration
         string metricsEndpoint = $"{baseEndpoint}/v1/metrics";
         string logsEndpoint = $"{baseEndpoint}/v1/logs";
 
-        // Filter out EF Core's own command-level logs from what gets
-        // exported. EnableSensitiveDataLogging on the DbContext means
-        // this category logs full SQL parameter values (usernames today,
-        // potentially worse later) - useful in the console during dev,
-        // not something that should ship to a shared Grafana instance.
+        // Filters EF Core's command-level logs out of what gets exported -
+        // EnableSensitiveDataLogging means this category logs full SQL
+        // parameter values (usernames today, worse later), fine in a dev
+        // console but not something that should ship to shared Grafana.
         services.AddLogging(logging =>
             logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.None));
 

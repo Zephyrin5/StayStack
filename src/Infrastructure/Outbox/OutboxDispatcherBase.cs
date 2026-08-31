@@ -7,36 +7,23 @@ using System.Text.Json.Serialization.Metadata;
 namespace Outbox;
 
 /// <summary>
-///     One per module (BookingsOutboxDispatcher, TransactionsOutboxDispatcher,
-///     IdentityOutboxDispatcher), each constructed over that module's own
-///     DbContext so Enqueue/TryDispatchAsync/DispatchPendingAsync all read
-///     and write through the same scoped instance a handler's own writes go
-///     through - that's what makes Enqueue-then-SaveChangesAsync atomic with
-///     whatever domain write it accompanies. See docs/adr/0003.
+///     One per module, each over that module's own DbContext - so
+///     Enqueue-then-SaveChangesAsync is atomic with the domain write it
+///     accompanies. See docs/adr/0003.
 ///     <para>
-///         No reflection anywhere in the dispatch path: TryHandleAsync is a
-///         plain virtual method each module overrides with a hand-written
-///         switch over OutboxMessage.Type, and payload (de)serialization
-///         always goes through the caller's own source-generated
-///         JsonSerializerContext.
+///         No reflection: TryHandleAsync is a plain virtual switch over
+///         OutboxMessage.Type; payload (de)serialization goes through the
+///         caller's own source-generated JsonSerializerContext.
 ///     </para>
 ///     <para>
-///         Every dispatch attempt - inline from a handler, DispatchPendingAsync's
-///         batch, SweepDeadLetteredAsync's retry - claims its row via
-///         `SELECT ... FOR UPDATE SKIP LOCKED` (against Postgres; see
-///         ClaimAndDispatchAsync for the Sqlite fallback the unit test
-///         suite runs under) inside a short-lived transaction held only for
-///         that one row's processing, not a plain read. Without this, two
-///         overlapping runs of the same relay job (one slower than the
-///         one-minute cron, or two app instances) can both select and
-///         dispatch the same row: nothing today would stop it structurally,
-///         only every current message type happening to be idempotent
-///         papers over it - load-bearing behavior nothing enforces for
-///         whatever message type gets added next. SKIP LOCKED means a
-///         second concurrent claim attempt on a row already locked by the
-///         first simply doesn't see it (returns no rows), rather than
-///         blocking and duplicating work once the first claimant releases
-///         it.
+///         Every dispatch claims its row via `SELECT ... FOR UPDATE SKIP
+///         LOCKED` (Postgres; see ClaimAndDispatchAsync for the Sqlite
+///         fallback tests run under), inside a short transaction held only
+///         for that row. Without it, two overlapping relay runs could claim
+///         and dispatch the same row - today's handlers are all idempotent,
+///         but that's not something this should keep relying on. SKIP
+///         LOCKED means a second claimant simply doesn't see a locked row,
+///         rather than blocking and duplicating work.
 ///     </para>
 /// </summary>
 public abstract partial class OutboxDispatcherBase<TDbContext>(
@@ -44,15 +31,13 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
     TimeProvider timeProvider,
     ILogger logger) where TDbContext : DbContext
 {
-    // Retried forever would waste cycles on a genuinely poisoned message;
-    // uncapped is unnecessary when nothing here is latency-sensitive (every
-    // message type is a best-effort follow-up, never blocking a response) -
-    // 10 attempts at the backoff schedule below is roughly a day of retrying
-    // before something needs a human.
+    // Capped, not uncapped - nothing here is latency-sensitive, but
+    // retrying a poisoned message forever wastes cycles. 10 attempts at the
+    // schedule below is roughly a day before it needs a human.
     private const int MaxAttempts = 10;
 
-    // Indexed by (Attempts - 1); the last entry repeats once Attempts
-    // exceeds the table's length rather than growing without bound.
+    // Indexed by (Attempts - 1); the last entry repeats past the table's
+    // length rather than growing unbounded.
     private static readonly TimeSpan[] BackoffSteps =
     [
         TimeSpan.FromSeconds(30),
@@ -62,13 +47,10 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
         TimeSpan.FromHours(1)
     ];
 
-    // Resolved once per dispatcher instance, not per call - EF's own model
-    // metadata, not user input, so safe to interpolate directly into raw
-    // SQL. Table names are module-prefixed (bookings_outbox_messages etc,
-    // see AppBookingsDbContext.BookingsOutboxMessages) precisely because
-    // every module shares one physical Postgres schema - resolving this
-    // dynamically rather than hardcoding it here is what lets one base
-    // class serve all three modules' differently-named tables.
+    // Resolved once, lazily - EF's own model metadata, not user input, so
+    // safe to interpolate into raw SQL. Table names are module-prefixed
+    // (every module shares one physical Postgres schema), which is why
+    // this resolves dynamically instead of being hardcoded.
     private string? _claimByIdSql;
 
     private string ClaimByIdSql => _claimByIdSql ??= BuildClaimByIdSql();
@@ -78,11 +60,10 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
     protected abstract string ModuleName { get; }
 
     /// <summary>
-    ///     Adds the row to DbContext's change tracker - the caller still has
-    ///     to call DbContext.SaveChangesAsync (ideally in the same call that
-    ///     saves whatever domain write this message follows from, for the
-    ///     atomicity guarantee this whole mechanism exists for). Returns the
-    ///     row so the caller can dispatch it inline once that save commits.
+    ///     Adds the row to the change tracker - the caller still has to call
+    ///     SaveChangesAsync (ideally alongside the domain write this message
+    ///     follows from, for atomicity). Returns the row so the caller can
+    ///     dispatch it inline once that save commits.
     /// </summary>
     public OutboxMessage Enqueue<TMessage>(TMessage message, JsonTypeInfo<TMessage> typeInfo)
     {
@@ -102,29 +83,24 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
     }
 
     /// <summary>
-    ///     Dispatches one specific row and immediately persists its outcome.
-    ///     Called inline right after a message's own enqueueing save commits
-    ///     (keeps happy-path latency identical to a direct call), and by
-    ///     DispatchPendingAsync for whatever the inline attempt didn't
-    ///     finish. Claims the row under FOR UPDATE SKIP LOCKED first (see
-    ///     the class doc comment) - `message` may already be a tracked
-    ///     reference the caller holds (e.g. straight from Enqueue), but
-    ///     locking can only happen via a real query, so this always re-claims
-    ///     by id regardless. A no-op if the row is already locked by another
-    ///     concurrent claim, already resolved, or already dead-lettered
-    ///     (dead-lettered rows are only ever retried through
-    ///     SweepDeadLetteredAsync, never through this path).
+    ///     Dispatches one row and persists its outcome immediately - called
+    ///     inline right after its enqueueing save commits (matching a direct
+    ///     call's latency), and by DispatchPendingAsync for whatever an
+    ///     earlier inline attempt didn't finish. Always re-claims by id (see
+    ///     the class doc comment); `message` may be a tracked reference the
+    ///     caller already holds, but locking requires a real query
+    ///     regardless. No-op if the row is already locked, resolved, or
+    ///     dead-lettered (those are only retried via SweepDeadLetteredAsync).
     /// </summary>
     public Task TryDispatchAsync(OutboxMessage message, CancellationToken cancellationToken) =>
         ClaimAndDispatchAsync(message.Id, retryingDeadLetter: false, cancellationToken);
 
     /// <summary>
-    ///     What the relay job's poll calls - loads whatever's due and
-    ///     dispatches it. Excludes dead-lettered rows and anything still
-    ///     backing off (NextAttemptAt in the future). This is only a
-    ///     candidate scan, not a claim - id order isn't disturbed by another
-    ///     process's row locks, so ordinary read-committed visibility is
-    ///     fine here; the actual claim happens per-row in TryDispatchAsync.
+    ///     The relay job's poll: loads whatever's due (excluding
+    ///     dead-lettered and still-backing-off rows) and dispatches it. Only
+    ///     a candidate scan, not a claim - ordinary read-committed
+    ///     visibility is fine here since the actual claim happens per-row in
+    ///     TryDispatchAsync.
     /// </summary>
     public async Task DispatchPendingAsync(int batchSize, CancellationToken cancellationToken)
     {
@@ -143,21 +119,15 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
     }
 
     /// <summary>
-    ///     A dead letter is "stop retrying every poll interval," not "never
-    ///     try again" - standard dead-letter-queue practice (Kafka/RabbitMQ/
-    ///     SQS shops all replay their DLQs) applied here: give dead-lettered
-    ///     rows one more attempt per sweep, using the row's own original
-    ///     Payload rather than trying to reconstruct the right outcome from
-    ///     current state elsewhere (which for a money-touching message would
-    ///     mean re-deriving the exact refund amount CancelBookingHandler
-    ///     computed once, a strictly worse and more error-prone answer than
-    ///     just replaying what's already durably recorded). Cadence and
-    ///     cooldown are the caller's job (see Bookings/Transactions/Identity's
-    ///     own OutboxRelayJob) - this only answers "which rows are due," not
-    ///     "how often to ask." Like DispatchPendingAsync, this is only a
-    ///     candidate scan; ClaimAndDispatchAsync does the actual per-row
-    ///     claim and is what clears DeadLetteredAt, atomically with the rest
-    ///     of the dispatch outcome, not this scan.
+    ///     A dead letter means "stop retrying every poll," not "never
+    ///     again" - standard DLQ practice, replaying each row's original
+    ///     Payload rather than reconstructing the outcome from current state
+    ///     (for a money-touching message that would mean re-deriving a
+    ///     refund amount instead of replaying what's already recorded).
+    ///     Cadence/cooldown are the caller's job (see each module's own
+    ///     OutboxRelayJob); this only picks candidates. ClaimAndDispatchAsync
+    ///     does the actual per-row claim and clears DeadLetteredAt
+    ///     atomically with the rest of the outcome.
     /// </summary>
     public async Task SweepDeadLetteredAsync(int batchSize, TimeSpan cooldown, CancellationToken cancellationToken)
     {
@@ -177,94 +147,62 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
 
     /// <summary>
     ///     The actual claim-and-process step every dispatch path funnels
-    ///     through. One transaction per row, held only for as long as that
-    ///     row's own processing takes - not one transaction for a whole
-    ///     batch, which would hold many rows' locks for the batch's entire
-    ///     wall-clock time and roll back already-succeeded dispatches (whose
-    ///     real side effects, e.g. an actual ReleaseHoldAsync call elsewhere,
-    ///     already happened and can't be undone by rolling back this table's
-    ///     own row) if a later row in the same batch failed unexpectedly.
+    ///     through. One transaction per row, not per batch - a batch-wide
+    ///     transaction would hold every row's lock for the whole batch and
+    ///     roll back already-succeeded dispatches (whose real side effects,
+    ///     e.g. an actual ReleaseHoldAsync call, can't be undone by rolling
+    ///     back this table's own row) if a later row failed.
     ///     <para>
-    ///         retryingDeadLetter distinguishes DispatchPendingAsync's normal
-    ///         claims from SweepDeadLetteredAsync's retries: a normal claim
-    ///         must not touch a row that's actually dead-lettered (or the
-    ///         fast retry loop would fight the sweep's own cooldown), and a
-    ///         retry must only touch a row that's still actually
-    ///         dead-lettered (it may have already been resolved - e.g. by a
-    ///         concurrent retry - between the caller's batch scan and this
-    ///         claim). DeadLetteredAt is cleared here, inside the lock,
-    ///         rather than by the scan that found the row - clearing it
-    ///         before the claim would let a second concurrent scan see the
-    ///         row as no-longer-dead-lettered and race a normal dispatch
-    ///         attempt against this same retry.
+    ///         retryingDeadLetter separates normal claims from sweep
+    ///         retries - a normal claim must skip an actually dead-lettered
+    ///         row (or it'd fight the sweep's cooldown), a retry must only
+    ///         touch one still dead-lettered (it may have resolved
+    ///         concurrently since the scan). DeadLetteredAt clears inside
+    ///         the lock, not by the scan that found the row, so a second
+    ///         concurrent scan can't see it as clear and race a normal
+    ///         dispatch against this retry.
     ///     </para>
     /// </summary>
     private async Task ClaimAndDispatchAsync(Guid id, bool retryingDeadLetter, CancellationToken cancellationToken)
     {
-        // Wrapped in the configured execution strategy, not a bare
-        // BeginTransactionAsync - ConfigureStayStackDefaults enables
-        // Npgsql's retry-on-failure (transient errors like deadlocks/
-        // serialization failures get retried), and a resilient execution
-        // strategy refuses a manually-opened transaction it didn't create
-        // itself (EF Core throws "does not support user-initiated
-        // transactions" otherwise) since it can't safely retry only part of
-        // one. CreateExecutionStrategy().ExecuteAsync re-runs this entire
-        // delegate - including the claim query and TryHandleAsync - from
-        // the start on a transient failure, which is safe precisely because
-        // every *transactional* write here is already required to be
-        // idempotent (ADR-0003) for the ordinary relay-retry case anyway,
-        // and each retry re-reads `claimed` fresh (the previous attempt's
-        // in-memory changes were never committed).
+        // Wrapped in the execution strategy, not a bare BeginTransactionAsync -
+        // Npgsql's retry-on-failure is enabled, and a resilient strategy
+        // throws on a manually-opened transaction it didn't create itself.
+        // This re-runs the whole delegate, including the claim query and
+        // TryHandleAsync, on a transient failure - safe because every
+        // transactional write here must already be idempotent (ADR-0003),
+        // and ChangeTracker.Clear() below guarantees each retry re-reads
+        // fresh instead of stale in-memory state.
         //
-        // The one thing that ISN'T safe to leave inside this delegate: a
-        // non-transactional side effect. OutboxTelemetry.DeadLettered.Add
-        // and the dead-letter log line are process-local, not part of the
-        // DB transaction - a rolled-back-and-retried attempt would fire
-        // them again for what's really one logical dispatch, the same
-        // "rate instead of a count" problem SweepDeadLetteredAsync's own
-        // repeated retries have (see wasAlreadyDeadLettered below), just at
-        // the execution-strategy layer instead of the sweep-loop layer.
-        // Both are deferred until after ExecuteAsync actually returns -
-        // guaranteed to only ever happen once per successful commit.
-        // OnDeadLetteredAsync stays inside, deliberately: its own writes
-        // (see TransactionsOutboxDispatcher's override) need to commit
-        // atomically with the rest of this row's outcome, and it's already
-        // required to be idempotent the same way TryHandleAsync is, so
-        // re-running it across a transactional retry is safe by the same
-        // reasoning as the rest of this delegate.
+        // OutboxTelemetry.DeadLettered.Add and the dead-letter log
+        // deliberately stay OUTSIDE this delegate - they're process-local,
+        // not part of the DB transaction, so a retried attempt would
+        // double-fire them for one logical dispatch. Deferred until after
+        // ExecuteAsync returns, so they fire only once per committed
+        // outcome. OnDeadLetteredAsync stays inside: its own writes need to
+        // commit atomically with the row, and it's required to be
+        // idempotent the same way TryHandleAsync is.
         IExecutionStrategy strategy = DbContext.Database.CreateExecutionStrategy();
 
         (OutboxMessage? claimed, bool justDeadLettered) = await strategy.ExecuteAsync(async () =>
         {
-            // First line of every attempt, including retries - a rolled-back
-            // DB transaction does not undo this DbContext's in-memory change
-            // tracking, and EF's identity resolution means the query below
-            // would otherwise hand back whatever entity a *previous*,
-            // rolled-back attempt already mutated (e.g. still showing
-            // ProcessedAt set) instead of the row's real, current database
-            // state. Without this, a transient failure that happens after
-            // `candidate` was mutated but before the commit lands makes the
-            // very next attempt misread its own stale in-memory write as
-            // "already processed by someone else" and bail out - the row
-            // never actually gets marked processed, and the next relay poll
-            // dispatches it again for real. Same pattern already used in
-            // ConfirmBookingHandler/BecomeHostHandler's own compensating
-            // paths.
+            // Retries reuse this DbContext - a rolled-back transaction
+            // doesn't undo EF's tracking, so without this, a retry's claim
+            // query returns the same entity a prior failed attempt already
+            // mutated (e.g. ProcessedAt set) via identity resolution,
+            // misreading it as claimed elsewhere and never actually
+            // processing the row.
             DbContext.ChangeTracker.Clear();
 
             await using IDbContextTransaction transaction = await DbContext.Database.BeginTransactionAsync(cancellationToken);
 
-            // FOR UPDATE SKIP LOCKED is Postgres syntax - Sqlite (what the
-            // unit test suite runs the surrounding handlers against, since
-            // those tests exercise handler/pricing/compensation logic that
-            // has nothing to do with this locking mechanism itself) doesn't
-            // parse it. Real claim-locking only applies against the real
-            // provider; the plain fallback still re-reads and re-validates
-            // the row (nothing here skips the ProcessedAt/DeadLetteredAt
-            // checks below), it just can't provide the cross-process mutual
-            // exclusion SKIP LOCKED does. Proven against real Postgres by
-            // OutboxDispatcherConcurrencyTests, not by anything running
-            // under Sqlite.
+            // FOR UPDATE SKIP LOCKED is Postgres syntax - Sqlite (what unit
+            // tests run the surrounding handlers against, since those
+            // exercise pricing/compensation logic unrelated to this
+            // locking) doesn't parse it. The plain fallback still re-reads
+            // and re-validates the row, it just can't provide SKIP LOCKED's
+            // cross-process exclusion - proven separately by
+            // OutboxDispatcherConcurrencyTests against real Postgres.
             bool supportsSkipLocked = DbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL";
 
             OutboxMessage? candidate = supportsSkipLocked
@@ -273,12 +211,11 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
 
             if (candidate is null || candidate.ProcessedAt is not null || (candidate.DeadLetteredAt is not null) != retryingDeadLetter)
             {
-                // Either SKIP LOCKED skipped it (another claim already
-                // holds this row's lock right now), or it's already
-                // resolved, or it's dead-lettered/not-dead-lettered in a
-                // way that doesn't match what this caller is here to do.
-                // No lock was meaningfully taken - the transaction below
-                // just rolls back on dispose.
+                // Either SKIP LOCKED skipped an already-locked row, it's
+                // already resolved, or its dead-lettered state doesn't
+                // match what this caller is here to do. No lock was
+                // meaningfully taken - the transaction rolls back on
+                // dispose.
                 return ((OutboxMessage?)null, false);
             }
 
@@ -309,14 +246,11 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
             }
             else
             {
-                // Captured before the increment: SweepDeadLetteredAsync
-                // clears DeadLetteredAt before retrying (see its own doc
-                // comment), so a renewed failure here re-crosses the
-                // MaxAttempts threshold every single sweep, forever, for a
-                // message that's genuinely stuck - Attempts is never reset,
-                // so without this check the telemetry/hook below would fire
-                // on every hourly retry, not just the first time this row
-                // actually became dead-lettered.
+                // Captured before the increment - SweepDeadLetteredAsync
+                // clears DeadLetteredAt before retrying, so a stuck message
+                // re-crosses MaxAttempts every sweep. Attempts is never
+                // reset, so without this the telemetry/hook below would
+                // fire every retry, not just the first time.
                 bool wasAlreadyDeadLettered = candidate.Attempts >= MaxAttempts;
                 candidate.Attempts++;
 
@@ -327,10 +261,9 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
 
                     if (becameDeadLettered)
                     {
-                        // Idempotent and transactional (see this method's
-                        // own doc comment for why it's safe to leave inside
-                        // the retried delegate, unlike the telemetry/log
-                        // deferred below).
+                        // Idempotent and transactional - safe inside the
+                        // retried delegate, unlike the telemetry/log
+                        // deferred below.
                         await OnDeadLetteredAsync(candidate, cancellationToken);
                     }
                 }
@@ -341,18 +274,12 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
                 }
             }
 
-            // Idempotent to re-run even if this itself fails mid-way (e.g.
-            // the process dies between TryHandleAsync succeeding and this
-            // commit) - the underlying action is already documented
-            // idempotent (ADR-0003), so a later claim re-dispatching this
-            // same row is safe, just a harmless repeat. The transaction
-            // rolling back on an unhandled failure here (a real
-            // SaveChangesAsync/commit error, not TryHandleAsync's own
-            // already-caught exceptions) leaves the row exactly as it was
-            // before this attempt - Attempts not incremented, nothing
-            // lost, just retried again later (or, under the execution
-            // strategy, retried again immediately from the top of this
-            // same delegate).
+            // Safe to re-run even if this fails mid-way (e.g. the process
+            // dies between TryHandleAsync succeeding and this commit) - the
+            // underlying action is already required to be idempotent
+            // (ADR-0003), so a later re-dispatch of the same row is a
+            // harmless repeat. An unhandled failure here rolls the
+            // transaction back, leaving the row exactly as it was.
             await DbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
@@ -361,9 +288,9 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
 
         if (claimed is not null && justDeadLettered)
         {
-            // Only reached once the transaction above has actually
-            // committed - see this method's own doc comment for why these
-            // two specifically can't live inside the retried delegate.
+            // Only reached after the transaction above actually commits -
+            // see the execution-strategy comment above for why these two
+            // can't live inside the retried delegate.
             OutboxTelemetry.DeadLettered.Add(
                 1,
                 new KeyValuePair<string, object?>("module", ModuleName),
@@ -406,16 +333,13 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
     protected virtual Task OnDeadLetteredAsync(OutboxMessage message, CancellationToken cancellationToken) =>
         Task.CompletedTask;
 
-    // Past tense, deliberately - not a claim about the row's current state.
-    // A module's own OnDeadLetteredAsync override (see
-    // TransactionsOutboxDispatcher's) can resolve the row further in the
-    // same commit this log is reporting on - e.g. compensating and then
-    // setting ProcessedAt/clearing DeadLetteredAt again, so it no longer
-    // matches a `WHERE dead_lettered_at IS NOT NULL` query at all by the
-    // time anyone reads this line next to the table. "is dead-lettered"
-    // would flatly contradict what's actually in the row at that point;
-    // "was dead-lettered" just records that this dispatch attempt crossed
-    // the retry threshold, true regardless of what happened afterward.
+    // Past tense, deliberately - not a claim about current row state. A
+    // module's OnDeadLetteredAsync override (see TransactionsOutboxDispatcher)
+    // can resolve the row further in the same commit, e.g. setting
+    // ProcessedAt and clearing DeadLetteredAt again - "is dead-lettered"
+    // would then contradict the row by the time anyone reads this next to
+    // the table; "was dead-lettered" just records that this attempt crossed
+    // the retry threshold.
     [LoggerMessage(LogLevel.Error,
         "Outbox message {MessageId} ({MessageType}, module {Module}) was dead-lettered after {Attempts} attempts. Last error: {LastError}")]
     private static partial void LogDeadLettered(ILogger logger, string module, string messageType, Guid messageId, int attempts, string? lastError);

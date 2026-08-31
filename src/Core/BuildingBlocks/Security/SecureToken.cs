@@ -3,17 +3,14 @@ using System.Text;
 namespace BuildingBlocks.Security;
 
 /// <summary>
-///     The generate-a-random-opaque-token-and-hash-it primitive shared by
-///     every "issue a bearer credential, persist only its hash, look it up
-///     by re-hashing an incoming value" flow in this app - originally
-///     inlined in Identity's AuthTokenProvider (refresh tokens) before
-///     Bookings' guest booking-management token needed the exact same two
-///     operations. Deliberately just these two operations, not a "token
-///     service" - what each caller does around them (rotation/family/reuse
-///     detection for refresh tokens vs. a single long-lived reusable token
-///     for booking management) differs enough that forcing it into one
-///     shared abstraction would need to be configurable for behaviors most
-///     callers don't want, rather than actually shared.
+///     The generate-a-random-token-and-hash-it primitive shared by every
+///     "issue a bearer credential, persist only its hash, re-hash an
+///     incoming value to look it up" flow (refresh tokens, guest
+///     booking-management tokens). Deliberately just these two operations,
+///     not a "token service" - what each caller does around them
+///     (rotation/reuse detection vs. a single long-lived token) differs
+///     enough that a shared abstraction would need to be configurable for
+///     behavior most callers don't want.
 /// </summary>
 public static class SecureToken
 {

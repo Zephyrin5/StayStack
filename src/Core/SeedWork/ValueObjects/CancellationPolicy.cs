@@ -2,15 +2,11 @@ using Ardalis.GuardClauses;
 using System.Collections.ObjectModel;
 namespace SeedWork.ValueObjects;
 
-// A ladder of CancellationTier rungs, not a named preset enum (Flexible/
-// Moderate/Strict/...) - the whole point is that every common real-world
-// shape (fully flexible, non-refundable, free-until-a-date,
-// graduated/Moderate-style) is just data on this one structure, not a
-// hardcoded case a future policy shape would need a new enum member for.
-// One current value per Unit (like BasePrice/Currency), replaced wholesale
-// on update - not a variable set of co-existing host-authored rules the way
-// PricingRule is, so this stays a plain value object rather than an
-// Entity/aggregate root of its own.
+// A ladder of CancellationTier rungs, not a preset enum - every real-world
+// shape (flexible, non-refundable, graduated) is just data here, not a
+// hardcoded case needing a new enum member. One current value per Unit,
+// replaced wholesale on update - not host-authored co-existing rules like
+// PricingRule, so this stays a value object rather than an aggregate root.
 public sealed class CancellationPolicy : IEquatable<CancellationPolicy>
 {
     private readonly ReadOnlyCollection<CancellationTier> _tiers;
@@ -22,13 +18,10 @@ public sealed class CancellationPolicy : IEquatable<CancellationPolicy>
 
     public IReadOnlyList<CancellationTier> Tiers => _tiers;
 
-    // Airbnb-"Moderate"-shaped: full refund 5+ days out, half back inside
-    // that window, nothing inside 24 hours. Applied automatically to every
-    // new Unit and to any historical Booking whose snapshot predates this
-    // feature (see Booking.CancellationPolicy) - a host who never touches
-    // this setting shouldn't silently end up fully flexible (surprising to
-    // the host) or non-refundable (surprising, and arguably unfair, to the
-    // guest).
+    // Airbnb-"Moderate"-shaped: full refund 5+ days out, half inside that
+    // window, nothing inside 24 hours. Applied to every new Unit and any
+    // historical Booking predating this feature - a host who never touches
+    // this shouldn't silently end up fully flexible or non-refundable.
     public static CancellationPolicy CreateDefault() =>
         Create([
             new CancellationTier(5, 100m),
@@ -73,20 +66,15 @@ public sealed class CancellationPolicy : IEquatable<CancellationPolicy>
 
     public static CancellationPolicy Restore(IReadOnlyList<CancellationTier> tiers) => new CancellationPolicy(tiers);
 
-    // daysBeforeCheckIn is the caller's responsibility to floor at 0 (a
-    // cancellation on or after check-in day itself lands on the same
-    // strictest tier as one made the moment check-in starts, not an
-    // undefined negative one) - this method only guards against receiving
-    // a negative value outright, it doesn't reinterpret one.
+    // daysBeforeCheckIn is the caller's job to floor at 0 - this only
+    // guards against a negative value, it doesn't reinterpret one.
     public decimal ResolveRefundPercent(int daysBeforeCheckIn)
     {
         Guard.Against.Negative(daysBeforeCheckIn);
 
         // Not assuming stored order - Create sorts descending, but Restore
-        // (materializing whatever order the jsonb column happens to
-        // deserialize in) doesn't. The applicable tier is whichever
-        // satisfied threshold is closest to daysBeforeCheckIn, i.e. the
-        // largest MinDaysBeforeCheckIn among tiers that still qualify.
+        // (jsonb deserialization order) doesn't. The applicable tier is the
+        // largest MinDaysBeforeCheckIn that still qualifies.
         return _tiers
             .Where(t => t.MinDaysBeforeCheckIn <= daysBeforeCheckIn)
             .OrderByDescending(t => t.MinDaysBeforeCheckIn)

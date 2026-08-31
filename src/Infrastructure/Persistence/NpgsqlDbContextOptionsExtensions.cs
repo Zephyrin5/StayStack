@@ -5,24 +5,18 @@ public static class NpgsqlDbContextOptionsExtensions
 {
     /// <summary>
     ///     Every module's ServicesRegistration calls this instead of
-    ///     repeating UseNpgsql/UseSnakeCaseNamingConvention/sensitive
-    ///     logging by hand. moduleName becomes part of the migrations
-    ///     history table name so each module's migration history stays
-    ///     independent even though they share one physical database - see
-    ///     the earlier note on why that matters once two DbContexts target
-    ///     the same connection string.
+    ///     repeating UseNpgsql/UseSnakeCaseNamingConvention/sensitive logging
+    ///     by hand. moduleName becomes part of the migrations history table
+    ///     name so each module's history stays independent despite sharing
+    ///     one physical database.
     ///     <para>
-    ///         Pool sizing: every module's ServicesRegistration resolves the
-    ///         same literal "AppConnection" string and passes it here
-    ///         unmodified (no per-module Application Name/search_path). Npgsql
-    ///         pools connections by exact connection-string text at the driver
-    ///         level, so this is one shared pool (Npgsql's default Maximum
-    ///         Pool Size=100) across every DbContext in the app, not one pool
-    ///         per module - do not "fix" this by giving each module a
-    ///         distinguishing connection-string param, that would multiply the
-    ///         total connection count instead of sharing it. Tune pool size,
-    ///         if it's ever needed, via "Maximum Pool Size=N" on the
-    ///         AppConnection secret itself.
+    ///         Pool sizing: every module resolves the same literal
+    ///         "AppConnection" string unmodified, so Npgsql pools all of them
+    ///         together (default Maximum Pool Size=100) as one shared pool,
+    ///         not one per module. Don't "fix" this with a per-module
+    ///         distinguishing connection-string param - that multiplies the
+    ///         connection count instead of sharing it. Tune pool size via
+    ///         "Maximum Pool Size=N" on the AppConnection secret itself.
     ///     </para>
     /// </summary>
     public static void ConfigureStayStackDefaults(
@@ -34,33 +28,25 @@ public static class NpgsqlDbContextOptionsExtensions
     {
         builder.UseNpgsql(connectionString, npgsql =>
         {
-            // EF Core resolves migrations from the DbContext's assembly by
-            // default. Keeping that default avoids runtime assembly-name
-            // lookup while preserving one migration set per module - except
-            // for Jobs (TickerQDbContext), whose DbContext type is declared
-            // inside the TickerQ.EntityFrameworkCore package itself rather
-            // than a project this solution owns, so it has to name its
-            // migrations assembly explicitly instead.
+            // EF Core resolves migrations from the DbContext's own assembly
+            // by default, giving one migration set per module for free -
+            // except Jobs (TickerQDbContext), whose DbContext lives in the
+            // TickerQ.EntityFrameworkCore package itself, so it has to name
+            // its migrations assembly explicitly.
             npgsql.MigrationsHistoryTable($"__ef_migrations_history_{moduleName}");
 
-            // Npgsql's own transient-error classification doesn't include
-            // 40P01 (deadlock_detected) by default - confirmed against a
-            // real deadlock HoldAvailabilityConcurrencyTests reproduced
-            // under genuine 10-way concurrent contention on the same
-            // range, which this alone doesn't fix (see
+            // Npgsql doesn't classify 40P01 (deadlock_detected) as transient
+            // by default - confirmed against a real deadlock
+            // HoldAvailabilityConcurrencyTests reproduced under 10-way
+            // concurrent contention (this only makes it retriable;
             // HoldAvailabilityHandler's own CreateExecutionStrategy wrap
-            // for the other half: this only makes the error retriable,
-            // something still has to actually invoke the retry loop).
-            // 40001 (serialization_failure) added alongside it for the same
-            // reason, once CreatePricingRuleHandler started wrapping its
-            // check-then-insert in an IsolationLevel.Serializable
-            // transaction (see docs/adr/0012) - without it, a genuine
-            // concurrent conflict there would surface as an unhandled 500
-            // instead of retrying, the opposite of what Serializable was
-            // added for. This widens retry semantics for every DbContext in
-            // the app, not just that one path - accepted, since a
-            // serialization failure is retriable by definition everywhere
-            // it can occur.
+            // actually invokes the retry). 40001 (serialization_failure)
+            // added alongside it once CreatePricingRuleHandler started using
+            // IsolationLevel.Serializable (docs/adr/0012) - without it, a
+            // genuine conflict there would surface as an unhandled 500
+            // instead of retrying. Widens retry semantics for every
+            // DbContext, accepted since a serialization failure is
+            // retriable by definition everywhere it occurs.
             npgsql.EnableRetryOnFailure(
                 maxRetryCount: 6,
                 maxRetryDelay: TimeSpan.FromSeconds(30),

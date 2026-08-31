@@ -45,16 +45,13 @@ public static class ModelBuilderExtensions
 
     /// <summary>
     ///     Maps a Money-typed complex property onto the same two plain
-    ///     columns every money field used before Money existed - no
-    ///     OwnsOne, no JSONB collapse (unlike LocalizedText/CancellationPolicy,
-    ///     the only other converted-type precedents in this codebase), just
-    ///     EF Core 10's native ComplexProperty support pinned to explicit
-    ///     column names so introducing Money is a type-only change against
-    ///     already-existing columns wherever the names match. numeric(12,3)
-    ///     everywhere - scale 3 covers every currency this app supports
-    ///     (KWD needs it) without truncation, and one shared width means
-    ///     every money column agrees rather than each entity's config
-    ///     picking its own precision by hand. See docs/adr/0015.
+    ///     columns every money field used before Money existed - EF Core
+    ///     10's native ComplexProperty (not OwnsOne/JSONB, unlike
+    ///     LocalizedText/CancellationPolicy) pinned to explicit column
+    ///     names, so introducing Money is a type-only change. numeric(12,3)
+    ///     everywhere - scale 3 covers every supported currency (KWD needs
+    ///     it) without truncation, and one shared width keeps every money
+    ///     column consistent. See docs/adr/0015.
     /// </summary>
     public static void ConfigureMoney(
         this ComplexPropertyBuilder<Money> builder,

@@ -1,12 +1,11 @@
 namespace Outbox;
 
 /// <summary>
-///     A durable record of "please eventually do X in another module",
-///     written atomically (same SaveChangesAsync call) alongside whatever
-///     local write it follows from - see docs/adr/0003. Not Entity-derived:
-///     this is a delivery mechanism, not a domain concept, so the
-///     CreatedBy/ModifiedBy/Status audit shape Entity carries for every
-///     business aggregate doesn't apply here.
+///     A durable "please eventually do X in another module" record, written
+///     atomically alongside whatever local write it follows from - see
+///     docs/adr/0003. Not Entity-derived: a delivery mechanism, not a
+///     domain concept, so Entity's CreatedBy/ModifiedBy/Status audit shape
+///     doesn't apply.
 /// </summary>
 public class OutboxMessage
 {
@@ -32,9 +31,7 @@ public class OutboxMessage
     public string? LastError { get; set; }
 
     // Set once Attempts reaches OutboxDispatcherBase.MaxAttempts. Not
-    // auto-recovered - the same accepted-risk-window shape ADR-0003 already
-    // documents for ReconcileOrphanedBookedHoldsJob's own lookback cap. See
-    // ADR-0003's Consequences for what's actually stuck behind each message
-    // type once this is set.
+    // auto-recovered - see ADR-0003's Consequences for what's stuck behind
+    // each message type once this is set.
     public DateTimeOffset? DeadLetteredAt { get; set; }
 }

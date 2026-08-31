@@ -2,12 +2,11 @@ using System.Diagnostics.Metrics;
 namespace Outbox;
 
 /// <summary>
-///     Mirrors BuildingBlocks.Observability.CommandTelemetry's shape - one
-///     shared Meter, registered once with the OTel SDK, picked up
-///     automatically by every module's dispatcher rather than each module
-///     wiring its own. The counter below is what's actually alertable in
-///     production; the Error-level log OutboxDispatcherBase also emits on
-///     dead-letter is the human-readable companion, not a substitute.
+///     Mirrors CommandTelemetry's shape - one shared Meter, registered once
+///     with the OTel SDK, picked up automatically by every module's
+///     dispatcher. The counter below is what's alertable in production; the
+///     Error-level log OutboxDispatcherBase emits on dead-letter is its
+///     human-readable companion.
 /// </summary>
 public static class OutboxTelemetry
 {
