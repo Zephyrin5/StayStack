@@ -100,6 +100,17 @@ public class GetPropertiesHandler(
             // resolve capacity-matching candidate unit ids first, then ask
             // Availability which of those have a blocking hold/booking for
             // the requested dates.
+            //
+            // Unbounded by anything other than how many units match Guests -
+            // fine at this app's current scale (see docs/adr/0004's
+            // Consequences for the round-trip cost this was already weighed
+            // against), but there's no cap here the way
+            // ReconcileOrphanedBookedHoldsJob's own candidate query has one
+            // (MaxResultsPerRun). A city/property-type-agnostic Guests-only
+            // search against tens of thousands of units would send an
+            // equally large id array to Availability and build an equally
+            // large IN/ANY clause here - not urgent today, worth a cap if
+            // this app's unit count ever gets there.
             List<Guid> candidateUnitIds = await matchingUnitsQuery
                 .Select(u => u.Id)
                 .ToListAsync(cancellationToken);
