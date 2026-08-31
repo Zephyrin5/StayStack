@@ -5,16 +5,15 @@ using Mediator;
 using Promotions.Features;
 using Promotions.Features.ListMyPromotions;
 
-namespace Api.Endpoints.Catalog;
+namespace Api.Endpoints.Promotions;
 
 public class ListMyPromotionsEndpoint(IMediator mediator) : Endpoint<ListMyPromotionsRequest, PagedResponse<PromotionSummary>>
 {
     public override void Configure()
     {
-        Get("promotions/mine");
+        Get("mine");
         Policies(AuthorizationPolicies.Host);
-        Group<CatalogGroup>();
-        Description(b => b.WithTags("Promotions"));
+        Group<PromotionsGroup>();
 
         Summary(s =>
         {

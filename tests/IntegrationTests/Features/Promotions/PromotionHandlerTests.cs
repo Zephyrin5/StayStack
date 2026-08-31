@@ -93,7 +93,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         decimal discountValue = 10m, Currency? currency = null)
     {
         HttpResponseMessage response = await _client.SendAsync(
-            Authorized(HttpMethod.Post, "/api/catalog/promotions", hostAccessToken, new CreatePromotionRequest
+            Authorized(HttpMethod.Post, "/api/promotions", hostAccessToken, new CreatePromotionRequest
             {
                 Code = code ?? _faker.Random.AlphaNumeric(10).ToUpperInvariant(),
                 DiscountType = discountType,
@@ -130,7 +130,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         (_, string hostToken) = await SeedHostUserAsync();
 
         HttpResponseMessage response = await _client.SendAsync(
-            Authorized(HttpMethod.Post, "/api/catalog/promotions", hostToken, new CreatePromotionRequest
+            Authorized(HttpMethod.Post, "/api/promotions", hostToken, new CreatePromotionRequest
             {
                 Code = "  summer26  ",
                 DiscountType = PromotionDiscountType.Percentage,
@@ -155,7 +155,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         await CreateHostPromotionAsync(hostToken, code);
 
         HttpResponseMessage response = await _client.SendAsync(
-            Authorized(HttpMethod.Post, "/api/catalog/promotions", hostToken, new CreatePromotionRequest
+            Authorized(HttpMethod.Post, "/api/promotions", hostToken, new CreatePromotionRequest
             {
                 Code = code,
                 DiscountType = PromotionDiscountType.Percentage,
@@ -172,7 +172,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         (_, string hostToken) = await SeedHostUserAsync();
 
         HttpResponseMessage response = await _client.SendAsync(
-            Authorized(HttpMethod.Post, "/api/catalog/promotions", hostToken, new CreatePromotionRequest
+            Authorized(HttpMethod.Post, "/api/promotions", hostToken, new CreatePromotionRequest
             {
                 Code = _faker.Random.AlphaNumeric(10).ToUpperInvariant(),
                 DiscountType = PromotionDiscountType.FixedAmount,
@@ -189,7 +189,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         string adminToken = await SignInAsSeededAdminAsync();
 
         HttpResponseMessage response = await _client.SendAsync(
-            Authorized(HttpMethod.Post, "/api/catalog/promotions/admin", adminToken, new AdminCreatePromotionRequest
+            Authorized(HttpMethod.Post, "/api/promotions/admin", adminToken, new AdminCreatePromotionRequest
             {
                 HostId = null,
                 Code = _faker.Random.AlphaNumeric(10).ToUpperInvariant(),
@@ -214,7 +214,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         string adminToken = await SignInAsSeededAdminAsync();
 
         HttpResponseMessage response = await _client.SendAsync(
-            Authorized(HttpMethod.Post, "/api/catalog/promotions/admin", adminToken, new AdminCreatePromotionRequest
+            Authorized(HttpMethod.Post, "/api/promotions/admin", adminToken, new AdminCreatePromotionRequest
             {
                 HostId = Guid.NewGuid(),
                 Code = _faker.Random.AlphaNumeric(10).ToUpperInvariant(),
@@ -233,7 +233,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         CreatePromotionResponse created = await CreateHostPromotionAsync(hostToken, discountValue: 10m);
 
         HttpResponseMessage response = await _client.SendAsync(
-            Authorized(HttpMethod.Put, $"/api/catalog/promotions/{created.PromotionId}", hostToken, new UpdatePromotionRequest
+            Authorized(HttpMethod.Put, $"/api/promotions/{created.PromotionId}", hostToken, new UpdatePromotionRequest
             {
                 PromotionId = created.PromotionId,
                 DiscountValue = 25m,
@@ -258,7 +258,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         CreatePromotionResponse created = await CreateHostPromotionAsync(ownerToken);
 
         HttpResponseMessage response = await _client.SendAsync(
-            Authorized(HttpMethod.Put, $"/api/catalog/promotions/{created.PromotionId}", otherHostToken, new UpdatePromotionRequest
+            Authorized(HttpMethod.Put, $"/api/promotions/{created.PromotionId}", otherHostToken, new UpdatePromotionRequest
             {
                 PromotionId = created.PromotionId,
                 DiscountValue = 99m
@@ -275,7 +275,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         (_, string hostToken) = await SeedHostUserAsync();
 
         HttpResponseMessage createResponse = await _client.SendAsync(
-            Authorized(HttpMethod.Post, "/api/catalog/promotions/admin", adminToken, new AdminCreatePromotionRequest
+            Authorized(HttpMethod.Post, "/api/promotions/admin", adminToken, new AdminCreatePromotionRequest
             {
                 HostId = null,
                 Code = _faker.Random.AlphaNumeric(10).ToUpperInvariant(),
@@ -287,7 +287,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(created);
 
         HttpResponseMessage response = await _client.SendAsync(
-            Authorized(HttpMethod.Put, $"/api/catalog/promotions/{created.PromotionId}", hostToken, new UpdatePromotionRequest
+            Authorized(HttpMethod.Put, $"/api/promotions/{created.PromotionId}", hostToken, new UpdatePromotionRequest
             {
                 PromotionId = created.PromotionId,
                 DiscountValue = 99m
@@ -304,7 +304,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         CreatePromotionResponse created = await CreateHostPromotionAsync(hostToken);
 
         HttpResponseMessage deleteResponse = await _client.SendAsync(
-            Authorized(HttpMethod.Delete, $"/api/catalog/promotions/{created.PromotionId}", hostToken),
+            Authorized(HttpMethod.Delete, $"/api/promotions/{created.PromotionId}", hostToken),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
 
@@ -315,7 +315,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(EntityStatus.Archived, archived.Status);
 
         HttpResponseMessage listResponse = await _client.SendAsync(
-            Authorized(HttpMethod.Get, "/api/catalog/promotions/mine", hostToken),
+            Authorized(HttpMethod.Get, "/api/promotions/mine", hostToken),
             TestContext.Current.CancellationToken);
         PagedResponse<PromotionSummary>? listResult =
             await listResponse.Content.ReadFromJsonAsync<PagedResponse<PromotionSummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
@@ -336,7 +336,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         CreatePromotionResponse original = await CreateHostPromotionAsync(hostToken, code);
 
         HttpResponseMessage deleteResponse = await _client.SendAsync(
-            Authorized(HttpMethod.Delete, $"/api/catalog/promotions/{original.PromotionId}", hostToken),
+            Authorized(HttpMethod.Delete, $"/api/promotions/{original.PromotionId}", hostToken),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
 
@@ -352,7 +352,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         CreatePromotionResponse created = await CreateHostPromotionAsync(ownerToken);
 
         HttpResponseMessage response = await _client.SendAsync(
-            Authorized(HttpMethod.Delete, $"/api/catalog/promotions/{created.PromotionId}", otherHostToken),
+            Authorized(HttpMethod.Delete, $"/api/promotions/{created.PromotionId}", otherHostToken),
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -367,7 +367,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         CreatePromotionResponse mine = await CreateHostPromotionAsync(hostToken);
         await CreateHostPromotionAsync(otherHostToken);
         await _client.SendAsync(
-            Authorized(HttpMethod.Post, "/api/catalog/promotions/admin", adminToken, new AdminCreatePromotionRequest
+            Authorized(HttpMethod.Post, "/api/promotions/admin", adminToken, new AdminCreatePromotionRequest
             {
                 HostId = null,
                 Code = _faker.Random.AlphaNumeric(10).ToUpperInvariant(),
@@ -377,7 +377,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
             TestContext.Current.CancellationToken);
 
         HttpResponseMessage response = await _client.SendAsync(
-            Authorized(HttpMethod.Get, "/api/catalog/promotions/mine", hostToken),
+            Authorized(HttpMethod.Get, "/api/promotions/mine", hostToken),
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

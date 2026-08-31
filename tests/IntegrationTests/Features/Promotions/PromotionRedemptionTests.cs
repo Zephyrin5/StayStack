@@ -180,7 +180,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         decimal discountValue = 20m, Currency? currency = null, int? maxRedemptions = null, DateTimeOffset? expiresAt = null)
     {
         HttpResponseMessage response = await _client.SendAsync(
-            Authorized(HttpMethod.Post, "/api/catalog/promotions", accessToken, new CreatePromotionRequest
+            Authorized(HttpMethod.Post, "/api/promotions", accessToken, new CreatePromotionRequest
             {
                 Code = code ?? _faker.Random.AlphaNumeric(10).ToUpperInvariant(),
                 DiscountType = discountType,
@@ -198,7 +198,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
 
     private async Task<Guid> HoldUnitAsync(Guid unitId, DateOnly checkIn, DateOnly checkOut, HttpClient? client = null)
     {
-        HttpResponseMessage response = await (client ?? _client).PostAsJsonAsync("/api/catalog/holds", new HoldAvailabilityRequest
+        HttpResponseMessage response = await (client ?? _client).PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
         {
             UnitId = unitId,
             CheckIn = checkIn,

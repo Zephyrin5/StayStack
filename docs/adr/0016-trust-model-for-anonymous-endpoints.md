@@ -12,7 +12,7 @@ Fifteen endpoints call `AllowAnonymous()`. Some are obviously safe (public prope
 
 | Endpoint | What it does | Rate-limited? | Notes |
 |---|---|---|---|
-| `POST /catalog/holds` | Creates a hold (DB write) | Yes (`"holds"` policy) | Also: stay-length cap (90 nights), lead-time cap (730 days), 5-active-holds-per-session cap - see below. |
+| `POST /availability/holds` | Creates a hold (DB write) | Yes (`"holds"` policy) | Also: stay-length cap (90 nights), lead-time cap (730 days), 5-active-holds-per-session cap - see below. |
 | `POST /auth/sign-in`, `/auth/register`, `/auth/refresh-token` | Credential/token issuance | Yes (`"auth"` policy) | |
 | `POST /auth/sign-out` | Revokes a refresh token | No | Self-limiting by construction - only ever revokes a token the caller already possesses; there's nothing to abuse by calling it repeatedly with a token that isn't yours. |
 | `POST /bookings/{id}/cancel`, `GET /bookings/{id}/manage` | Booking management for guest checkout | Yes (`"auth"` policy) | Gated by a two-path ownership proof (matching `CustomerId`, or a valid management token) independent of the rate limit. |

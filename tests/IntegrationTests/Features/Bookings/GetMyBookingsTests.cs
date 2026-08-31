@@ -67,7 +67,7 @@ public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
     private async Task<Guid> HoldUnitAsync(Guid unitId)
     {
         DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
-        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/catalog/holds", new HoldAvailabilityRequest
+        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
         {
             UnitId = unitId,
             CheckIn = today,

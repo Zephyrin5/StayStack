@@ -4,7 +4,7 @@ using FastEndpoints;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-namespace Api.Endpoints.Catalog;
+namespace Api.Endpoints.Availability;
 
 public class HoldAvailabilityEndpoint(IMediator mediator, TimeProvider timeProvider)
     : Endpoint<HoldAvailabilityRequest, HoldAvailabilityResponse>
@@ -13,8 +13,7 @@ public class HoldAvailabilityEndpoint(IMediator mediator, TimeProvider timeProvi
     {
         Post("holds");
         AllowAnonymous();
-        Group<CatalogGroup>();
-        Description(b => b.WithTags("Availability"));
+        Group<AvailabilityGroup>();
         Options(x => x.RequireRateLimiting(ApiServicesRegistration.HoldRateLimitPolicy));
 
         Summary(s =>

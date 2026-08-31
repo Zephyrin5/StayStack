@@ -52,7 +52,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
     private async Task<Guid> HoldAndConfirmBookingAsync(Guid unitId)
     {
         DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
-        HttpResponseMessage holdResponse = await _client.PostAsJsonAsync("/api/catalog/holds", new HoldAvailabilityRequest
+        HttpResponseMessage holdResponse = await _client.PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
         {
             UnitId = unitId,
             CheckIn = today,

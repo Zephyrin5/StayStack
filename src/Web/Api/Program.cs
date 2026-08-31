@@ -136,7 +136,9 @@ builder.Services.OpenApiDocument(o =>
             document.Extensions["x-tagGroups"] = new JsonNodeExtension(JsonNode.Parse(
                 """
                 [
-                    { "name": "Catalog", "tags": ["Properties", "Units", "Pricing Rules", "Promotions", "Availability"] },
+                    { "name": "Catalog", "tags": ["Properties", "Units", "Pricing Rules"] },
+                    { "name": "Availability", "tags": ["Availability"] },
+                    { "name": "Promotions", "tags": ["Promotions"] },
                     { "name": "Hosts", "tags": ["Hosts"] },
                     { "name": "Bookings", "tags": ["Bookings"] },
                     { "name": "Transactions", "tags": ["Transactions"] },

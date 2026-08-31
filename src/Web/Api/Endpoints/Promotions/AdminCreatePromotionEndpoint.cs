@@ -6,9 +6,9 @@ using Promotions.Features.AdminCreatePromotion;
 using Promotions.Features.CreatePromotion;
 using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
-namespace Api.Endpoints.Catalog;
+namespace Api.Endpoints.Promotions;
 
-// Under CatalogGroup ("api/catalog"), not HostsGroup - unlike
+// Under PromotionsGroup ("api/promotions"), not HostsGroup - unlike
 // AdminCreatePropertyEndpoint's route, HostId here is an optional body
 // field rather than a route segment (a promotion doesn't always have an
 // owning host), so there's no host-scoped URL for this to naturally live
@@ -18,10 +18,9 @@ public class AdminCreatePromotionEndpoint(IMediator mediator)
 {
     public override void Configure()
     {
-        Post("promotions/admin");
+        Post("admin");
         Policies(AuthorizationPolicies.Administrator);
-        Group<CatalogGroup>();
-        Description(b => b.WithTags("Promotions"));
+        Group<PromotionsGroup>();
 
         Summary(s =>
         {

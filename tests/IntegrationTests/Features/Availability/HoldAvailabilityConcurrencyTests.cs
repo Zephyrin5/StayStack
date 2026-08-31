@@ -62,7 +62,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         Task<HttpResponseMessage>[] tasks =
         [
             .. Enumerable.Range(0, concurrentRequests)
-                .Select(_ => factory.CreateClient().PostAsJsonAsync("/api/catalog/holds", request, TestContext.Current.CancellationToken))
+                .Select(_ => factory.CreateClient().PostAsJsonAsync("/api/availability/holds", request, TestContext.Current.CancellationToken))
         ];
 
         HttpResponseMessage[] responses = await Task.WhenAll(tasks);
@@ -94,7 +94,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         Task<HttpResponseMessage>[] tasks =
         [
             .. Enumerable.Range(0, concurrentRequests)
-                .Select(i => factory.CreateClient().PostAsJsonAsync("/api/catalog/holds", new HoldAvailabilityRequest
+                .Select(i => factory.CreateClient().PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
                 {
                     UnitId = unit.Id,
                     CheckIn = today.AddDays(i),
@@ -153,9 +153,9 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         Task<HttpResponseMessage>[] tasks =
         [
             .. Enumerable.Range(0, concurrentRequestsPerRange)
-                .Select(_ => factory.CreateClient().PostAsJsonAsync("/api/catalog/holds", rangeA, TestContext.Current.CancellationToken)),
+                .Select(_ => factory.CreateClient().PostAsJsonAsync("/api/availability/holds", rangeA, TestContext.Current.CancellationToken)),
             .. Enumerable.Range(0, concurrentRequestsPerRange)
-                .Select(_ => factory.CreateClient().PostAsJsonAsync("/api/catalog/holds", rangeB, TestContext.Current.CancellationToken))
+                .Select(_ => factory.CreateClient().PostAsJsonAsync("/api/availability/holds", rangeB, TestContext.Current.CancellationToken))
         ];
 
         HttpResponseMessage[] responses = await Task.WhenAll(tasks);
@@ -194,7 +194,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         // slots) before any concurrent request fires - otherwise every
         // "concurrent" request below would race to mint its own fresh
         // token instead of sharing one, which would test nothing at all.
-        HttpResponseMessage warmUp = await client.PostAsJsonAsync("/api/catalog/holds", new HoldAvailabilityRequest
+        HttpResponseMessage warmUp = await client.PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
         {
             UnitId = units[0].Id,
             CheckIn = today,
@@ -205,7 +205,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
 
         Task<HttpResponseMessage>[] tasks =
         [
-            .. units.Skip(1).Select(unit => client.PostAsJsonAsync("/api/catalog/holds", new HoldAvailabilityRequest
+            .. units.Skip(1).Select(unit => client.PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
             {
                 UnitId = unit.Id,
                 CheckIn = today,

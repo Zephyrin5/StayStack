@@ -20,7 +20,7 @@ public class GetHostPromotionsEndpoint(IMediator mediator) : Endpoint<GetHostPro
         Summary(s =>
         {
             s.Summary = "List a specific host's promo codes (admin-only)";
-            s.Description = "The read counterpart to POST /api/catalog/promotions/admin - lets an " +
+            s.Description = "The read counterpart to POST /api/promotions/admin - lets an " +
                             "Administrator browse a host's portal the way that host would see it. " +
                             "Paginated - defaults to page 1, 20 per page.";
             s.Response<PagedResponse<PromotionSummary>>(200, "Promo codes returned.");

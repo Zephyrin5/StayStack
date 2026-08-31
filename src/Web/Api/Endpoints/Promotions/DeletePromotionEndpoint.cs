@@ -5,16 +5,15 @@ using Microsoft.AspNetCore.Mvc;
 using Promotions.Features.DeletePromotion;
 using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
-namespace Api.Endpoints.Catalog;
+namespace Api.Endpoints.Promotions;
 
 public class DeletePromotionEndpoint(IMediator mediator) : Endpoint<DeletePromotionRequest, DeletePromotionResponse>
 {
     public override void Configure()
     {
-        Delete("promotions/{PromotionId}");
+        Delete("{PromotionId}");
         Policies(AuthorizationPolicies.HostOrAdministrator);
-        Group<CatalogGroup>();
-        Description(b => b.WithTags("Promotions"));
+        Group<PromotionsGroup>();
 
         Summary(s =>
         {

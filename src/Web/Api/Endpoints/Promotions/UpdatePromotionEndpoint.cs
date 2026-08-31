@@ -5,16 +5,15 @@ using Microsoft.AspNetCore.Mvc;
 using Promotions.Features.UpdatePromotion;
 using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
-namespace Api.Endpoints.Catalog;
+namespace Api.Endpoints.Promotions;
 
 public class UpdatePromotionEndpoint(IMediator mediator) : Endpoint<UpdatePromotionRequest, UpdatePromotionResponse>
 {
     public override void Configure()
     {
-        Put("promotions/{PromotionId}");
+        Put("{PromotionId}");
         Policies(AuthorizationPolicies.HostOrAdministrator);
-        Group<CatalogGroup>();
-        Description(b => b.WithTags("Promotions"));
+        Group<PromotionsGroup>();
 
         Summary(s =>
         {

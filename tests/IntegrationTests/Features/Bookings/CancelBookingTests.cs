@@ -109,7 +109,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
 
     private async Task<Guid> HoldUnitAsync(Guid unitId, DateOnly checkIn, DateOnly checkOut)
     {
-        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/catalog/holds", new HoldAvailabilityRequest
+        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
         {
             UnitId = unitId,
             CheckIn = checkIn,
