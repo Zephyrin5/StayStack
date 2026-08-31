@@ -25,11 +25,11 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
         builder.HasIndex(t => t.BookingId, "ix_transactions_booking_id");
 
         // A Pending or Succeeded transaction is the "active" one for a
-        // booking - only one may exist at a time. Enforced here (not just
-        // in InitiateTransactionHandler's pre-check, which alone can't stop
-        // two concurrent requests from both passing it and both inserting -
-        // see the DbUpdateException catch in the handler that turns a
-        // violation of this index into TransactionAlreadyInProgressException).
+        // booking - only one may exist at a time. Enforced here, not just
+        // in InitiateTransactionHandler's pre-check, which alone can't
+        // stop two concurrent requests both passing it and both inserting -
+        // see the handler's DbUpdateException catch, which turns a
+        // violation of this index into TransactionAlreadyInProgressException.
         builder.HasIndex(t => t.BookingId, "ix_transactions_booking_id_active")
             .IsUnique()
             .HasDatabaseName("ix_transactions_booking_id_active")

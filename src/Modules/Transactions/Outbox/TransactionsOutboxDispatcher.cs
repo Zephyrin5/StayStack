@@ -46,26 +46,24 @@ public class TransactionsOutboxDispatcher(
 
     /// <summary>
     ///     ConfirmPaymentAsync throws NotFoundException if the booking
-    ///     doesn't exist - the realistic way this message type actually
-    ///     exhausts its retries, and not a transient condition more waiting
-    ///     fixes. Left unresolved, the transaction sits Succeeded and the
-    ///     booking sits Pending forever: money taken, nothing sold, with no
-    ///     automatic path back. Compensates the same way the inline
-    ///     !confirmed branch above does - full refund, since nothing is
-    ///     actually being held against a payment that was never turned into
-    ///     a real booking.
+    ///     doesn't exist - the realistic way this message type exhausts its
+    ///     retries, not a transient condition more waiting fixes. Left
+    ///     unresolved, the transaction sits Succeeded and the booking sits
+    ///     Pending forever: money taken, nothing sold. Compensates the same
+    ///     way the inline !confirmed branch above does - full refund, since
+    ///     nothing is held against a payment that was never turned into a
+    ///     real booking.
     ///     <para>
-    ///         Critically, this also resolves the message itself
-    ///         (ProcessedAt set, DeadLetteredAt cleared) rather than leaving
-    ///         it dead-lettered - SweepDeadLetteredAsync doesn't know this
-    ///         row was compensated, and would otherwise keep retrying
-    ///         ConfirmPaymentAsync on it forever. If that retry ever
-    ///         succeeded after the transaction was already marked
-    ///         RefundPending here, the booking would end up Confirmed
-    ///         against a transaction already flagged for refund - a worse
-    ///         inconsistency than the one this exists to close. Compensating
-    ///         is a deliberate, one-way decision once made, not a step in an
-    ///         ongoing retry loop.
+    ///         Critically, this also resolves the message itself (ProcessedAt
+    ///         set, DeadLetteredAt cleared) rather than leaving it
+    ///         dead-lettered - SweepDeadLetteredAsync doesn't know this row
+    ///         was compensated, and would otherwise keep retrying
+    ///         ConfirmPaymentAsync forever. If that retry ever succeeded
+    ///         after the transaction was already marked RefundPending here,
+    ///         the booking would end up Confirmed against a transaction
+    ///         already flagged for refund - worse than the inconsistency
+    ///         this closes. Compensating is a one-way decision once made,
+    ///         not a step in an ongoing retry loop.
     ///     </para>
     /// </summary>
     protected override async Task OnDeadLetteredAsync(OutboxMessage message, CancellationToken cancellationToken)

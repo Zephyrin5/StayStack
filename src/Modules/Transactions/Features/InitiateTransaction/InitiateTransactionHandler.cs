@@ -22,18 +22,15 @@ public class InitiateTransactionHandler(
         }
 
         // A Pending or Succeeded transaction blocks a new one - Failed
-        // leaves room for a retry, and Refunded/RefundPending/RefundFailed
-        // are moot anyway since a booking only ever reaches those via
-        // cancellation, which already fails the IsPending check above.
-        // Spelled out as the exact active set, not "!= Failed" - the latter
-        // would also match the refund states above by accident, relying on
-        // the IsPending check above to make that harmless rather than
-        // saying what's actually meant. This check is just a fast-path/
-        // friendly-error optimization: it's not what actually prevents
-        // double-charging under concurrent requests (two callers can both
-        // pass it before either inserts) - the partial unique index in the
-        // migration is the real authority, enforced below via the
-        // DbUpdateException catch.
+        // leaves room for a retry, and the refund states are moot since a
+        // booking only reaches those via cancellation, which already fails
+        // IsPending above. Spelled out as the exact active set, not
+        // "!= Failed" - that would also match the refund states by
+        // accident. This check is just a fast-path/friendly-error
+        // optimization: it doesn't prevent double-charging under
+        // concurrent requests (two callers can both pass it before either
+        // inserts) - the partial unique index below is the real
+        // authority, enforced via the DbUpdateException catch.
         bool hasTransactionInProgress = await dbContext.Transactions
             .AnyAsync(
                 t => t.BookingId == request.BookingId

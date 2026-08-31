@@ -11,10 +11,10 @@ public enum TransactionStatus
 
     // Mirrors the Pending -> {Succeeded, Failed} shape for the refund
     // sub-lifecycle a cancelled booking's Succeeded transaction enters -
-    // see Transaction.MarkRefundPending()/MarkRefunded()/MarkRefundFailed()
-    // and the admin stand-in endpoints that resolve RefundPending, same
-    // reasoning as MarkTransactionSucceeded/MarkTransactionFailed standing
-    // in for a real gateway webhook.
+    // see Transaction.MarkRefundPending()/MarkRefunded()/MarkRefundFailed(),
+    // and the admin stand-in endpoints that resolve RefundPending, same as
+    // MarkTransactionSucceeded/MarkTransactionFailed standing in for a
+    // real gateway webhook.
     RefundPending = 3,
     Refunded = 4,
     RefundFailed = 5

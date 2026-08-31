@@ -20,17 +20,15 @@ public class MarkTransactionSucceededHandler(
                                       .SingleOrDefaultAsync(t => t.Id == request.TransactionId, cancellationToken)
                                   ?? throw new NotFoundException(nameof(Transaction), request.TransactionId);
 
-        // Marks the transaction itself first - this is the source of
-        // truth for "payment actually succeeded". The booking-side
-        // confirmation below is now an outbox message enqueued in this same
-        // SaveChangesAsync: a crash after this commits leaves both the
-        // Succeeded status and the durable intent to confirm the booking
-        // together, closing the window ADR-0003 originally accepted and
-        // ADR-0003 now closes (a crash between this and the old direct
-        // ConfirmPaymentAsync call used to leave Succeeded + booking
-        // Pending forever, with no retry path - MarkSucceeded's own guard
-        // makes this endpoint reject a retry with 409 once Succeeded is
-        // set).
+        // Marks the transaction itself first - the source of truth for
+        // "payment actually succeeded". The booking-side confirmation
+        // below is an outbox message enqueued in this same SaveChangesAsync:
+        // a crash after this commits leaves both the Succeeded status and
+        // the durable intent to confirm the booking together, closing a
+        // real gap - a crash between this and a direct ConfirmPaymentAsync
+        // call used to leave Succeeded + booking Pending forever, with no
+        // retry path (MarkSucceeded's own guard rejects a retry with 409
+        // once Succeeded is set).
         transaction.MarkSucceeded();
 
         OutboxMessage confirmPaymentRow = dispatcher.Enqueue(

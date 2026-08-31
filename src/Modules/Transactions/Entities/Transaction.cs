@@ -39,14 +39,10 @@ public sealed class Transaction : Entity, IAggregateRoot
     public Guid BookingId { get; private set; }
 
     // Snapshotted from the booking at initiation time, not a live read -
-    // same reasoning as Booking.GuestName being a snapshot: what was
-    // actually charged shouldn't drift if the booking's own total ever
-    // changed later. The one Money-typed (currency-carrying) field on this
-    // entity - RefundAmount below is a plain decimal in this same currency
-    // by construction (a transaction has exactly one currency, validated at
-    // MarkRefundPending), matching how UnitAvailabilityHold.Subtotal stays
-    // a plain decimal next to its own canonical TotalPrice (see
-    // docs/adr/0015).
+    // what was actually charged shouldn't drift if the booking's total
+    // changes later. The one Money-typed field here - RefundAmount below
+    // is a plain decimal in this same currency by construction, validated
+    // at MarkRefundPending (docs/adr/0015).
     public Money Amount { get; private set; }
 
     // Named TransactionStatus, not Status - Status is already claimed by
@@ -56,11 +52,10 @@ public sealed class Transaction : Entity, IAggregateRoot
     public string? FailureReason { get; private set; }
 
     // Set only once MarkRefundPending computes it - a cancellation policy's
-    // tiered percentage, applied against this transaction's own Amount by
-    // the caller (Bookings.Features.CancelBooking, via
-    // Transactions.Contracts.ITransactionReversal), not necessarily equal
-    // to Amount itself. Transactions has no notion of a cancellation
-    // policy - it just records whatever amount it was told to refund.
+    // tiered percentage, applied by the caller (CancelBookingHandler, via
+    // ITransactionReversal), not necessarily equal to Amount. Transactions
+    // has no notion of a cancellation policy itself - it just records
+    // whatever amount it was told to refund.
     public decimal? RefundAmount { get; private set; }
 
     public static Transaction Create(Guid bookingId, Money amount)
@@ -71,13 +66,11 @@ public sealed class Transaction : Entity, IAggregateRoot
         return new Transaction(Guid.CreateVersion7(), bookingId, amount, TransactionStatus.Pending);
     }
 
-    // Both transitions guard "only from Pending", same reasoning as
-    // Booking.Cancel()/Confirm() - a transaction is a one-shot ledger
-    // entry, not something that flips back and forth. Unlike Cancel()'s
-    // idempotent no-op, re-finalizing a transaction is always a genuine
-    // conflict worth surfacing (a retried webhook call for an
-    // already-succeeded transaction should not be silently swallowed the
-    // way a repeated cancel is).
+    // Both transitions guard "only from Pending" - a transaction is a
+    // one-shot ledger entry, not something that flips back and forth.
+    // Unlike Cancel()'s idempotent no-op, re-finalizing is always a
+    // genuine conflict worth surfacing - a retried webhook for an
+    // already-succeeded transaction shouldn't be silently swallowed.
     public void MarkSucceeded()
     {
         if (TransactionStatus != TransactionStatus.Pending)
@@ -100,12 +93,10 @@ public sealed class Transaction : Entity, IAggregateRoot
     }
 
     // The refund sub-lifecycle - only reachable from Succeeded, mirroring
-    // MarkSucceeded/MarkFailed's own "one-shot, guard the starting state"
-    // shape. Driven by CancelBookingHandler (via Transactions.Contracts.
-    // ITransactionReversal) when a booking with a paid transaction is
-    // cancelled, and resolved by the same kind of admin stand-in endpoint
-    // MarkTransactionSucceeded/MarkTransactionFailed already use in place
-    // of a real gateway webhook.
+    // MarkSucceeded/MarkFailed's "guard the starting state" shape. Driven
+    // by CancelBookingHandler (via ITransactionReversal), and resolved by
+    // the same admin stand-in endpoints MarkTransactionSucceeded/
+    // MarkTransactionFailed use in place of a real gateway webhook.
     public void MarkRefundPending(Money refundAmount)
     {
         if (TransactionStatus != TransactionStatus.Succeeded)
