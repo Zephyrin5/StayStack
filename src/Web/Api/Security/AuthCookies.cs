@@ -24,27 +24,23 @@ public static class AuthCookies
             response.Cookies.Append(RefreshTokenCookieName, refreshToken, new CookieOptions
             {
                 HttpOnly = true,
-                // Tied to the actual request scheme, not an environment name
-                // check (e.g. IsDevelopment()) - dev runs over plain HTTP (see
-                // the rest of this session's notes on why - avoiding ASP.NET
-                // Core dev-cert trust issues with Node's fetch), and the
-                // integration test suite's TestServer transport is HTTP too
-                // regardless of environment name ("Testing", not
+                // Tied to the actual request scheme, not an environment check
+                // like IsDevelopment() - dev runs over plain HTTP (avoids
+                // ASP.NET Core dev-cert trust issues with Node's fetch), and
+                // the integration test suite's TestServer transport is HTTP
+                // too regardless of environment name ("Testing", not
                 // "Development"). A Secure cookie set on a non-HTTPS response
-                // is correctly refused by any real cookie jar (browser or
-                // HttpClient), so this has to track the actual scheme, not
-                // guess at it from the environment - confirmed by
-                // CookieAuthTests.cs failing against a naive
-                // !environment.IsDevelopment() check.
+                // is correctly refused by any real cookie jar, so this has
+                // to track the actual scheme - confirmed by CookieAuthTests.cs
+                // failing against a naive !environment.IsDevelopment() check.
                 Secure = response.HttpContext.Request.IsHttps,
-                // Lax, not None: this cookie is only ever attached to same-site
-                // JS-initiated fetch calls, never a cross-site top-level
-                // navigation - and SameSite compares registrable domain, not
-                // port, so localhost:3000 (frontend) and localhost:5277 (API)
-                // already count as same-site in dev. Lax also closes the
-                // classic CSRF vector (an attacker page auto-submitting a form
-                // POST here) that a cookie-based credential would otherwise
-                // reopen.
+                // Lax, not None: this cookie is only ever attached to
+                // same-site JS-initiated fetch calls, never a cross-site
+                // top-level navigation - and SameSite compares registrable
+                // domain, not port, so localhost:3000/5277 already count as
+                // same-site in dev. Lax also closes the classic CSRF vector
+                // (an attacker page auto-submitting a form POST here) a
+                // cookie-based credential would otherwise reopen.
                 SameSite = SameSiteMode.Lax,
                 Expires = timeProvider.GetUtcNow().AddDays(tokenSettings.RefreshTokenLifespanInDays),
                 Path = "/"

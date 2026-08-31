@@ -34,9 +34,6 @@ if (builder.Environment.IsDevelopment())
     builder.Configuration.AddUserSecrets<Program>(true);
 }
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-
 builder.Services.ConfigureIdentityServices(builder.Configuration, builder.Environment);
 // TODO: Disabled until Grafana is configured
 //builder.Services.ConfigureObservabilityServices(builder.Configuration);
@@ -59,14 +56,12 @@ builder.Services.AddHealthChecks();
 // applied per-endpoint via Options() in Configure() (SignInEndpoint,
 // RegisterEndpoint, RefreshTokenEndpoint, InitiateTransactionEndpoint).
 //
-// Limit/window resolved from IOptions<AuthRateLimitOptions> per partition
-// (not captured once into a local at startup) specifically so tests can
-// override it via the standard services.Configure<AuthRateLimitOptions>
-// DI-replacement pattern: appsettings.Testing.json sets a very high limit
-// so the shared integration-test WebApplicationFactory (one instance, one
-// rate limiter, reused by every test in the collection) doesn't trip it on
-// ordinary test traffic; RateLimitingTests overrides it back down on its
-// own WithWebHostBuilder-derived factory to actually exercise a 429.
+// Limit/window resolved per partition from IOptions<AuthRateLimitOptions>,
+// not captured once at startup, so tests can override it via the
+// standard Configure<AuthRateLimitOptions> DI-replacement pattern:
+// appsettings.Testing.json sets a high limit so the shared integration-
+// test factory doesn't trip it on ordinary traffic; RateLimitingTests
+// overrides it back down to actually exercise a 429.
 builder.Services.Configure<AuthRateLimitOptions>(builder.Configuration.GetSection("RateLimiting"));
 // Same "RateLimiting" section, sibling keys - HoldPermitLimit/HoldWindowSeconds
 // coexist with AuthPermitLimit/AuthWindowSeconds without colliding.
@@ -92,12 +87,11 @@ builder.Services.AddRateLimiter(options =>
 
     // HoldAvailabilityEndpoint is anonymous and DB-write - the caps in
     // HoldAvailabilityRequestValidator/HoldAvailabilityHandler bound how
-    // much damage one hold can do, this bounds how many a single caller can
-    // fire. Partitioned the same way as "auth" (by RemoteIpAddress, correct
-    // once ForwardedHeaders is processing a real proxy's headers) rather
-    // than by the hold-session cookie - the cookie is an ownership handle a
-    // scripted caller can drop and regenerate per request, so it would be
-    // no partition at all as a rate-limit key.
+    // much damage one hold can do, this bounds how many a caller can fire.
+    // Partitioned by RemoteIpAddress, same as "auth", not by the
+    // hold-session cookie - a scripted caller can drop and regenerate
+    // that per request, so it would be no partition at all as a
+    // rate-limit key.
     options.AddPolicy(ApiServicesRegistration.HoldRateLimitPolicy, httpContext =>
     {
         HoldRateLimitOptions limits = httpContext.RequestServices.GetRequiredService<IOptions<HoldRateLimitOptions>>().Value;
@@ -123,21 +117,17 @@ builder.Services.OpenApiDocument(o =>
     o.AutoTagPathSegmentIndex = 0;
 
     // x-tagGroups is a Scalar/ReDoc vendor extension, not a FastEndpoints
-    // concept - there's no first-class option for it here, so it's added
-    // via the underlying OpenApiOptions' document-transformer hook instead.
-    // Nests Catalog's now-split-out per-family tags (see CatalogGroup.cs
-    // and each endpoint's own Description(b => b.WithTags(...)) call)
-    // under one collapsible "Catalog" heading in Scalar's sidebar, rather
-    // than a flat list of a dozen-plus individually-tagged operations.
+    // concept - added via the document-transformer hook instead. Nests
+    // Catalog's per-family tags (CatalogGroup.cs, each endpoint's own
+    // Description(b => b.WithTags(...))) under one collapsible "Catalog"
+    // heading rather than a flat list of a dozen-plus tagged operations.
     //
-    // IMPORTANT: once x-tagGroups is present at all, Scalar stops showing
-    // any tag that isn't listed inside SOME group - an ungrouped tag
-    // doesn't fall back to its own flat top-level section, it just
-    // silently disappears from the sidebar entirely (confirmed by
-    // rendering this and diffing against the tag list in the raw document).
-    // So every module's tag needs an entry here, even the ones that get no
-    // real nesting - a new module/tag added later needs a line added here
-    // too, or its docs go dark without any other symptom.
+    // IMPORTANT: once x-tagGroups is present, Scalar stops showing any tag
+    // not listed in SOME group - it doesn't fall back to a flat top-level
+    // section, it silently disappears from the sidebar (confirmed by
+    // diffing the rendered sidebar against the raw document's tag list).
+    // A new module/tag added later needs a line added here too, or its
+    // docs go dark with no other symptom.
     o.ConfigureOpenApi = openApiOptions =>
     {
         openApiOptions.AddDocumentTransformer((document, _, _) =>
@@ -177,13 +167,13 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-// Trusts nothing by default - ForwardedHeadersOptions' own KnownNetworks/
-// KnownProxies (loopback only) would otherwise let an untrusted edge spoof
-// X-Forwarded-For/-Proto and defeat both AuthCookies' Secure-flag check and
-// the IP-partitioned rate limiter's partition key below. Populated from
-// config (never hardcoded) so each deployment lists its actual reverse
-// proxy/load balancer addresses. Registered before anything else in the
-// pipeline reads Request.IsHttps or Connection.RemoteIpAddress.
+// Trusts nothing by default - the loopback-only KnownNetworks/KnownProxies
+// default would otherwise let an untrusted edge spoof
+// X-Forwarded-For/-Proto and defeat both AuthCookies' Secure-flag check
+// and the IP-partitioned rate limiter's partition key below. Populated
+// from config, never hardcoded, so each deployment lists its actual
+// proxy addresses. Registered before anything else reads Request.IsHttps
+// or Connection.RemoteIpAddress.
 ForwardedHeadersOptions forwardedHeadersOptions = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
@@ -230,10 +220,10 @@ app.UseWhen(context => context.Request.Path.StartsWithSegments("/api"), apiApp =
     apiApp.UseExceptionHandler(_ => { });
 });
 
-// Explicit rather than relying on WebApplication's implicit auto-insertion
-// (which only fires immediately before the first endpoint-routing-aware
-// middleware) - UseTickerQ below maps the dashboard's own endpoints and
-// needs HttpContext.User already populated via WithHostAuthentication.
+// Explicit rather than relying on WebApplication's implicit
+// auto-insertion (which only fires right before the first
+// endpoint-routing-aware middleware) - UseTickerQ below maps the
+// dashboard's own endpoints and needs HttpContext.User already populated.
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -249,22 +239,21 @@ app.MapHealthChecks("/health");
 
 app.UseFastEndpoints(options =>
 {
-    // See ApiJsonTypeInfoResolver - the same combined resolver is also wired
-    // onto ASP.NET Core's native Http.Json.JsonOptions in
+    // See ApiJsonTypeInfoResolver - the same combined resolver is also
+    // wired onto ASP.NET Core's native Http.Json.JsonOptions in
     // ApiServicesRegistration, so GlobalExceptionHandler's WriteAsJsonAsync
-    // and the 404 page's Results.Problem (neither of which goes through
+    // and the 404 page's Results.Problem (neither goes through
     // FastEndpoints) get the same source-generated coverage instead of
-    // silently falling back to full reflection.
+    // falling back to reflection.
     options.Serializer.Options.TypeInfoResolver = ApiJsonTypeInfoResolver.Combined;
 
     options.Errors.StatusCode = StatusCodes.Status400BadRequest;
 
     // FastEndpoints' own FluentValidation failures never throw, so
-    // GlobalExceptionHandler never sees them - they're built here
-    // instead. Reshaping them into the same ValidationProblemDetails
-    // shape means a request with a bad DTO and a request that hits a
-    // thrown ValidationException deep in a handler come back looking
-    // identical on the wire.
+    // GlobalExceptionHandler never sees them - built here instead.
+    // Reshaping into the same ValidationProblemDetails shape means a bad
+    // DTO and a thrown ValidationException deep in a handler come back
+    // looking identical on the wire.
     options.Errors.ResponseBuilder = (failures, ctx, statusCode) =>
     {
         var errors = failures

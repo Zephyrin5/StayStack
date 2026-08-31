@@ -71,12 +71,12 @@ public static class ApiServicesRegistration
         services.AddScoped<ICurrentUserProvider, HttpContextCurrentUserProvider>();
         services.AddExceptionHandler<GlobalExceptionHandler>();
         // Every module with its own Endpoint/Validator types needs its
-        // source-generated DiscoveredTypes list passed explicitly - once any
-        // list is passed, FastEndpoints stops reflection-scanning assemblies
-        // it wasn't given, so an omitted module's validators silently never
-        // fire (a request just reaches the handler with unvalidated data
-        // instead of failing with 400 - caught via a Bookings HTTP test that
-        // expected 400 and got 500 instead).
+        // source-generated DiscoveredTypes list passed explicitly - once
+        // any list is passed, FastEndpoints stops reflection-scanning
+        // assemblies it wasn't given, so an omitted module's validators
+        // silently never fire (a request reaches the handler with
+        // unvalidated data instead of failing with 400 - caught via a
+        // Bookings HTTP test expecting 400, getting 500).
         services.AddFastEndpoints(
             IdentityDiscoveredTypes.All,
             CatalogDiscoveredTypes.All,
@@ -93,9 +93,9 @@ public static class ApiServicesRegistration
 
         services.AddMediator(options => { options.ServiceLifetime = ServiceLifetime.Scoped; });
 
-        // In-process (L1) cache only, no L2 registered - see the hosting
-        // constraints discussion. Wraps the price calendar read path in
-        // GetPriceCalendarHandler.
+        // In-process (L1) cache only, no L2 registered. Wraps the
+        // GetPriceCalendarHandler/GetPropertiesHandler/GetPropertyByIdHandler
+        // read paths.
         services.AddHybridCache();
 
         return services;

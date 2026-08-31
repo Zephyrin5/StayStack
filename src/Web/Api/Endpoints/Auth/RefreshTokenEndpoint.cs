@@ -11,7 +11,6 @@ using ProblemDetails = Microsoft.AspNetCore.Mvc.ProblemDetails;
 
 namespace Api.Endpoints.Auth;
 
-// Endpoint<Request, Response> maps the HTTP payload to your data shapes
 public class RefreshTokenEndpoint(
     IMediator mediator,
     IOptions<AuthTokenConfiguration> tokenSettings,
@@ -19,15 +18,12 @@ public class RefreshTokenEndpoint(
 {
     public override void Configure()
     {
-        // Define the HTTP route and method
         Post("refresh-token");
-        // Allow unauthenticated users to hit this endpoint
         AllowAnonymous();
 
         Group<AuthGroup>();
         Options(x => x.RequireRateLimiting(ApiServicesRegistration.AuthRateLimitPolicy));
 
-        // Document the endpoint
         Summary(s =>
         {
             s.Summary = "Rotate refresh token";
@@ -36,7 +32,7 @@ public class RefreshTokenEndpoint(
                             "?useCookies=true - the token is read from the httpOnly cookie and the response " +
                             "rotates that cookie instead of returning the new refresh token in the body.";
             s.ExampleRequest = new RefreshTokenRequest
-                { RefreshToken = "rt_live_9f8d7c6b5a43210fedcba9876543210f19a28b7e" }; // Pre-populates UI examples
+                { RefreshToken = "rt_live_9f8d7c6b5a43210fedcba9876543210f19a28b7e" };
             s.Response<RefreshTokenResponse>(200, "Tokens successfully rotated.");
             s.Response<ValidationProblemDetails>(400, "Validation failed or parameters missing.");
             s.Response<ProblemDetails>(401, "Invalid or expired refresh token, or token reuse detected.");
@@ -53,9 +49,9 @@ public class RefreshTokenEndpoint(
             ? HttpContext.Request.GetRefreshTokenFromCookie()
             : req.RefreshToken;
 
-        // Execute the business logic via your handler - a null token here
-        // reaches RefreshTokenHandler's own guard, which throws the same
-        // InvalidRefreshTokenException (401) a bad token would.
+        // A null token here reaches RefreshTokenHandler's own guard, which
+        // throws the same InvalidRefreshTokenException (401) a bad token
+        // would.
         RefreshTokenResponse result = await mediator.Send(new RefreshTokenRequest { RefreshToken = refreshToken }, ct);
 
         if (cookieAuth)
@@ -64,7 +60,6 @@ public class RefreshTokenEndpoint(
             result = result with { RefreshToken = null };
         }
 
-        // Send an HTTP 200 OK along with your Response DTO
         await Send.OkAsync(result, ct);
     }
 }

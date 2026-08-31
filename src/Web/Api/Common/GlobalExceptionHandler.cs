@@ -29,30 +29,23 @@ public sealed partial class GlobalExceptionHandler(
             ValidationException validationEx => BuildValidationProblem(validationEx),
             AppException appEx => BuildProblem(appEx.StatusCode, appEx.Message),
             // ArgumentNullException derives from ArgumentException, and
-            // Guard.Against.Null/NullOrWhiteSpace do throw it (on the null
-            // branch specifically - NullOrWhiteSpace throws plain
-            // ArgumentException for the whitespace-only branch), so this
-            // isn't about which exception type Guard happens to pick. The
-            // reason it's still a 500: every one of those Guard calls sits
-            // inside a domain factory (Booking.Create, Unit.Create, etc.)
-            // behind a FluentValidation validator that's supposed to reject
-            // a missing required field before the handler ever constructs
-            // the entity. A null reaching the factory anyway means that
-            // validator has a gap - a bug in this codebase, not bad input
-            // from the caller - so it belongs on the 500 path even though
-            // the thrown type is the same family the line below maps to
-            // 400. Ordered before the ArgumentException arm below
-            // specifically so it isn't caught by it: without this, the
-            // validator-gap bug would return 400 with "Value cannot be
-            // null. (Parameter 'x')" verbatim - masking the real bug as a
-            // client error and leaking an internal parameter name in the
-            // same message.
+            // Guard.Against.Null/NullOrWhiteSpace do throw it on the null
+            // branch, so this isn't about which exception type Guard
+            // picks. It's still a 500 because every one of those Guard
+            // calls sits inside a domain factory (Booking.Create, etc.)
+            // behind a validator that's supposed to reject a missing
+            // field before the handler ever constructs the entity - a
+            // null reaching the factory anyway means the validator has a
+            // gap, a bug here, not bad input. Ordered before the
+            // ArgumentException arm below so it isn't caught by it -
+            // otherwise the validator-gap bug would return 400 with
+            // "Value cannot be null. (Parameter 'x')" verbatim, masking
+            // the real bug and leaking an internal parameter name.
             ArgumentNullException => BuildUnhandledProblem(exception),
             // Guard.Against.* throws ArgumentException/ArgumentOutOfRangeException
-            // (a subtype) for ordinary bad-input cases (HoldAvailabilityHandler,
-            // Booking.Create, Transaction.Create, etc.) - these are caller
-            // errors, not bugs, and belong on the 400 path rather than falling
-            // through to BuildUnhandledProblem's generic 500.
+            // for ordinary bad-input cases - caller errors, not bugs,
+            // belonging on the 400 path rather than BuildUnhandledProblem's
+            // generic 500.
             ArgumentException argEx => BuildProblem(StatusCodes.Status400BadRequest, argEx.Message),
             _ => BuildUnhandledProblem(exception)
         };
@@ -79,13 +72,12 @@ public sealed partial class GlobalExceptionHandler(
         httpContext.Response.StatusCode = problem.Status ?? StatusCodes.Status500InternalServerError;
         httpContext.Response.ContentType = "application/problem+json";
 
-        // problem's declared type is the base ProblemDetails (the switch
-        // above's common type), so writing it through the generic
-        // WriteAsJsonAsync(problem, ct) overload would serialize only base
-        // members - silently dropping ValidationProblemDetails.Errors for
-        // every ValidationException thrown from application code. Branching
-        // on the actual runtime type and passing its own source-generated
-        // JsonTypeInfo keeps Errors in the response and avoids reflection.
+        // problem's declared type is the base ProblemDetails, so writing
+        // it through the generic WriteAsJsonAsync(problem, ct) overload
+        // would serialize only base members - silently dropping
+        // ValidationProblemDetails.Errors. Branching on the runtime type
+        // and passing its own source-generated JsonTypeInfo keeps Errors
+        // in the response and avoids reflection.
         if (problem is ValidationProblemDetails validationProblem)
         {
             await httpContext.Response.WriteAsJsonAsync(
