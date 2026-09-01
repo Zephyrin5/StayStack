@@ -17,6 +17,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Transactions;
+using Transactions.Contracts;
 using Transactions.Entities;
 using Transactions.Features.GetTransactions;
 using Transactions.Features.InitiateTransaction;
@@ -469,5 +470,62 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         Transaction transaction = await transactionsDb.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
         Assert.Equal(TransactionStatus.RefundFailed, transaction.TransactionStatus);
         Assert.Equal("Original card closed", transaction.FailureReason);
+    }
+
+    [Fact]
+    public async Task RefundLookups_StaySingleValued_OnceATransactionEntersTheRefundLifecycle()
+    {
+        // Pins the invariant that makes TransactionReversal's two
+        // SingleOrDefaultAsync lookups safe, because nothing else did and it
+        // spans three separate facts across two modules:
+        //
+        //   1. ix_transactions_booking_id_active is unique but filtered to
+        //      ('Pending','Succeeded'), so a transaction entering the refund
+        //      sub-lifecycle leaves it and stops blocking new inserts.
+        //   2. RefundAmount is only ever written by MarkRefundPending, which
+        //      requires Succeeded - so a second non-null RefundAmount needs a
+        //      second transaction to reach Succeeded.
+        //   3. That second transaction can never be created, because
+        //      initiating one requires BookingSummary.IsPending, and a
+        //      booking only reaches the refund path by being Cancelled -
+        //      with no transition back to Pending.
+        //
+        // Break (3) - say, by adding a reinstate-booking feature - and
+        // GetRefundSnapshotAsync starts throwing InvalidOperationException,
+        // surfacing as a 500 on cancellation. This test fails first.
+        string adminToken = await SignInAsAdministratorAsync();
+        (Guid bookingId, Guid transactionId) = await CreateSucceededTransactionAsync(adminToken);
+
+        using (IServiceScope setupScope = factory.Services.CreateScope())
+        {
+            AppBookingsDbContext bookingsDb = setupScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            Booking booking = await bookingsDb.Bookings.SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
+            booking.Cancel();
+            await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+            AppTransactionsDbContext transactionsDb = setupScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+            Transaction transaction = await transactionsDb.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
+            transaction.MarkRefundPending(transaction.Amount);
+            await transactionsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        // The transaction has left the unique index's filter, so the index
+        // alone would now permit a second one. The booking's own state is
+        // what actually refuses it.
+        HttpResponseMessage secondInitiate = await _client.PostAsJsonAsync(
+            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Conflict, secondInitiate.StatusCode);
+
+        // And both lookups still resolve rather than throwing on a second row.
+        using IServiceScope scope = factory.Services.CreateScope();
+        ITransactionReversal transactionReversal = scope.ServiceProvider.GetRequiredService<ITransactionReversal>();
+
+        TransactionRefundSnapshot? snapshot =
+            await transactionReversal.GetRefundSnapshotAsync(bookingId, TestContext.Current.CancellationToken);
+        Assert.NotNull(snapshot);
+
+        // Null, not a throw: the one Succeeded transaction moved on to
+        // RefundPending, so nothing matches that filter any more.
+        Assert.Null(await transactionReversal.GetSucceededTransactionAmountAsync(bookingId, TestContext.Current.CancellationToken));
     }
 }
