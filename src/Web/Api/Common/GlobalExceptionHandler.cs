@@ -2,6 +2,7 @@
 using BuildingBlocks.Exceptions;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json;
 namespace Api.Common;
 
 /// <summary>
@@ -102,7 +103,29 @@ public sealed partial class GlobalExceptionHandler(
 
     private static ValidationProblemDetails BuildValidationProblem(ValidationException ex)
     {
-        return new ValidationProblemDetails(ex.Errors)
+        // Keys camelCased here, once, rather than at each throw site.
+        // ValidationProblemDetails.Errors is a Dictionary<string, string[]>,
+        // and PropertyNamingPolicy governs declared property names, never
+        // dictionary keys - so a handler's nameof(request.CheckIn) reaches the
+        // wire as "CheckIn" while FastEndpoints' own FluentValidation failure
+        // on the same field arrives as "checkIn". That gave one API two
+        // error-key casings, decided by which layer happened to reject the
+        // request, which no client can reasonably branch on.
+        //
+        // Doing it per-site was tried and didn't hold: two ConfirmBookingHandler
+        // throws called ConvertName themselves and every other site forgot.
+        // This is the one place every ValidationException converges, so it's
+        // the only place the conversion can't be forgotten.
+        //
+        // Grouped rather than ToDictionary'd: two keys differing only in case
+        // would collide once folded, and an exception thrown *inside* the
+        // exception handler escapes with no handler left to catch it. Merging
+        // their messages is both safer and the more useful answer.
+        Dictionary<string, string[]> errors = ex.Errors
+            .GroupBy(error => JsonNamingPolicy.CamelCase.ConvertName(error.Key))
+            .ToDictionary(group => group.Key, group => group.SelectMany(error => error.Value).ToArray());
+
+        return new ValidationProblemDetails(errors)
         {
             Status = StatusCodes.Status400BadRequest,
             Title = "Validation failed",

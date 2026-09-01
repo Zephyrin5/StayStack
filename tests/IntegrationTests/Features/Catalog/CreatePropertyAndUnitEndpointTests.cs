@@ -223,11 +223,9 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
         string body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        // camelCase here: this key comes from FastEndpoints' FluentValidation
-        // pipeline, which lowercases the leading character. Handler-thrown
-        // ValidationExceptions use nameof() and so stay PascalCase - a
-        // pre-existing divergence in the error-key casing between the two
-        // validation paths, asserted as-is rather than papered over.
+        // camelCase, the one casing both validation paths now produce -
+        // FastEndpoints' FluentValidation pipeline natively, and handler-thrown
+        // ValidationExceptions via GlobalExceptionHandler.BuildValidationProblem.
         Assert.Contains("timeZoneId", body);
         Assert.Contains("not a recognised IANA time zone", body);
         Assert.DoesNotContain("Parameter", body);

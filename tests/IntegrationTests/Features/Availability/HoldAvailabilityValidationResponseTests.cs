@@ -87,7 +87,13 @@ public class HoldAvailabilityValidationResponseTests(IntegrationTestWebApplicati
         // A ValidationProblemDetails keyed by field, not a flat Detail
         // string - same shape FluentValidation failures already produce, so
         // a client parses one response format for bad input rather than two.
+        //
+        // camelCase, matching what FastEndpoints' FluentValidation pipeline
+        // emits, even though the throw site passes nameof() PascalCase -
+        // GlobalExceptionHandler converts on the way out so one API doesn't
+        // ship two error-key casings. Asserted case-sensitively on purpose.
         Assert.Contains("\"errors\"", body);
-        Assert.Contains("CheckIn", body);
+        Assert.Contains("checkIn", body);
+        Assert.DoesNotContain("CheckIn", body);
     }
 }

@@ -291,6 +291,17 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         HttpResponseMessage response = await ConfirmBookingRawAsync(holdId, "guest@example.com", "NOSUCHCODE");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        // The error key, not just the status. ConfirmBookingHandler passes a
+        // bare nameof(request.PromoCode) - PascalCase - and relies on
+        // GlobalExceptionHandler.BuildValidationProblem to camelCase it on the
+        // way out, so this is what proves that central conversion actually
+        // runs for a handler-thrown ValidationException. It previously
+        // converted the key at the throw site instead, and nothing asserted
+        // the result either way.
+        string body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("\"promoCode\"", body);
+        Assert.DoesNotContain("PromoCode", body);
     }
 
     [Fact]

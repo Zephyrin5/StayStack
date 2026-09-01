@@ -12,7 +12,6 @@ using Npgsql;
 using Outbox;
 using Promotions.Contracts;
 using SeedWork.ValueObjects;
-using System.Text.Json;
 namespace Bookings.Features.ConfirmBooking;
 
 public class ConfirmBookingHandler(
@@ -125,15 +124,15 @@ public class ConfirmBookingHandler(
 
                 if (redemptionException is PromotionInvalidException promotionInvalidException)
                 {
-                    // camelCased explicitly, not bare nameof() PascalCase -
-                    // ValidationProblemDetails.Errors is a Dictionary<string,
-                    // string[]>, and PropertyNamingPolicy only governs
-                    // declared property names, never dictionary keys.
-                    // Without this the wire key would be "PromoCode", not
-                    // "promoCode" - silently breaking the client's
-                    // error.errors?.promoCode lookup.
+                    // Bare nameof(), like every other ValidationException.
+                    // This used to camelCase the key itself, because
+                    // ValidationProblemDetails.Errors is a dictionary and
+                    // PropertyNamingPolicy doesn't reach dictionary keys -
+                    // true, but a rule only two throw sites in the codebase
+                    // remembered. GlobalExceptionHandler.BuildValidationProblem
+                    // now converts every key on the way out.
                     throw new ValidationException(
-                        JsonNamingPolicy.CamelCase.ConvertName(nameof(request.PromoCode)),
+                        nameof(request.PromoCode),
                         promotionInvalidException.Message);
                 }
 
@@ -180,7 +179,7 @@ public class ConfirmBookingHandler(
                 await DiscardIntentAsync();
 
                 throw new ValidationException(
-                    JsonNamingPolicy.CamelCase.ConvertName(nameof(request.PromoCode)),
+                    nameof(request.PromoCode),
                     discountedPrice.Amount <= 0m
                         ? "This code covers the entire stay, which can't be checked out. Please book without it."
                         : "This code doesn't provide additional savings for your current stay.");
