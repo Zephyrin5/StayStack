@@ -89,7 +89,7 @@ public class ConfirmBookingHandler(
             // via TotalPrice + LengthOfStayDiscountAmount - that
             // reconstruction is exactly the rounding bug docs/adr/0015
             // exists to close.
-            Money couponBase = Money.Of(hold.Subtotal, hold.TotalPrice.Currency);
+            Money couponBase = hold.Subtotal;
             PromotionRedemptionResult? redemption = null;
 
             try

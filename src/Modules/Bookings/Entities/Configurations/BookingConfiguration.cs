@@ -13,7 +13,14 @@ public class BookingConfiguration : IEntityTypeConfiguration<Booking>
         builder.Property(b => b.GuestEmail).HasMaxLength(200).IsRequired();
         builder.Property(b => b.GuestPhone).HasMaxLength(50);
         builder.ComplexProperty(b => b.TotalPrice, money => money.ConfigureMoney("total_price"));
-        builder.Property(b => b.Subtotal).HasColumnType("numeric(12,3)").IsRequired();
+        // Mapped by backing-field name, not by the Money-typed Subtotal
+        // property: the currency lives on total_price and is paired back on
+        // read, so this stays exactly the one column it has always been - a
+        // type-only change with no migration. See Booking.Subtotal.
+        builder.Property<decimal>("_subtotal")
+            .HasColumnName("subtotal")
+            .HasColumnType("numeric(12,3)")
+            .IsRequired();
 
         // Required - see Booking.TimeZoneId for why this is non-nullable
         // where the CancellationPolicy snapshot beside it is not.

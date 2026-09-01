@@ -69,7 +69,7 @@ public class ConfirmBookingHandlerTests : IDisposable
         CheckOut = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(2),
         GuestCount = 2,
         TotalPrice = Money.Of(200m, Currency.KWD),
-        Subtotal = 200m
+        Subtotal = Money.Of(200m, Currency.KWD)
     };
 
     private static Mock<IUnitLookup> CreateUnitLookupMock(ConfirmedHold hold)
@@ -236,8 +236,8 @@ public class ConfirmBookingHandlerPromoPricingTests : IDisposable
             CheckOut = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(2),
             GuestCount = 2,
             TotalPrice = Money.Of(180m, Currency.KWD),
-            Subtotal = 200m,
-            LengthOfStayDiscountAmount = 20m
+            Subtotal = Money.Of(200m, Currency.KWD),
+            LengthOfStayDiscountAmount = Money.Of(20m, Currency.KWD)
         };
 
         Mock<IHoldConfirmation> holdConfirmationMock = new Mock<IHoldConfirmation>();
@@ -247,7 +247,7 @@ public class ConfirmBookingHandlerPromoPricingTests : IDisposable
         Mock<IPromotionRedemption> promotionRedemptionMock = new Mock<IPromotionRedemption>();
         promotionRedemptionMock
             .Setup(x => x.RedeemAsync(
-                "SAVE5", hold.UnitId, "jane@example.com", Money.Of(hold.Subtotal, Currency.KWD),
+                "SAVE5", hold.UnitId, "jane@example.com", hold.Subtotal,
                 It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PromotionRedemptionResult { RedemptionId = Guid.NewGuid(), DiscountAmount = Money.Of(5m, Currency.KWD) });
 

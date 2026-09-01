@@ -150,7 +150,7 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
         {
             MaxOccupancy = row.unit.MaxOccupancy,
             TotalPrice = breakdown.Total,
-            Subtotal = breakdown.Subtotal.Amount,
+            Subtotal = breakdown.Subtotal,
             LengthOfStayDiscountAmount = breakdown.LengthOfStayDiscountAmount,
             TimeZoneId = row.TimeZoneId
         };

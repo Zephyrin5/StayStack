@@ -15,7 +15,7 @@ public class BookingTests
         return Booking.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), customerId,
             "Jane Guest", "jane@example.com", "+965 1234 5678",
-            Today, Today.AddDays(3), 2, Kwd(150m), 150m, CancellationPolicy.CreateDefault(), "Asia/Kuwait");
+            Today, Today.AddDays(3), 2, Kwd(150m), Kwd(150m), CancellationPolicy.CreateDefault(), "Asia/Kuwait");
     }
 
     [Fact]
@@ -29,7 +29,7 @@ public class BookingTests
         Booking booking = Booking.Create(
             id, unitId, holdId, customerId,
             "Jane Guest", "jane@example.com", "+965 1234 5678",
-            Today, Today.AddDays(3), 2, Kwd(150m), 150m, CancellationPolicy.CreateDefault(), "Asia/Kuwait");
+            Today, Today.AddDays(3), 2, Kwd(150m), Kwd(150m), CancellationPolicy.CreateDefault(), "Asia/Kuwait");
 
         Assert.Equal(id, booking.Id);
         Assert.Equal(unitId, booking.UnitId);
@@ -42,7 +42,7 @@ public class BookingTests
         Assert.Equal(Today.AddDays(3), booking.CheckOut);
         Assert.Equal(2, booking.GuestCount);
         Assert.Equal(Kwd(150m), booking.TotalPrice);
-        Assert.Equal(150m, booking.Subtotal);
+        Assert.Equal(Kwd(150m), booking.Subtotal);
         Assert.Equal(BookingStatus.Pending, booking.BookingStatus);
     }
 
@@ -52,7 +52,7 @@ public class BookingTests
         Booking booking = Booking.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null,
             "Jane Guest", "jane@example.com", null,
-            Today, Today.AddDays(1), 1, Kwd(50m), 50m, CancellationPolicy.CreateDefault(), "Asia/Kuwait");
+            Today, Today.AddDays(1), 1, Kwd(50m), Kwd(50m), CancellationPolicy.CreateDefault(), "Asia/Kuwait");
 
         Assert.Null(booking.CustomerId);
         Assert.Null(booking.GuestPhone);
@@ -62,21 +62,21 @@ public class BookingTests
     public void Create_ShouldThrow_WhenIdIsEmpty()
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.Empty, Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(50m), 50m, CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
+            Guid.Empty, Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(50m), Kwd(50m), CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
     }
 
     [Fact]
     public void Create_ShouldThrow_WhenUnitIdIsEmpty()
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.Empty, Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(50m), 50m, CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
+            Guid.NewGuid(), Guid.Empty, Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(50m), Kwd(50m), CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
     }
 
     [Fact]
     public void Create_ShouldThrow_WhenHoldIdIsEmpty()
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(50m), 50m, CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
+            Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(50m), Kwd(50m), CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
     }
 
     [Theory]
@@ -86,7 +86,7 @@ public class BookingTests
     public void Create_ShouldThrow_WhenGuestNameIsNullOrWhitespace(string? guestName)
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, guestName!, "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(50m), 50m, CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, guestName!, "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(50m), Kwd(50m), CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
     }
 
     [Theory]
@@ -96,14 +96,14 @@ public class BookingTests
     public void Create_ShouldThrow_WhenGuestEmailIsInvalid(string? guestEmail)
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "Jane", guestEmail!, null, Today, Today.AddDays(1), 1, Kwd(50m), 50m, CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "Jane", guestEmail!, null, Today, Today.AddDays(1), 1, Kwd(50m), Kwd(50m), CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
     }
 
     [Fact]
     public void Create_ShouldThrow_WhenCheckOutIsNotAfterCheckIn()
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today, 1, Kwd(50m), 50m, CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today, 1, Kwd(50m), Kwd(50m), CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
     }
 
     [Theory]
@@ -112,14 +112,14 @@ public class BookingTests
     public void Create_ShouldThrow_WhenGuestCountIsNotPositive(int guestCount)
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), guestCount, Kwd(50m), 50m, CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), guestCount, Kwd(50m), Kwd(50m), CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
     }
 
     [Fact]
     public void Create_ShouldThrow_WhenTotalPriceIsNegative()
     {
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(-1m), -1m, CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(-1m), Kwd(-1m), CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
     }
 
     [Fact]
@@ -132,7 +132,7 @@ public class BookingTests
         // code; see PromotionRedemptionTests'
         // ConfirmBooking_WithAFullyDiscountingCode_IsRejected_NotTurnedIntoAnUnpayableBooking.
         Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(0m), 0m, CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(0m), Kwd(0m), CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
     }
 
     [Fact]

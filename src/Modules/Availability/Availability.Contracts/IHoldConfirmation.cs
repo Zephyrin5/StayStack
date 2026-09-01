@@ -42,12 +42,12 @@ public record ConfirmedHold
     // LengthOfStayDiscountAmount - that reconstruction is exactly the
     // rounding bug docs/adr/0015 exists to close, since each side was
     // independently rounded. Shares TotalPrice.Currency.
-    public decimal Subtotal { get; init; }
+    public Money Subtotal { get; init; }
 
     // Same snapshot as TotalPrice/Subtotal, carried through so
     // ConfirmBookingHandler can undo just the length-of-stay portion when a
     // redeemed promo code is exclusive of it rather than stacking - see
     // Catalog.Contracts.IUnitLookup.StayPricingResult for why this needs to
     // travel separately from the final total.
-    public decimal? LengthOfStayDiscountAmount { get; init; }
+    public Money? LengthOfStayDiscountAmount { get; init; }
 }

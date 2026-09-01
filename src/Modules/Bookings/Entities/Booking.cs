@@ -36,7 +36,7 @@ public sealed class Booking : Entity, IAggregateRoot
         DateOnly checkOut,
         int guestCount,
         Money totalPrice,
-        decimal subtotal,
+        Money subtotal,
         BookingStatus bookingStatus,
         CancellationPolicy cancellationPolicy,
         string timeZoneId)
@@ -52,7 +52,7 @@ public sealed class Booking : Entity, IAggregateRoot
         CheckOut = checkOut;
         GuestCount = guestCount;
         TotalPrice = totalPrice;
-        Subtotal = subtotal;
+        _subtotal = subtotal.Amount;
         BookingStatus = bookingStatus;
         CancellationPolicy = cancellationPolicy;
         TimeZoneId = timeZoneId;
@@ -78,17 +78,31 @@ public sealed class Booking : Entity, IAggregateRoot
     public DateOnly CheckOut { get; private set; }
     public int GuestCount { get; private set; }
 
-    // The one Money-typed (currency-carrying) field on this entity -
-    // Subtotal below is a plain decimal in this same currency by
-    // construction (a booking has exactly one currency), matching
-    // UnitAvailabilityHold.Subtotal's own reasoning (see docs/adr/0015).
+    // A booking carries exactly one currency, and TotalPrice is where it is
+    // stored - see Subtotal below.
     public Money TotalPrice { get; private set; }
 
+    // Persisted as one decimal column (the backing field, mapped in
+    // BookingConfiguration) but exposed as Money, paired with the currency
+    // this booking already has.
+    //
+    // docs/adr/0015 originally made this a bare decimal, reasoning that a
+    // second currency column could only ever agree with TotalPrice's. That
+    // storage argument still holds and nothing about it changed - which is
+    // why there is no new column here. What did not hold is the leap from
+    // "don't store it twice" to "don't type it": every consumer then had to
+    // re-pair the currency by hand, and ConfirmBookingHandler literally did,
+    // with Money.Of(hold.Subtotal, hold.TotalPrice.Currency). That is a
+    // silent wrong-currency bug waiting for someone to pass a different
+    // second argument, in the one place a type exists specifically to stop
+    // it.
+    //
     // Snapshotted directly from the hold's own Subtotal at confirm time
-    // (ConfirmBookingHandler), not reconstructed - see
-    // ConfirmedHold.Subtotal's own doc comment for why reconstruction was
-    // the actual rounding bug this closes.
-    public decimal Subtotal { get; private set; }
+    // (ConfirmBookingHandler), not reconstructed - see ConfirmedHold.Subtotal
+    // for why reconstruction was the actual rounding bug docs/adr/0015 closes.
+    private decimal _subtotal;
+
+    public Money Subtotal => Money.Of(_subtotal, TotalPrice.Currency);
 
     // Named BookingStatus, not Status - Status is already claimed by the
     // inherited Entity.Status (EntityStatus: soft-delete state), a
@@ -135,7 +149,7 @@ public sealed class Booking : Entity, IAggregateRoot
         DateOnly checkOut,
         int guestCount,
         Money totalPrice,
-        decimal subtotal,
+        Money subtotal,
         CancellationPolicy cancellationPolicy,
         string timeZoneId)
     {
@@ -163,7 +177,7 @@ public sealed class Booking : Entity, IAggregateRoot
         // free stays would mean a confirm-without-payment path, not relaxing
         // this.
         Guard.Against.NegativeOrZero(totalPrice.Amount);
-        Guard.Against.Negative(subtotal);
+        Guard.Against.Negative(subtotal.Amount);
         Guard.Against.Null(cancellationPolicy);
         Guard.Against.NullOrWhiteSpace(timeZoneId);
 

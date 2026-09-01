@@ -373,7 +373,7 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
                 intent.Id, unit.Id, holdId, null,
                 "Committed By Retry", "jane@example.com", null,
                 checkIn, checkIn.AddDays(3), 1,
-                Money.Of(999m, Currency.KWD), 999m, CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
+                Money.Of(999m, Currency.KWD), Money.Of(999m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
             await db.SaveChangesAsync();
         });
 

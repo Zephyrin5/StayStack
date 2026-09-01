@@ -129,7 +129,7 @@ public class GuestReviewTests(IntegrationTestWebApplicationFactory factory)
     {
         Booking booking = Booking.Create(
             Guid.CreateVersion7(), unitId, Guid.NewGuid(), null,
-            _faker.Name.FullName(), _faker.Internet.Email(), null, checkIn, checkOut, 2, Money.Of(300m, Currency.KWD), 300m,
+            _faker.Name.FullName(), _faker.Internet.Email(), null, checkIn, checkOut, 2, Money.Of(300m, Currency.KWD), Money.Of(300m, Currency.KWD),
             CancellationPolicy.CreateDefault(), "Asia/Kuwait");
         booking.Confirm();
 

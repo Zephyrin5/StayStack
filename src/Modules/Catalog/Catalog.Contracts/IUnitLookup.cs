@@ -70,7 +70,13 @@ public record StayPricingResult
 {
     public int MaxOccupancy { get; init; }
     public Money TotalPrice { get; init; }
-    public decimal Subtotal { get; init; }
+    // Money, not a bare decimal in TotalPrice's currency. It shares that
+    // currency by construction, but "by construction" is exactly the kind of
+    // invariant the type system should be holding rather than each consumer
+    // re-attaching it - ConfirmBookingHandler used to do that literally, with
+    // Money.Of(hold.Subtotal, hold.TotalPrice.Currency), which is a silent
+    // bug the moment someone pairs it with the wrong currency.
+    public Money Subtotal { get; init; }
     public Money? LengthOfStayDiscountAmount { get; init; }
 
     // Carried so HoldAvailabilityHandler can resolve "today" at the

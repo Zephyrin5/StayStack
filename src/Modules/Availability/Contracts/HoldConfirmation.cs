@@ -76,8 +76,13 @@ internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider
             CheckOut = row.CheckOut,
             GuestCount = row.GuestCount,
             TotalPrice = Money.Of(row.TotalPrice, currency),
-            Subtotal = row.Subtotal,
-            LengthOfStayDiscountAmount = row.LengthOfStayDiscountAmount
+            // The one place the hold's single currency column is paired back
+            // onto its three amounts. Callers receive Money and never repeat
+            // this - ConfirmBookingHandler used to redo it by hand.
+            Subtotal = Money.Of(row.Subtotal, currency),
+            LengthOfStayDiscountAmount = row.LengthOfStayDiscountAmount is { } discount
+                ? Money.Of(discount, currency)
+                : null
         };
     }
 

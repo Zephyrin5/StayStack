@@ -192,7 +192,7 @@ public class HoldAvailabilityHandler(
                         CreatedAt = now,
                         request.GuestCount,
                         TotalPrice = pricing.TotalPrice.Amount,
-                        Subtotal = pricing.Subtotal,
+                        Subtotal = pricing.Subtotal.Amount,
                         Currency = pricing.TotalPrice.Currency.ToString(),
                         LengthOfStayDiscountAmount = pricing.LengthOfStayDiscountAmount?.Amount,
                         request.HolderToken,

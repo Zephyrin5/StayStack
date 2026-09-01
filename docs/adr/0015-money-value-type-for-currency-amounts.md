@@ -42,7 +42,87 @@ Every entity here (`Booking`, `Unit`, `Transaction`) follows this codebase's est
 
 - `PricingRule.OverridePrice`/`Multiplier`/`DiscountPercent` - no paired `Currency` exists at that level (it's implied by the owning `Unit`); wrapping these in `Money` would invent structure that isn't there.
 - `Promotion.DiscountValue` - a genuinely discriminated field. For a `FixedAmount` promotion it's a real currency amount with `Currency` set; for `Percentage` it's a bare percentage and `Currency` is null *by design* (enforced in `CreatePromotionRequestValidator`). Modeling this pair as `Money?` would null out the discount value itself for every percentage-based promotion. Splitting it into `FixedAmount: Money?` / `Percentage: decimal?` would be a real, separate modeling improvement, but is out of scope here.
-- `UnitAvailabilityHold.Subtotal`/`LengthOfStayDiscountAmount`, `Booking.Subtotal`, `Transaction.RefundAmount` - each shares its owning entity's one canonical currency by construction (a hold/booking/transaction has exactly one currency; `Transaction.MarkRefundPending(Money refundAmount)` validates the incoming refund's currency against `Amount.Currency` before ever persisting it, then stores just the decimal). Modeling these as independently-currencied `Money?` fields would add a redundant currency column that could only ever agree with the entity's own, for no type-safety benefit - the same reasoning that keeps `PricingRule.OverridePrice` a plain decimal.
+- **Superseded in part (see "Amendment: subtotal is a `Money`" below).** `UnitAvailabilityHold.Subtotal`/`LengthOfStayDiscountAmount`, `Booking.Subtotal`, `Transaction.RefundAmount` - each shares its owning entity's one canonical currency by construction (a hold/booking/transaction has exactly one currency; `Transaction.MarkRefundPending(Money refundAmount)` validates the incoming refund's currency against `Amount.Currency` before ever persisting it, then stores just the decimal). Modeling these as independently-currencied `Money?` fields would add a redundant currency column that could only ever agree with the entity's own, for no type-safety benefit - the same reasoning that keeps `PricingRule.OverridePrice` a plain decimal.
+
+## Amendment: subtotal is a `Money`
+
+The "what stayed a plain `decimal`" list above conflated two separate
+questions, and got one of them wrong.
+
+**Storage - unchanged, and the original reasoning still holds.** A subtotal
+does share its entity's one canonical currency by construction, and a second
+currency column could only ever agree with the first. There is still exactly
+one `subtotal` column and one `currency`/`total_price_currency` alongside it.
+Making `Booking.Subtotal` a `Money` required no migration at all: it is a
+`Money`-typed property computed over a private `decimal` backing field, which
+`BookingConfiguration` maps to the same column by field name.
+
+**Typing - reversed.** "The currency is implied" does not follow from "the
+currency is not stored twice", and treating it as if it did pushed the pairing
+out to every consumer. `ConfirmBookingHandler` did it literally:
+
+```csharp
+Money couponBase = Money.Of(hold.Subtotal, hold.TotalPrice.Currency);
+```
+
+That line is the whole argument against the original decision. It is a
+currency being re-attached by hand, at a call site, to a value that already
+had one - in a codebase whose stated reason for having `Money` at all is that
+amounts should carry their currency. Nothing stops the next such line pairing
+a subtotal with some *other* amount's currency, and nothing would catch it:
+both operands are the right types, the arithmetic succeeds, and
+`CurrencyMismatchException` never fires because the mismatch was introduced
+before any operator saw it. The same reattachment had already been copied into
+a unit test's mock setup, which is how this kind of thing spreads.
+
+So `StayPricingResult.Subtotal`, `ConfirmedHold.Subtotal` and
+`ConfirmedHold.LengthOfStayDiscountAmount`, and `Booking.Subtotal` are now
+`Money`. `PricingCalculator.StayPriceBreakdown.Subtotal` always was - the type
+was being *discarded* at the contract boundary (`Subtotal = breakdown.Subtotal.Amount`)
+and manually reconstituted downstream. The currency is now paired back exactly
+once, in `HoldConfirmation.ConfirmHoldAsync`, where the row's single currency
+column is read.
+
+`UnitAvailabilityHold.Subtotal` stays a plain `decimal`, deliberately and
+consistently with this: that type is a persistence-layer construct (see its
+own doc comment), written by hand-rolled Dapper SQL and never loaded through
+EF change tracking by business logic. `ConfirmedHold` is the contract business
+logic actually consumes, and that is where the typing belongs.
+`Transaction.RefundAmount` also stays as-is - `MarkRefundPending(Money)`
+already validates the incoming currency against `Amount.Currency` at the only
+write path, so the invariant is enforced rather than assumed.
+
+## Amendment: where rounding happens in a stay total
+
+The "Alternatives considered" entry below rejects rounding once at the end of
+a stay *for per-night prices*. `ResolveStayTotal` then makes the same choice a
+second time, one level up, and that was not written down: the length-of-stay
+discount is applied to the already-rounded subtotal, and the discount is
+itself rounded.
+
+The consequence is that `Subtotal`, `LengthOfStayDiscountAmount` and `Total`
+are all real payable amounts, and `Total` is exactly
+`Subtotal - LengthOfStayDiscountAmount`. Under the usual alternative - full
+precision throughout, round once at the boundary - the two numbers the guest
+is shown need not add up to the one they are charged.
+
+**How much this actually matters was measured, not assumed**, because the
+first draft of this amendment overstated it. Since the subtotal is always an
+exact multiple of the minor unit (it is a sum of already-rounded nightly
+prices), rounding is otherwise translation-invariant and the two policies
+agree almost everywhere. They diverge only at exact ties, where
+`MidpointRounding.ToEven` inspects the last digit of the discount under one
+policy and of the difference under the other, and those digits can have
+different parity. A sweep over 200,000 random stays put the divergence at
+~0.02% of cases, always by exactly one minor unit.
+
+`PricingCalculatorTests` pins a concrete instance rather than a decorative
+one: 45 nights at 191.175 KWD less 13.2% gives a subtotal of 8602.875 and a
+discount of 1135.580, so this policy charges **7467.295** where round-at-the-
+end charges **7467.296** - and at that same tie, round-at-the-end is exactly
+where `8602.875 - 1135.580` stops equalling the total charged. The test was
+verified to fail against a round-at-the-end implementation, so it discriminates
+between the policies rather than merely describing the current one.
 
 ## Alternatives considered
 
