@@ -32,6 +32,9 @@ public class ConfirmBookingEndpoint(IMediator mediator) : Endpoint<ConfirmBookin
             s.Response<ConfirmBookingResponse>(200, "Booking created.");
             s.Response<ValidationProblemDetails>(400, "Validation failed.");
             s.Response<ProblemDetails>(404, "Hold not found, already used, or expired.");
+            s.Response<ProblemDetails>(409,
+                "Another confirmation for this hold is in flight, or this one was interrupted and rolled back. " +
+                "Retryable - though an interrupted confirmation releases its hold, so the guest may need to re-hold.");
             s.Response(429, "Too many requests.");
         });
     }

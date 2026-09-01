@@ -6,6 +6,15 @@ using TickerQ.Utilities.Base;
 namespace Bookings.Jobs;
 
 /// <summary>
+///     SUPERSEDED by ReconcileOrphanedBookingIntentsJob (docs/adr/0017) -
+///     <b>delete this, IHoldLookup, and its DI registration after one
+///     release.</b> Kept running for exactly one release because an orphan
+///     created before the intent table existed has no intent row, so the new
+///     job cannot see it; this one still can. Note the overlap only drains
+///     what this job could ever reach - an orphan older than
+///     ReconciliationWindow was already unreachable before ADR-0017 and stays
+///     that way.
+///
 ///     A backstop for two distinct ways a hold can end up stuck 'booked'
 ///     with nothing that will ever release it:
 ///     <list type="bullet">

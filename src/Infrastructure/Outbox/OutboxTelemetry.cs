@@ -4,9 +4,9 @@ namespace Outbox;
 /// <summary>
 ///     Mirrors CommandTelemetry's shape - one shared Meter, registered once
 ///     with the OTel SDK, picked up automatically by every module's
-///     dispatcher. The counter below is what's alertable in production; the
-///     Error-level log OutboxDispatcherBase emits on dead-letter is its
-///     human-readable companion.
+///     dispatcher. The counters below are what's alertable in production; the
+///     logs OutboxDispatcherBase emits alongside them are their
+///     human-readable companions.
 /// </summary>
 public static class OutboxTelemetry
 {
@@ -17,4 +17,18 @@ public static class OutboxTelemetry
     public static readonly Counter<long> DeadLettered = Meter.CreateCounter<long>(
         "outbox.messages.dead_lettered",
         description: "Number of outbox messages that exhausted retries, tagged by module and message type.");
+
+    /// <summary>
+    ///     Distinct from DeadLettered, which only counts a row's *first*
+    ///     crossing into dead-letter state. SweepDeadLetteredAsync retries a
+    ///     dead-lettered row hourly forever, and docs/adr/0017 makes that
+    ///     forever-retry load-bearing (it's why the reconcile job no longer
+    ///     covers a hold behind a Cancelled booking). Without this counter, a
+    ///     message whose failure is permanent loops indefinitely emitting
+    ///     nothing at all - the retry is invisible precisely because Attempts
+    ///     is already past MaxAttempts.
+    /// </summary>
+    public static readonly Counter<long> DeadLetterRetried = Meter.CreateCounter<long>(
+        "outbox.messages.dead_letter_retried",
+        description: "Number of dead-letter sweep retries that failed again, tagged by module and message type.");
 }

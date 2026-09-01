@@ -9,6 +9,7 @@ public class AppBookingsDbContext(DbContextOptions<AppBookingsDbContext> options
 {
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<BookingManagementToken> BookingManagementTokens => Set<BookingManagementToken>();
+    public DbSet<PendingBookingIntent> PendingBookingIntents => Set<PendingBookingIntent>();
     // Named per-module, not just "OutboxMessages" - Bookings, Transactions,
     // and Identity all share this same type, and (per docs/adr/0004's own
     // note) every module already shares one physical Postgres schema, so an
@@ -20,6 +21,7 @@ public class AppBookingsDbContext(DbContextOptions<AppBookingsDbContext> options
     {
         modelBuilder.ApplyConfiguration(new BookingConfiguration());
         modelBuilder.ApplyConfiguration(new BookingManagementTokenConfiguration());
+        modelBuilder.ApplyConfiguration(new PendingBookingIntentConfiguration());
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());
     }
 }

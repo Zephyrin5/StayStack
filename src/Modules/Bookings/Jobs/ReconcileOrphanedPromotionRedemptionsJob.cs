@@ -6,6 +6,13 @@ using TickerQ.Utilities.Base;
 namespace Bookings.Jobs;
 
 /// <summary>
+///     SUPERSEDED by ReconcileOrphanedBookingIntentsJob (docs/adr/0017), which
+///     reverses a redemption straight off the intent row's own Id - no
+///     IRedemptionLookup, no cross-module join. <b>Delete this,
+///     IRedemptionLookup, and its DI registration after one release</b>, for
+///     the same pre-existing-orphan reason spelled out on
+///     ReconcileOrphanedBookedHoldsJob.
+///
 ///     The redemption-side counterpart to ReconcileOrphanedBookedHoldsJob -
 ///     same two orphan shapes, same reasoning, applied to
 ///     promotion_redemptions instead of unit_availability_holds:

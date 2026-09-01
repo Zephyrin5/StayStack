@@ -38,26 +38,21 @@ public class ConfirmBookingHandlerTests : IDisposable
 
         _dbContext = new AppBookingsDbContext(options);
 
-        // Deliberately not calling Database.EnsureCreated() - the bookings
-        // table doesn't exist, so the handler's booking insert fails
-        // deterministically, simulating "Catalog write succeeded, Bookings
-        // write failed". bookings_outbox_messages is created by hand
-        // instead, matching only what OutboxMessageConfiguration maps, so
-        // the compensating enqueue below can still succeed even though the
-        // rest of the schema doesn't exist.
-        _dbContext.Database.ExecuteSqlRaw("""
-            CREATE TABLE bookings_outbox_messages (
-                id TEXT NOT NULL PRIMARY KEY,
-                type TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                next_attempt_at TEXT NOT NULL,
-                processed_at TEXT NULL,
-                attempts INTEGER NOT NULL,
-                last_error TEXT NULL,
-                dead_lettered_at TEXT NULL
-            )
-            """);
+        _dbContext.Database.EnsureCreated();
+
+        // Then drop exactly one table, so the guest-checkout management-token
+        // insert fails and rolls the whole save back with it - a
+        // deterministic "the hold was already flipped, the Bookings-side
+        // write then failed" without breaking anything else.
+        //
+        // This used to work by creating no schema at all beyond the outbox
+        // table. That stopped being viable once ConfirmBookingHandler began
+        // asking the database whether the Booking actually committed before
+        // compensating (docs/adr/0017): with no bookings table, that read
+        // throws instead of answering, and no compensation happens. Dropping
+        // one table keeps the failure realistic - in production the schema
+        // exists and the read succeeds - while still failing the save.
+        _dbContext.Database.ExecuteSqlRaw("DROP TABLE booking_management_tokens");
     }
 
     public void Dispose()
@@ -124,9 +119,9 @@ public class ConfirmBookingHandlerTests : IDisposable
             GuestEmail = "jane@example.com"
         };
 
-        // Act & Assert - the underlying Sqlite failure (missing bookings
-        // table) propagates, but the compensating enqueue+dispatch must
-        // have run first.
+        // Act & Assert - the underlying Sqlite failure (missing
+        // booking_management_tokens table) propagates, but the compensating
+        // enqueue+dispatch must have run first.
         await Assert.ThrowsAnyAsync<DbUpdateException>(() =>
             handler.Handle(request, CancellationToken.None).AsTask());
 

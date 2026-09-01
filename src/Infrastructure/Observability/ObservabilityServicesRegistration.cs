@@ -75,8 +75,15 @@ public static class ObservabilityServicesRegistration
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation()
-                .AddMeter(CommandTelemetry.SourceName)
-                .AddMeter(OutboxTelemetry.MeterName)
+                // Wildcard rather than one AddMeter per source. Module-owned
+                // meters (Bookings' orphaned-intent counter, and whatever
+                // follows it) can't be named here as constants without this
+                // Infrastructure project referencing the modules themselves,
+                // inverting the dependency direction ADR-0004 sets. Every
+                // meter in this codebase is named "StayStack.<area>", so one
+                // pattern covers them all and new ones are collected without
+                // a change here.
+                .AddMeter("StayStack.*")
                 .AddConsoleExporter()
                 .AddOtlpExporter(otlp =>
                 {

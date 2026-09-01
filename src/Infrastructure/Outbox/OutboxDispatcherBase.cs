@@ -184,7 +184,7 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
         // idempotent the same way TryHandleAsync is.
         IExecutionStrategy strategy = DbContext.Database.CreateExecutionStrategy();
 
-        (OutboxMessage? claimed, bool justDeadLettered) = await strategy.ExecuteAsync(async () =>
+        (OutboxMessage? claimed, bool justDeadLettered, bool retryFailedAgain) = await strategy.ExecuteAsync(async () =>
         {
             // Retries reuse this DbContext - a rolled-back transaction
             // doesn't undo EF's tracking, so without this, a retry's claim
@@ -216,7 +216,7 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
                 // match what this caller is here to do. No lock was
                 // meaningfully taken - the transaction rolls back on
                 // dispose.
-                return ((OutboxMessage?)null, false);
+                return ((OutboxMessage?)null, false, false);
             }
 
             if (retryingDeadLetter)
@@ -239,6 +239,12 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
 
             DateTimeOffset now = timeProvider.GetUtcNow();
             bool becameDeadLettered = false;
+
+            // A sweep retry that failed again. Tracked separately because
+            // becameDeadLettered is false here by construction (Attempts is
+            // already past MaxAttempts), so without this the retry emits
+            // nothing at all - see OutboxTelemetry.DeadLetterRetried.
+            bool deadLetterRetryFailed = retryingDeadLetter && !succeeded;
 
             if (succeeded)
             {
@@ -283,19 +289,35 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
             await DbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
-            return (candidate, becameDeadLettered);
+            return (candidate, becameDeadLettered, deadLetterRetryFailed);
         });
 
-        if (claimed is not null && justDeadLettered)
+        if (claimed is null)
         {
-            // Only reached after the transaction above actually commits -
-            // see the execution-strategy comment above for why these two
-            // can't live inside the retried delegate.
+            return;
+        }
+
+        // Only reached after the transaction above actually commits - see the
+        // execution-strategy comment above for why these can't live inside the
+        // retried delegate.
+        if (justDeadLettered)
+        {
             OutboxTelemetry.DeadLettered.Add(
                 1,
                 new KeyValuePair<string, object?>("module", ModuleName),
                 new KeyValuePair<string, object?>("type", claimed.Type));
             LogDeadLettered(logger, ModuleName, claimed.Type, claimed.Id, claimed.Attempts, claimed.LastError);
+        }
+        else if (retryFailedAgain)
+        {
+            // Warning, not Error - the first crossing already logged at Error
+            // and is the actionable event. This is the ongoing signal that
+            // the message is still stuck, which is otherwise invisible.
+            OutboxTelemetry.DeadLetterRetried.Add(
+                1,
+                new KeyValuePair<string, object?>("module", ModuleName),
+                new KeyValuePair<string, object?>("type", claimed.Type));
+            LogDeadLetterRetryFailed(logger, ModuleName, claimed.Type, claimed.Id, claimed.Attempts, claimed.LastError);
         }
     }
 
@@ -343,4 +365,8 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
     [LoggerMessage(LogLevel.Error,
         "Outbox message {MessageId} ({MessageType}, module {Module}) was dead-lettered after {Attempts} attempts. Last error: {LastError}")]
     private static partial void LogDeadLettered(ILogger logger, string module, string messageType, Guid messageId, int attempts, string? lastError);
+
+    [LoggerMessage(LogLevel.Warning,
+        "Dead-lettered outbox message {MessageId} ({MessageType}, module {Module}) failed again on its sweep retry ({Attempts} attempts so far). Last error: {LastError}")]
+    private static partial void LogDeadLetterRetryFailed(ILogger logger, string module, string messageType, Guid messageId, int attempts, string? lastError);
 }

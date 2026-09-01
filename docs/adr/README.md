@@ -28,7 +28,7 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 |---|---|---|
 | [0001](0001-native-aot-compatibility.md) | Native AOT compatibility as a design constraint | Accepted |
 | [0002](0002-tickerq-for-background-jobs.md) | TickerQ for background jobs | Accepted |
-| [0003](0003-compensating-actions-over-distributed-transactions.md) | Compensating actions and a transactional outbox for cross-module writes | Accepted |
+| [0003](0003-compensating-actions-over-distributed-transactions.md) | Compensating actions and a transactional outbox for cross-module writes | Accepted; partially superseded by [0017](0017-durable-intent-records-for-cross-module-writes.md) |
 | [0004](0004-module-boundaries-via-contracts-projects.md) | Module boundaries via per-module Contracts projects | Accepted |
 | [0005](0005-host-is-a-capability-not-a-separate-account.md) | Host is a capability on an account, not a separate account type | Accepted |
 | [0006](0006-materialize-then-map-for-jsonb-value-objects.md) | Materialize-then-map for JSONB-converted value objects | Accepted |
@@ -40,3 +40,6 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 | [0012](0012-single-pricing-rule-entity-with-write-time-overlap-rejection.md) | Single PricingRule entity with write-time overlap rejection | Accepted |
 | [0013](0013-admin-targeted-host-queries-as-a-third-request-variant.md) | Admin-targeted host queries as a third request variant | Accepted |
 | [0014](0014-ef-core-vs-dapper-decision-rule.md) | EF Core vs. Dapper: which owns a given database operation | Accepted |
+| [0015](0015-money-value-type-for-currency-amounts.md) | A `Money` value type for currency amounts, at the domain boundary only | Accepted |
+| [0016](0016-trust-model-for-anonymous-endpoints.md) | Trust model for anonymous endpoints | Accepted |
+| [0017](0017-durable-intent-records-for-cross-module-writes.md) | Durable intent records for the forward half of cross-module writes | Accepted |
