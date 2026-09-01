@@ -13,6 +13,7 @@ namespace Api.Endpoints.Auth;
 public class RegisterEndpoint(
     IMediator mediator,
     IOptions<AuthTokenConfiguration> tokenSettings,
+    IOptions<CookieSecurityOptions> cookieSecurity,
     TimeProvider timeProvider) : Endpoint<SignUpRequest, SignUpResponse>
 {
     public override void Configure()
@@ -48,7 +49,7 @@ public class RegisterEndpoint(
 
         if (HttpContext.Request.WantsCookieAuth())
         {
-            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken!, tokenSettings.Value, timeProvider);
+            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken!, tokenSettings.Value, cookieSecurity.Value, timeProvider);
             result = result with { RefreshToken = null };
         }
 

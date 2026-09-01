@@ -4,9 +4,11 @@ using FastEndpoints;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 namespace Api.Endpoints.Availability;
 
-public class HoldAvailabilityEndpoint(IMediator mediator, TimeProvider timeProvider)
+public class HoldAvailabilityEndpoint(
+    IMediator mediator, IOptions<CookieSecurityOptions> cookieSecurity, TimeProvider timeProvider)
     : Endpoint<HoldAvailabilityRequest, HoldAvailabilityResponse>
 {
     public override void Configure()
@@ -32,7 +34,7 @@ public class HoldAvailabilityEndpoint(IMediator mediator, TimeProvider timeProvi
 
     public override async Task HandleAsync(HoldAvailabilityRequest req, CancellationToken ct)
     {
-        req.HolderToken = HttpContext.Request.GetOrCreateHoldSessionToken(HttpContext.Response, timeProvider);
+        req.HolderToken = HttpContext.Request.GetOrCreateHoldSessionToken(HttpContext.Response, cookieSecurity.Value, timeProvider);
 
         // Assigned unconditionally, overwriting whatever bound - see the
         // property's own comment. Correct only once ForwardedHeaders is

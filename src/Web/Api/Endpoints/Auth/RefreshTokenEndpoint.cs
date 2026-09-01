@@ -14,6 +14,7 @@ namespace Api.Endpoints.Auth;
 public class RefreshTokenEndpoint(
     IMediator mediator,
     IOptions<AuthTokenConfiguration> tokenSettings,
+    IOptions<CookieSecurityOptions> cookieSecurity,
     TimeProvider timeProvider) : Endpoint<RefreshTokenRequest, RefreshTokenResponse>
 {
     public override void Configure()
@@ -56,7 +57,7 @@ public class RefreshTokenEndpoint(
 
         if (cookieAuth)
         {
-            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken!, tokenSettings.Value, timeProvider);
+            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken!, tokenSettings.Value, cookieSecurity.Value, timeProvider);
             result = result with { RefreshToken = null };
         }
 

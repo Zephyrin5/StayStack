@@ -12,6 +12,7 @@ namespace Api.Endpoints.Hosts;
 public class BecomeHostEndpoint(
     IMediator mediator,
     IOptions<AuthTokenConfiguration> tokenSettings,
+    IOptions<CookieSecurityOptions> cookieSecurity,
     TimeProvider timeProvider) : Endpoint<BecomeHostRequest, BecomeHostResponse>
 {
     public override void Configure()
@@ -39,7 +40,7 @@ public class BecomeHostEndpoint(
 
         if (HttpContext.Request.WantsCookieAuth())
         {
-            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken ?? string.Empty, tokenSettings.Value, timeProvider);
+            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken ?? string.Empty, tokenSettings.Value, cookieSecurity.Value, timeProvider);
             result = result with { RefreshToken = null };
         }
 

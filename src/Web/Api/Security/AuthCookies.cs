@@ -19,21 +19,21 @@ public static class AuthCookies
     {
         public void SetRefreshTokenCookie(string refreshToken,
             AuthTokenConfiguration tokenSettings,
+            CookieSecurityOptions cookieSecurity,
             TimeProvider timeProvider)
         {
             response.Cookies.Append(RefreshTokenCookieName, refreshToken, new CookieOptions
             {
                 HttpOnly = true,
-                // Tied to the actual request scheme, not an environment check
-                // like IsDevelopment() - dev runs over plain HTTP (avoids
-                // ASP.NET Core dev-cert trust issues with Node's fetch), and
-                // the integration test suite's TestServer transport is HTTP
-                // too regardless of environment name ("Testing", not
-                // "Development"). A Secure cookie set on a non-HTTPS response
-                // is correctly refused by any real cookie jar, so this has
-                // to track the actual scheme - confirmed by CookieAuthTests.cs
-                // failing against a naive !environment.IsDevelopment() check.
-                Secure = response.HttpContext.Request.IsHttps,
+                // Declared by configuration, not derived from
+                // Request.IsHttps. IsHttps only reports the proxy's scheme
+                // once UseForwardedHeaders has trusted that proxy, and
+                // ForwardedHeaders:KnownProxies ships empty - so behind a
+                // TLS-terminating proxy on any non-loopback address this
+                // silently evaluated false and shipped the refresh token
+                // without Secure. See CookieSecurityOptions for why the
+                // default is true and which environments opt out.
+                Secure = cookieSecurity.RequireSecure,
                 // Lax, not None: this cookie is only ever attached to
                 // same-site JS-initiated fetch calls, never a cross-site
                 // top-level navigation - and SameSite compares registrable

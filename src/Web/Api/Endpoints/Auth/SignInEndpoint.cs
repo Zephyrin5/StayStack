@@ -14,6 +14,7 @@ namespace Api.Endpoints.Auth;
 public class SignInEndpoint(
     IMediator mediator,
     IOptions<AuthTokenConfiguration> tokenSettings,
+    IOptions<CookieSecurityOptions> cookieSecurity,
     TimeProvider timeProvider) : Endpoint<SignInRequest, SignInResponse>
 {
     public override void Configure()
@@ -44,7 +45,7 @@ public class SignInEndpoint(
 
         if (HttpContext.Request.WantsCookieAuth())
         {
-            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken!, tokenSettings.Value, timeProvider);
+            HttpContext.Response.SetRefreshTokenCookie(result.RefreshToken!, tokenSettings.Value, cookieSecurity.Value, timeProvider);
             result = result with { RefreshToken = null };
         }
 

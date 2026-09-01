@@ -1,5 +1,6 @@
 using Api;
 using Api.RateLimiting;
+using Api.Security;
 using Api.Serialization;
 using Availability;
 using Bookings;
@@ -62,6 +63,8 @@ builder.Services.AddHealthChecks();
 // appsettings.Testing.json sets a high limit so the shared integration-
 // test factory doesn't trip it on ordinary traffic; RateLimitingTests
 // overrides it back down to actually exercise a 429.
+builder.Services.Configure<CookieSecurityOptions>(
+    builder.Configuration.GetSection(CookieSecurityOptions.SectionName));
 builder.Services.Configure<AuthRateLimitOptions>(builder.Configuration.GetSection("RateLimiting"));
 // Same "RateLimiting" section, sibling keys - HoldPermitLimit/HoldWindowSeconds
 // coexist with AuthPermitLimit/AuthWindowSeconds without colliding.
@@ -169,13 +172,29 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-// Trusts nothing by default - the loopback-only KnownNetworks/KnownProxies
-// default would otherwise let an untrusted edge spoof
-// X-Forwarded-For/-Proto and defeat both AuthCookies' Secure-flag check
-// and the IP-partitioned rate limiter's partition key below. Populated
-// from config, never hardcoded, so each deployment lists its actual
-// proxy addresses. Registered before anything else reads Request.IsHttps
-// or Connection.RemoteIpAddress.
+// Populated from config, never hardcoded, so each deployment lists its
+// actual proxy addresses. Registered before anything else reads
+// Request.IsHttps or Connection.RemoteIpAddress.
+//
+// This does NOT trust nothing by default, despite what this comment used to
+// claim: ForwardedHeadersOptions ships with KnownProxies = { ::1 } and
+// KnownNetworks = { 127.0.0.0/8 }, and the loop below only adds to them. So
+// with the shipped empty config, a loopback caller is trusted and every
+// other address is not.
+//
+// The consequence is the reason ForwardedHeaders:KnownProxies has to be
+// populated in any proxied deployment. Without it, a TLS-terminating proxy
+// at a non-loopback address has its headers dropped, and two controls read
+// the wrong thing: RemoteIpAddress becomes the proxy's own address, so the
+// "holds"/"auth" rate-limit partitions and HoldAvailabilityHandler's
+// concurrent-hold cap collapse into one shared bucket for every caller.
+// AuthCookies used to be a third victim - its Secure flag is now declared
+// by configuration instead (see CookieSecurityOptions), precisely because a
+// security flag should not depend on transport details the app may not be
+// able to see.
+//
+// The startup check below makes that misconfiguration loud rather than
+// silent.
 ForwardedHeadersOptions forwardedHeadersOptions = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
@@ -184,6 +203,21 @@ foreach (string proxy in app.Configuration.GetSection("ForwardedHeaders:KnownPro
 {
     forwardedHeadersOptions.KnownProxies.Add(IPAddress.Parse(proxy));
 }
+if (!app.Environment.IsDevelopment() && forwardedHeadersOptions.KnownProxies.Count == 0)
+{
+    // A warning, not a throw: an app exposed directly with its own TLS has
+    // no proxy to list, and that is a legitimate deployment. But it is far
+    // more often an oversight, and the symptom - every caller sharing one
+    // rate-limit and hold-cap partition - reads as mysterious 429s rather
+    // than as a configuration problem, so it is worth saying plainly once
+    // at startup.
+    app.Logger.LogWarning(
+        "ForwardedHeaders:KnownProxies is empty outside Development. Only loopback proxies are trusted, " +
+        "so behind a proxy at any other address X-Forwarded-For/-Proto are ignored: every caller will share " +
+        "one rate-limit and concurrent-hold partition keyed on the proxy's address. List the proxy addresses " +
+        "if this app is deployed behind one.");
+}
+
 app.UseForwardedHeaders(forwardedHeadersOptions);
 
 app.UseRequestLocalization();

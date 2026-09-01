@@ -4,7 +4,11 @@ using Identity.Features.RefreshToken;
 using Identity.Features.SignIn;
 using Identity.Features.SignOut;
 using Microsoft.AspNetCore.Identity;
+using Api.Security;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using System.Net;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Auth;
@@ -83,6 +87,55 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(result);
         Assert.False(string.IsNullOrWhiteSpace(result.AccessToken));
         Assert.Null(result.RefreshToken);
+    }
+
+    [Fact]
+    public async Task SignIn_WithSecureCookiesRequired_SetsSecure_EvenOverPlainHttp()
+    {
+        // The regression this pins: the Secure flag used to be
+        // Request.IsHttps. That reads the proxy's scheme only when
+        // UseForwardedHeaders has trusted the proxy, and
+        // ForwardedHeaders:KnownProxies ships empty - so behind a
+        // TLS-terminating proxy at any non-loopback address it was false and
+        // the refresh token went out unprotected.
+        //
+        // TestServer's transport is plain HTTP, which makes it exactly the
+        // shape of that failure: IsHttps is false here too. With the flag
+        // declared by configuration rather than derived, the cookie is Secure
+        // anyway - which is the whole point, since the app cannot see the
+        // TLS the proxy terminated.
+        //
+        // appsettings.Testing.json turns RequireSecure off so the rest of the
+        // suite's cookie jar behaves like a browser on HTTP; this test opts
+        // back into the production default on its own host.
+        string email = _faker.Internet.Email();
+        string password = $"P@{_faker.Internet.Password()}!";
+        await SeedUserAsync(email, password);
+
+        using WebApplicationFactory<Program> secureFactory = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+                services.Configure<CookieSecurityOptions>(o => o.RequireSecure = true)));
+
+        using HttpClient client = secureFactory.CreateClient();
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/auth/sign-in?useCookies=true", new SignInRequest { Email = email, Password = password });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.TryGetValues("Set-Cookie", out var setCookieHeaders));
+
+        string cookieHeader = Assert.Single(setCookieHeaders);
+        Assert.Contains(CookieName, cookieHeader);
+        Assert.Contains("secure", cookieHeader, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CookieSecurityOptions_DefaultsToRequiringSecure()
+    {
+        // Fails closed. A deployment that genuinely serves plain HTTP has to
+        // say so in its own configuration; forgetting to configure anything
+        // must not be what silently drops the flag - that was the shape of
+        // the original defect.
+        Assert.True(new CookieSecurityOptions().RequireSecure);
     }
 
     [Fact]

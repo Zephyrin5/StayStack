@@ -24,12 +24,13 @@ public static class HoldSessionCookie
         /// <summary>
         ///     Returns the caller's existing hold-session token, or mints and
         ///     sets a new one on <paramref name="response"/> if none was
-        ///     presented. Same Secure/SameSite reasoning as AuthCookies - tied
-        ///     to the actual request scheme (correct once ForwardedHeaders is
-        ///     in place behind a real proxy), Lax since this is never sent
-        ///     cross-site.
+        ///     presented. Same Secure/SameSite reasoning as AuthCookies -
+        ///     Secure declared by configuration rather than inferred from
+        ///     Request.IsHttps (see <see cref="CookieSecurityOptions"/>), Lax
+        ///     since this is never sent cross-site.
         /// </summary>
-        public string GetOrCreateHoldSessionToken(HttpResponse response, TimeProvider timeProvider)
+        public string GetOrCreateHoldSessionToken(
+            HttpResponse response, CookieSecurityOptions cookieSecurity, TimeProvider timeProvider)
         {
             // Guid.TryParse, not just non-empty - the column this is
             // eventually written to is HasMaxLength(64), and nothing stops
@@ -49,7 +50,7 @@ public static class HoldSessionCookie
             response.Cookies.Append(CookieName, token, new CookieOptions
             {
                 HttpOnly = true,
-                Secure = request.IsHttps,
+                Secure = cookieSecurity.RequireSecure,
                 SameSite = SameSiteMode.Lax,
                 Expires = timeProvider.GetUtcNow().AddDays(1),
                 Path = "/"
