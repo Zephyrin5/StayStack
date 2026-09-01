@@ -113,4 +113,56 @@ public class RefreshTokenTests(IntegrationTestWebApplicationFactory factory)
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task RefreshToken_ShouldReturn401_WhenTheTokenIsValidButItsUserWasDeleted()
+    {
+        // refresh_tokens has no FK to users, so deleting an account leaves
+        // its tokens behind and they still validate - the handler then finds
+        // no user. That used to throw UnauthorizedAccessException, which is a
+        // plain BCL type GlobalExceptionHandler has no arm for, so a
+        // genuinely unauthorized caller got a 500.
+        //
+        // Asserts the body too, not just the status: this response has to
+        // stay indistinguishable from the unknown/expired/revoked paths, or
+        // it becomes an oracle confirming a token was real and its account
+        // since deleted (docs/adr/0016).
+        string email = _faker.Internet.Email();
+        string password = $"P@{_faker.Internet.Password()}!";
+        await SeedUserAsync(email, password);
+
+        HttpResponseMessage signInResponse = await _client.PostAsJsonAsync("/api/auth/sign-in", new SignInRequest
+        {
+            Email = email,
+            Password = password
+        }, TestContext.Current.CancellationToken);
+        SignInResponse? signInResult = await signInResponse.Content.ReadFromJsonAsync<SignInResponse>(
+            TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(signInResult?.RefreshToken);
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            ApplicationUser user = (await userManager.FindByEmailAsync(email))!;
+            IdentityResult deleteResult = await userManager.DeleteAsync(user);
+            Assert.True(deleteResult.Succeeded, "Failed to delete the test user.");
+        }
+
+        HttpResponseMessage response = await _client.PostAsJsonAsync(
+            "/api/auth/refresh-token",
+            new RefreshTokenRequest { RefreshToken = signInResult.RefreshToken },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+
+        // A token that never existed at all, for comparison.
+        HttpResponseMessage unknownTokenResponse = await _client.PostAsJsonAsync(
+            "/api/auth/refresh-token",
+            new RefreshTokenRequest { RefreshToken = "not-a-real-token" },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            await unknownTokenResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken),
+            await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
 }

@@ -1,4 +1,4 @@
-﻿using Identity.Entities;
+using Identity.Entities;
 using Identity.Exceptions;
 using Identity.Features.Common;
 using Mediator;
@@ -55,8 +55,19 @@ public class RefreshTokenHandler(
                 throw;
             }
 
+            // The token consumed above was genuine, but its user is gone -
+            // refresh_tokens has no FK to users, so deleting an account
+            // leaves its tokens behind and they still validate here.
+            //
+            // InvalidRefreshTokenException, not UnauthorizedAccessException:
+            // the latter is a plain BCL exception, so GlobalExceptionHandler
+            // has no arm for it and falls through to a 500. It also makes
+            // this response byte-identical to the unknown/expired/revoked
+            // paths, which docs/adr/0016's no-enumeration-oracle reasoning
+            // wants - a distinguishable answer here would confirm that a
+            // token was real and its account since deleted.
             ApplicationUser user = await userManager.FindByIdAsync(validated.UserId.ToString())
-                                   ?? throw new UnauthorizedAccessException("Invalid refresh token.");
+                                   ?? throw new InvalidRefreshTokenException();
             var roles = await userManager.GetRolesAsync(user);
 
             // New refresh token stays in the same rotation family as the
