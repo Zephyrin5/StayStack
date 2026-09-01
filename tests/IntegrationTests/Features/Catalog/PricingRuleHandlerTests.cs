@@ -79,6 +79,7 @@ public class PricingRuleHandlerTests(IntegrationTestWebApplicationFactory factor
         HttpResponseMessage response = await _client.SendAsync(
             Authorized(HttpMethod.Post, "/api/catalog/properties", accessToken, new CreatePropertyRequest
             {
+                TimeZoneId = "Asia/Kuwait",
                 PropertyType = PropertyType.Hotel,
                 Name = new Dictionary<string, string> { { "en", "Test Property" } },
                 City = "Kuwait City"

@@ -88,6 +88,7 @@ public class PricingRuleConcurrencyTests(IntegrationTestWebApplicationFactory fa
         HttpResponseMessage propertyResponse = await client.SendAsync(
             Authorized(HttpMethod.Post, "/api/catalog/properties", hostToken, new CreatePropertyRequest
             {
+                TimeZoneId = "Asia/Kuwait",
                 PropertyType = PropertyType.Hotel,
                 Name = new Dictionary<string, string> { { "en", "Test Property" } },
                 City = "Kuwait City"

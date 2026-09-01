@@ -1,4 +1,5 @@
 using Bookings.Contracts;
+using BuildingBlocks.Time;
 using BuildingBlocks.Identity;
 using Catalog.Contracts;
 using Mediator;
@@ -27,9 +28,16 @@ public class ListMyReviewableBookingsHandler(
         IReadOnlyList<BookingAccessResult> confirmedBookings =
             await bookingLookup.GetConfirmedBookingsForCustomerAsync(customerId, cancellationToken);
 
-        DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        // Per booking, not once for the whole list. These bookings can span
+        // properties in different zones, so a single "today" is structurally
+        // wrong here regardless of which zone it is computed in - and the
+        // filter runs before any unit is loaded, so the booking's own
+        // snapshot is the only thing available. See docs/adr/0018.
+        bool HasEnded(BookingAccessResult b) =>
+            b.CheckOut <= PropertyTimeZone.Today(timeProvider, b.TimeZoneId);
+
         List<Guid> pastBookingIds = confirmedBookings
-            .Where(b => b.CheckOut <= today)
+            .Where(HasEnded)
             .Select(b => b.BookingId)
             .ToList();
 
@@ -40,7 +48,7 @@ public class ListMyReviewableBookingsHandler(
             .ToListAsync(cancellationToken)).ToHashSet();
 
         List<BookingAccessResult> reviewable = confirmedBookings
-            .Where(b => b.CheckOut <= today && !alreadyReviewedBookingIds.Contains(b.BookingId))
+            .Where(b => HasEnded(b) && !alreadyReviewedBookingIds.Contains(b.BookingId))
             .ToList();
 
         // One batched lookup for every distinct unit, not one call per

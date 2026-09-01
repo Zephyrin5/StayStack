@@ -1,5 +1,6 @@
 using Bookings.Contracts;
 using BuildingBlocks.Exceptions;
+using BuildingBlocks.Time;
 using BuildingBlocks.Identity;
 using Catalog.Contracts;
 using Mediator;
@@ -31,7 +32,11 @@ public class CreateStayReviewHandler(
             throw new ValidationException(nameof(request.BookingId), "This booking hasn't been confirmed yet.");
         }
 
-        DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        // The booking's own snapshotted zone - "has the stay ended" is a
+        // question about the property's calendar, and this must match
+        // GetBookingForManagementHandler's CanReview exactly or the UI offers
+        // a review the API rejects. See docs/adr/0018.
+        DateOnly today = PropertyTimeZone.Today(timeProvider, access.TimeZoneId);
         if (access.CheckOut > today)
         {
             throw new ValidationException(nameof(request.BookingId), "This stay hasn't ended yet.");

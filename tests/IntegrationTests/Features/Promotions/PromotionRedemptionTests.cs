@@ -123,6 +123,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         HttpResponseMessage response = await _client.SendAsync(
             Authorized(HttpMethod.Post, "/api/catalog/properties", hostAccessToken, new CreatePropertyRequest
             {
+                TimeZoneId = "Asia/Kuwait",
                 PropertyType = PropertyType.Hotel,
                 Name = new Dictionary<string, string> { { "en", "Test Property" } },
                 City = "Kuwait City"

@@ -17,7 +17,7 @@ public class PropertyTests
         Guid hostId = Guid.NewGuid();
         LocalizedText name = CreateName();
 
-        Property property = Property.Create(hostId, PropertyType.Hotel, name, "Kuwait City");
+        Property property = Property.Create(hostId, PropertyType.Hotel, name, "Kuwait City", "Asia/Kuwait");
 
         Assert.NotEqual(Guid.Empty, property.Id);
         Assert.Equal(hostId, property.HostId);
@@ -30,7 +30,7 @@ public class PropertyTests
     [Fact]
     public void Create_ShouldAllowNullCity()
     {
-        Property property = Property.Create(Guid.NewGuid(), PropertyType.Chalet, CreateName(), null);
+        Property property = Property.Create(Guid.NewGuid(), PropertyType.Chalet, CreateName(), null, "Asia/Kuwait");
 
         Assert.Null(property.City);
     }
@@ -38,19 +38,19 @@ public class PropertyTests
     [Fact]
     public void Create_ShouldThrow_WhenHostIdIsEmpty()
     {
-        Assert.ThrowsAny<ArgumentException>(() => Property.Create(Guid.Empty, PropertyType.Hotel, CreateName(), null));
+        Assert.ThrowsAny<ArgumentException>(() => Property.Create(Guid.Empty, PropertyType.Hotel, CreateName(), null, "Asia/Kuwait"));
     }
 
     [Fact]
     public void Create_ShouldThrow_WhenNameIsNull()
     {
-        Assert.Throws<ArgumentNullException>(() => Property.Create(Guid.NewGuid(), PropertyType.Hotel, null!, null));
+        Assert.Throws<ArgumentNullException>(() => Property.Create(Guid.NewGuid(), PropertyType.Hotel, null!, null, "Asia/Kuwait"));
     }
 
     [Fact]
     public void Rename_ShouldUpdateName_WhenValid()
     {
-        Property property = Property.Create(Guid.NewGuid(), PropertyType.Hotel, CreateName(), null);
+        Property property = Property.Create(Guid.NewGuid(), PropertyType.Hotel, CreateName(), null, "Asia/Kuwait");
         LocalizedText newName = LocalizedText.Create(new Dictionary<string, string> { { "en", "Marina Hotel" } }, "en");
 
         property.Rename(newName);
@@ -61,7 +61,7 @@ public class PropertyTests
     [Fact]
     public void Rename_ShouldThrow_WhenNameIsNull()
     {
-        Property property = Property.Create(Guid.NewGuid(), PropertyType.Hotel, CreateName(), null);
+        Property property = Property.Create(Guid.NewGuid(), PropertyType.Hotel, CreateName(), null, "Asia/Kuwait");
 
         Assert.Throws<ArgumentNullException>(() => property.Rename(null!));
     }

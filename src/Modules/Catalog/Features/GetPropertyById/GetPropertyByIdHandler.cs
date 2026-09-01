@@ -48,6 +48,7 @@ public class GetPropertyByIdHandler(AppCatalogDbContext dbContext, HybridCache c
             PropertyType = property.PropertyType,
             Name = new Dictionary<string, string>(property.Name.Values),
             City = property.City,
+            TimeZoneId = property.TimeZoneId,
             Units =
             [
                 .. units.Select(u => new UnitSummary

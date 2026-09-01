@@ -29,7 +29,7 @@ public class AdminCreatePropertyHandler(
 
         LocalizedText name = LocalizedText.Create(request.Name, localizationSettings.Value.DefaultCulture);
 
-        Property property = Property.Create(request.HostId, request.PropertyType, name, request.City);
+        Property property = Property.Create(request.HostId, request.PropertyType, name, request.City, request.TimeZoneId);
 
         dbContext.Properties.Add(property);
         await dbContext.SaveChangesAsync(cancellationToken);

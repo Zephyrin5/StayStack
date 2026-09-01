@@ -17,10 +17,19 @@ namespace IntegrationTests.Features.Availability;
 [Collection("Integration Tests")]
 public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory factory)
 {
+    // Properties for units built by CreateTestUnit below, flushed by the
+    // seeder so a unit is never persisted without its owner - see
+    // CatalogSeeding.
+    private readonly List<Property> _pendingProperties = [];
+
     private async Task SeedCatalogAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+
+        // Owners first - a Unit without its Property no longer resolves.
+        context.AddRange(_pendingProperties);
+        _pendingProperties.Clear();
 
         context.AddRange(entities);
         await context.SaveChangesAsync();
@@ -35,10 +44,14 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         await context.SaveChangesAsync();
     }
 
-    private static Unit CreateTestUnit(int maxCapacity = 2)
+    private Unit CreateTestUnit(int maxCapacity = 2)
     {
+        // Built on a real Property, not a throwaway id - see CatalogSeeding.
+        Property property = CatalogSeeding.CreateProperty();
+        _pendingProperties.Add(property);
+
         return Unit.Create(
-            Guid.CreateVersion7(),
+            property.Id,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
             maxCapacity,
             100);
@@ -567,6 +580,71 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         };
 
         HoldAvailabilityResponse result = await handler.Handle(sixthRequest, CancellationToken.None);
+
+        Assert.NotEqual(Guid.Empty, result.HoldId);
+    }
+
+    [Fact]
+    public async Task Handle_CheckInIsYesterdayAtTheProperty_ButTodayInUtc_IsRejected()
+    {
+        // The behavioural proof for docs/adr/0018, and it fails under the old
+        // UTC logic.
+        //
+        // 21:30 UTC on 2026-08-20 is already 00:30 on the 21st in
+        // Asia/Kuwait, where this property is. So 2026-08-20 is *yesterday*
+        // for the hotel and must not be bookable - but a UTC-derived "today"
+        // reads 2026-08-20 and lets it through. That is the permissive
+        // direction this app's own market sits on: holding a unit for a date
+        // that has already passed locally.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+
+        DateTimeOffset lateEveningUtc = new DateTimeOffset(2026, 8, 20, 21, 30, 0, TimeSpan.Zero);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(lateEveningUtc);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
+
+        HoldAvailabilityRequest command = new HoldAvailabilityRequest
+        {
+            UnitId = unit.Id,
+            CheckIn = new DateOnly(2026, 8, 20),
+            CheckOut = new DateOnly(2026, 8, 23),
+            GuestCount = 2,
+            HolderToken = Guid.NewGuid().ToString()
+        };
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            handler.Handle(command, CancellationToken.None).AsTask());
+    }
+
+    [Fact]
+    public async Task Handle_CheckInIsTodayAtTheProperty_IsAccepted()
+    {
+        // The other half of the same boundary: the property's actual today
+        // (the 21st at that instant) still holds normally, so the guard moved
+        // rather than simply tightened.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+
+        DateTimeOffset lateEveningUtc = new DateTimeOffset(2026, 8, 20, 21, 30, 0, TimeSpan.Zero);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(lateEveningUtc);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
+
+        HoldAvailabilityResponse result = await handler.Handle(new HoldAvailabilityRequest
+        {
+            UnitId = unit.Id,
+            CheckIn = new DateOnly(2026, 8, 21),
+            CheckOut = new DateOnly(2026, 8, 24),
+            GuestCount = 2,
+            HolderToken = Guid.NewGuid().ToString()
+        }, CancellationToken.None);
 
         Assert.NotEqual(Guid.Empty, result.HoldId);
     }

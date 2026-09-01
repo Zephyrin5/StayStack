@@ -82,6 +82,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
         HttpResponseMessage response = await _client.SendAsync(
             Authorized(HttpMethod.Post, "/api/catalog/properties", accessToken, new CreatePropertyRequest
             {
+                TimeZoneId = "Asia/Kuwait",
                 PropertyType = propertyType,
                 Name = new Dictionary<string, string> { { "en", "Original Name" } },
                 City = city
@@ -120,6 +121,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
         HttpResponseMessage response = await _client.SendAsync(
             Authorized(HttpMethod.Put, $"/api/catalog/properties/{propertyId}", hostAccessToken, new UpdatePropertyRequest
             {
+                TimeZoneId = "Asia/Kuwait",
                 PropertyId = propertyId,
                 PropertyType = PropertyType.Chalet,
                 Name = new Dictionary<string, string> { { "en", "Renamed Property" } },
@@ -150,6 +152,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
         HttpResponseMessage response = await _client.SendAsync(
             Authorized(HttpMethod.Put, $"/api/catalog/properties/{propertyId}", otherHostToken, new UpdatePropertyRequest
             {
+                TimeZoneId = "Asia/Kuwait",
                 PropertyId = propertyId,
                 PropertyType = PropertyType.Hotel,
                 Name = new Dictionary<string, string> { { "en", "Hijacked" } }
@@ -409,7 +412,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
                 Guid.CreateVersion7(), unitId, Guid.NewGuid(), null,
                 "Jane Guest", "jane@example.com", null,
                 DateOnly.FromDateTime(DateTime.UtcNow).AddDays(5), DateOnly.FromDateTime(DateTime.UtcNow).AddDays(7),
-                2, Money.Of(200m, Currency.KWD), 200m, CancellationPolicy.CreateDefault());
+                2, Money.Of(200m, Currency.KWD), 200m, CancellationPolicy.CreateDefault(), "Asia/Kuwait");
             bookingsDb.Bookings.Add(booking);
             await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
         }

@@ -229,7 +229,8 @@ public class ConfirmBookingHandler(
                 hold.GuestCount,
                 totalPrice,
                 hold.Subtotal,
-                unit.CancellationPolicy);
+                unit.CancellationPolicy,
+                unit.TimeZoneId);
 
             dbContext.Bookings.Add(booking);
 

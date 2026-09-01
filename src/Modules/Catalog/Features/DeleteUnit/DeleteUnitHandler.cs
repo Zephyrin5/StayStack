@@ -1,4 +1,5 @@
 using BuildingBlocks.Exceptions;
+using BuildingBlocks.Time;
 using BuildingBlocks.Identity;
 using Catalog.Contracts;
 using Catalog.Entities;
@@ -40,7 +41,8 @@ public class DeleteUnitHandler(
             hostAuthorization.RequireOwnership(property.HostId, nameof(Property), property.Id);
         }
 
-        await EnsureNoActiveBookingsOrHoldsAsync(unit.Id, timeProvider, unitArchivalGuard, availabilityLookup, cancellationToken);
+        await EnsureNoActiveBookingsOrHoldsAsync(
+            unit.Id, property.TimeZoneId, timeProvider, unitArchivalGuard, availabilityLookup, cancellationToken);
 
         unit.Archive(timeProvider.GetUtcNow(), currentUserProvider.UserId);
 
@@ -57,12 +59,16 @@ public class DeleteUnitHandler(
     // obvious case of pulling a unit out from under a guest mid-stay.
     internal static async Task EnsureNoActiveBookingsOrHoldsAsync(
         Guid unitId,
+        string timeZoneId,
         TimeProvider timeProvider,
         IUnitArchivalGuard unitArchivalGuard,
         IUnitAvailabilityLookup availabilityLookup,
         CancellationToken cancellationToken)
     {
-        DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        // The property's own zone, not UTC - "is a booking still active" is
+        // measured against CheckOut, itself a property-local date. Both
+        // callers already have the Property loaded. See docs/adr/0018.
+        DateOnly today = PropertyTimeZone.Today(timeProvider, timeZoneId);
 
         bool hasActiveBooking = await unitArchivalGuard.HasActiveBookingForUnitAsync(unitId, today, cancellationToken);
         if (hasActiveBooking)

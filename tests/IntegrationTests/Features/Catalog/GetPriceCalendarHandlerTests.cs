@@ -1,4 +1,4 @@
-﻿using Availability;
+using Availability;
 using Availability.Contracts;
 using Availability.Entities;
 using Catalog;
@@ -15,10 +15,19 @@ namespace IntegrationTests.Features.Catalog;
 [Collection("Integration Tests")]
 public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory factory)
 {
+    // Properties for units built by CreateTestUnit below, flushed by the
+    // seeder so a unit is never persisted without its owner - see
+    // CatalogSeeding.
+    private readonly List<Property> _pendingProperties = [];
+
     private async Task SeedDatabaseAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+
+        // Owners first - a Unit without its Property no longer resolves.
+        context.AddRange(_pendingProperties);
+        _pendingProperties.Clear();
 
         context.AddRange(entities);
         await context.SaveChangesAsync();
@@ -38,10 +47,14 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         return new GetPriceCalendarHandler(context, availabilityLookup, cache, timeProvider);
     }
 
-    private static Unit CreateTestUnit(decimal basePrice = 120m)
+    private Unit CreateTestUnit(decimal basePrice = 120m)
     {
+        // Built on a real Property, not a throwaway id - see CatalogSeeding.
+        Property property = CatalogSeeding.CreateProperty();
+        _pendingProperties.Add(property);
+
         return Unit.Create(
-            Guid.CreateVersion7(),
+            property.Id,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Ocean View Suite" } }, "en"),
             2,
             basePrice);

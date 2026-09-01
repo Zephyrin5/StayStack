@@ -83,17 +83,24 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
 
     private readonly HttpClient _client = factory.CreateClient();
 
-    private static Unit CreateTestUnit() => Unit.Create(
-        Guid.CreateVersion7(),
+    private static (Property Property, Unit Unit) CreateTestUnit()
+    {
+        // A real Property, not a throwaway id - see CatalogSeeding.
+        Property property = CatalogSeeding.CreateProperty();
+        return (property, Unit.Create(
+            property.Id,
         LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
         2,
-        100m);
-
+        100m));
+    }
     private async Task<Unit> SeedUnitAsync()
     {
-        Unit unit = CreateTestUnit();
+        (Property property, Unit unit) = CreateTestUnit();
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+
+        // Owner first - a Unit without its Property no longer resolves.
+        context.Add(property);
         context.Add(unit);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         return unit;
@@ -366,7 +373,7 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
                 intent.Id, unit.Id, holdId, null,
                 "Committed By Retry", "jane@example.com", null,
                 checkIn, checkIn.AddDays(3), 1,
-                Money.Of(999m, Currency.KWD), 999m, CancellationPolicy.CreateDefault()));
+                Money.Of(999m, Currency.KWD), 999m, CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
             await db.SaveChangesAsync();
         });
 

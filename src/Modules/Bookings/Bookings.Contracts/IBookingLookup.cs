@@ -71,4 +71,9 @@ public record BookingAccessResult
     public bool IsConfirmed { get; init; }
     public required string GuestEmail { get; init; }
     public Guid? CustomerId { get; init; }
+
+    // The booking's own snapshotted zone, so callers resolve "today" per
+    // booking rather than once per request - what makes a list spanning
+    // several properties correct (docs/adr/0018).
+    public required string TimeZoneId { get; init; }
 }

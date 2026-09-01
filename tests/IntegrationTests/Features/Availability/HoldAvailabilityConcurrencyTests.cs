@@ -21,20 +21,25 @@ namespace IntegrationTests.Features.Availability;
 [Collection("Integration Tests")]
 public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFactory factory)
 {
-    private static Unit CreateTestUnit(int maxCapacity = 10)
+    private static (Property Property, Unit Unit) CreateTestUnit(int maxCapacity = 10)
     {
-        return Unit.Create(
-            Guid.CreateVersion7(),
+        // A real Property, not a throwaway id - see CatalogSeeding.
+        Property property = CatalogSeeding.CreateProperty();
+        return (property, Unit.Create(
+            property.Id,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
             maxCapacity,
-            100);
+            100));
     }
 
     private async Task<Unit> SeedUnitAsync()
     {
-        Unit unit = CreateTestUnit();
+        (Property property, Unit unit) = CreateTestUnit();
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+
+        // Owner first - a Unit without its Property no longer resolves.
+        context.Add(property);
         context.Add(unit);
         await context.SaveChangesAsync();
         return unit;

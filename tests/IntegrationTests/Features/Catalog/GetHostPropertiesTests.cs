@@ -78,6 +78,7 @@ public class GetHostPropertiesTests(IntegrationTestWebApplicationFactory factory
         {
             Content = JsonContent.Create(new CreatePropertyRequest
             {
+                TimeZoneId = "Asia/Kuwait",
                 PropertyType = PropertyType.Hotel,
                 Name = new Dictionary<string, string> { { "en", name } },
                 City = "Kuwait City"

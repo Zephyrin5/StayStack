@@ -82,6 +82,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         string hostAccessToken = await SeedHostUserAsync();
         CreatePropertyRequest request = new CreatePropertyRequest
         {
+                TimeZoneId = "Asia/Kuwait",
             PropertyType = PropertyType.Hotel,
             Name = new Dictionary<string, string> { { "en", "Seaside Hotel" } },
             City = "Kuwait City"
@@ -131,6 +132,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
 
         AdminCreatePropertyRequest request = new AdminCreatePropertyRequest
         {
+                TimeZoneId = "Asia/Kuwait",
             HostId = hostId,
             PropertyType = PropertyType.Chalet,
             Name = new Dictionary<string, string> { { "en", "Desert Chalet" } },
@@ -161,6 +163,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         HttpResponseMessage propertyResponse = await _client.SendAsync(
             AuthorizedPost("/api/catalog/properties", new CreatePropertyRequest
             {
+                TimeZoneId = "Asia/Kuwait",
                 PropertyType = PropertyType.Hotel,
                 Name = new Dictionary<string, string> { { "en", "Marina Hotel" } }
             }, hostAccessToken),
@@ -199,6 +202,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         HttpResponseMessage response = await _client.SendAsync(
             AuthorizedPost("/api/catalog/properties", new CreatePropertyRequest
             {
+                TimeZoneId = "Asia/Kuwait",
                 PropertyType = PropertyType.Hotel,
                 Name = new Dictionary<string, string> { { "en", "Test Property" } }
             }, accessToken),

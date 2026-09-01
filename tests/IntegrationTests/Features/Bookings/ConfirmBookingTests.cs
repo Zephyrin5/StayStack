@@ -27,13 +27,22 @@ namespace IntegrationTests.Features.Bookings;
 [Collection("Integration Tests")]
 public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
 {
+    // Properties for units built by CreateTestUnit below, flushed by the
+    // seeder so a unit is never persisted without its owner - see
+    // CatalogSeeding.
+    private readonly List<Property> _pendingProperties = [];
+
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();
 
-    private static Unit CreateTestUnit(decimal basePrice = 100m)
+    private Unit CreateTestUnit(decimal basePrice = 100m)
     {
+        // Built on a real Property, not a throwaway id - see CatalogSeeding.
+        Property property = CatalogSeeding.CreateProperty();
+        _pendingProperties.Add(property);
+
         return Unit.Create(
-            Guid.CreateVersion7(),
+            property.Id,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
             2,
             basePrice);
@@ -43,6 +52,10 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
     {
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+
+        // Owners first - a Unit without its Property no longer resolves.
+        context.AddRange(_pendingProperties);
+        _pendingProperties.Clear();
         context.AddRange(entities);
         await context.SaveChangesAsync();
     }

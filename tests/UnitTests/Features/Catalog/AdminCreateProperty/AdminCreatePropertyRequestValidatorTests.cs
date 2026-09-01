@@ -11,6 +11,7 @@ public class AdminCreatePropertyRequestValidatorTests
     {
         return new AdminCreatePropertyRequest
         {
+                TimeZoneId = "Asia/Kuwait",
             HostId = Guid.NewGuid(),
             PropertyType = PropertyType.Chalet,
             Name = new Dictionary<string, string> { { "en", "Desert Chalet" } },

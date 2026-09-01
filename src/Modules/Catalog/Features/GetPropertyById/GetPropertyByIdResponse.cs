@@ -10,6 +10,10 @@ public record GetPropertyByIdResponse
     public PropertyType PropertyType { get; init; }
     public Dictionary<string, string> Name { get; init; } = new Dictionary<string, string>();
     public string? City { get; init; }
+
+    // Exposed so clients can render this property's dates in the same zone
+    // the server resolves them in (docs/adr/0018).
+    public string TimeZoneId { get; init; } = string.Empty;
     public List<UnitSummary> Units { get; init; } = [];
 }
 

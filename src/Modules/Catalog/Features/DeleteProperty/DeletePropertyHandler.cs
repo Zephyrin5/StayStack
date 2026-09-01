@@ -48,7 +48,8 @@ public class DeletePropertyHandler(
         // shouldn't be a back door around the single-unit check.
         foreach (Unit unit in units)
         {
-            await DeleteUnitHandler.EnsureNoActiveBookingsOrHoldsAsync(unit.Id, timeProvider, unitArchivalGuard, availabilityLookup, cancellationToken);
+            await DeleteUnitHandler.EnsureNoActiveBookingsOrHoldsAsync(
+                unit.Id, property.TimeZoneId, timeProvider, unitArchivalGuard, availabilityLookup, cancellationToken);
         }
 
         foreach (Unit unit in units)

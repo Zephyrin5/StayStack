@@ -118,6 +118,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         {
             Content = JsonContent.Create(new CreatePropertyRequest
             {
+                TimeZoneId = "Asia/Kuwait",
                 PropertyType = PropertyType.Hotel,
                 Name = new Dictionary<string, string> { { "en", "Seaside Hotel" } },
                 City = "Kuwait City"
@@ -159,7 +160,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         Booking booking = Booking.Create(
             Guid.CreateVersion7(), unitId, Guid.NewGuid(), customerId,
             _faker.Name.FullName(), _faker.Internet.Email(), null, checkIn, checkOut, 2, Money.Of(300m, Currency.KWD), 300m,
-            CancellationPolicy.CreateDefault());
+            CancellationPolicy.CreateDefault(), "Asia/Kuwait");
         if (confirmed)
         {
             booking.Confirm();

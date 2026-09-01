@@ -1,5 +1,6 @@
 using Bookings.Entities;
 using BuildingBlocks.Security;
+using BuildingBlocks.Time;
 using Microsoft.EntityFrameworkCore;
 namespace Bookings.Features.Common;
 
@@ -39,7 +40,7 @@ internal static class BookingAccessChecker
         Guid bookingId,
         Guid? customerId,
         string? managementToken,
-        DateOnly today,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         Booking? booking = await dbContext.Bookings
@@ -59,6 +60,13 @@ internal static class BookingAccessChecker
         {
             return null;
         }
+
+        // Resolved here rather than taken as a parameter, and from the
+        // booking's own snapshot: the timezone isn't knowable until the
+        // booking is loaded, and CheckOut below is a property-local date, so
+        // comparing it against a UTC "today" compares unlike with unlike.
+        // See docs/adr/0018.
+        DateOnly today = PropertyTimeZone.Today(timeProvider, booking.TimeZoneId);
 
         if (today > booking.CheckOut.AddDays(ManagementTokenLifetimeDaysAfterCheckOut))
         {

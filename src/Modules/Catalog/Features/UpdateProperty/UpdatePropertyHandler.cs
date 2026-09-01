@@ -36,6 +36,7 @@ public class UpdatePropertyHandler(
         property.Rename(name);
         property.SetPropertyType(request.PropertyType);
         property.SetCity(request.City);
+        property.SetTimeZoneId(request.TimeZoneId);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 

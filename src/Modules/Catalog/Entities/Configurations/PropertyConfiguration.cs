@@ -10,6 +10,10 @@ public class PropertyConfiguration : IEntityTypeConfiguration<Property>
 
         builder.Property(p => p.City).HasMaxLength(100);
 
+        // Required, unlike City - see Property.TimeZoneId. 64 is comfortably
+        // above the longest IANA id in tzdata.
+        builder.Property(p => p.TimeZoneId).HasMaxLength(64).IsRequired();
+
         // Stored as text, not the integer enum value - a lot more legible
         // when you're staring at rows in psql, and safe against the enum's
         // underlying values ever being reordered.

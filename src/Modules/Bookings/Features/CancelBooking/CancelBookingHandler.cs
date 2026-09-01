@@ -4,6 +4,7 @@ using Bookings.Outbox;
 using Bookings.Serialization;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
+using BuildingBlocks.Time;
 using Mediator;
 using Outbox;
 using SeedWork.ValueObjects;
@@ -19,8 +20,6 @@ public class CancelBookingHandler(
 {
     public async ValueTask<CancelBookingResponse> Handle(CancelBookingRequest request, CancellationToken cancellationToken)
     {
-        DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
-
         // Doesn't distinguish "doesn't exist" from "isn't yours" - same
         // reasoning as IHostAuthorization.RequireOwnership, now covering
         // two proof-of-ownership paths instead of one: a matching
@@ -28,8 +27,18 @@ public class CancelBookingHandler(
         // management token (guest checkout) - see BookingAccessChecker's
         // own doc comment.
         Booking booking = await BookingAccessChecker.ResolveAsync(
-                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken, today, cancellationToken)
+                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken, timeProvider, cancellationToken)
                           ?? throw new NotFoundException(nameof(Booking), request.BookingId);
+
+        // Resolved after the booking loads, from its own snapshotted zone -
+        // the refund tier is measured against CheckIn, a property-local date,
+        // so a UTC "today" crosses tier boundaries a day early or late
+        // depending on which side of UTC the property sits. See
+        // docs/adr/0018. This and `cancelledOn` below must stay on the same
+        // clock: they feed the same ComputeRefund, and disagreeing across a
+        // local midnight would make a recancel report a different figure than
+        // the one already queued in ReverseTransactionOutboxMessage.
+        DateOnly today = PropertyTimeZone.Today(timeProvider, booking.TimeZoneId);
 
         // A booking confirmed before cancellation policies existed has no
         // snapshot - falls back to the same default new units get, rather
@@ -165,7 +174,8 @@ public class CancelBookingHandler(
         // reflects the SaveChangesAsync that ran Cancel() - nothing else
         // touches a Cancelled booking - so it's a reliable stand-in for
         // the original cancellation date.
-        DateOnly cancelledOn = DateOnly.FromDateTime((booking.ModifiedAt ?? timeProvider.GetUtcNow()).UtcDateTime);
+        DateOnly cancelledOn = PropertyTimeZone.ToLocalDate(
+            booking.ModifiedAt ?? timeProvider.GetUtcNow(), booking.TimeZoneId);
         (Money pendingRefundAmount, decimal pendingRefundPercent) = ComputeRefund(cancelledOn);
 
         return new CancelBookingResponse

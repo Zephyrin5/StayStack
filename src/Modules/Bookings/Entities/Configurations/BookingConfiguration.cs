@@ -15,6 +15,10 @@ public class BookingConfiguration : IEntityTypeConfiguration<Booking>
         builder.ComplexProperty(b => b.TotalPrice, money => money.ConfigureMoney("total_price"));
         builder.Property(b => b.Subtotal).HasColumnType("numeric(12,3)").IsRequired();
 
+        // Required - see Booking.TimeZoneId for why this is non-nullable
+        // where the CancellationPolicy snapshot beside it is not.
+        builder.Property(b => b.TimeZoneId).HasMaxLength(64).IsRequired();
+
         // Stored as text, not the integer enum value - same reasoning as
         // Property.PropertyType (Catalog): legible in psql, safe against
         // the enum's underlying values ever being reordered.

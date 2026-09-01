@@ -19,7 +19,8 @@ internal static class PropertySummaryMapper
                 HostId = p.HostId,
                 PropertyType = p.PropertyType,
                 Name = new Dictionary<string, string>(p.Name.Values),
-                City = p.City
+                City = p.City,
+                TimeZoneId = p.TimeZoneId
             })
         ];
     }

@@ -21,6 +21,7 @@ public sealed class Booking : Entity, IAggregateRoot
     {
         GuestName = string.Empty;
         GuestEmail = string.Empty;
+        TimeZoneId = string.Empty;
     }
 
     private Booking(
@@ -37,7 +38,8 @@ public sealed class Booking : Entity, IAggregateRoot
         Money totalPrice,
         decimal subtotal,
         BookingStatus bookingStatus,
-        CancellationPolicy cancellationPolicy)
+        CancellationPolicy cancellationPolicy,
+        string timeZoneId)
     {
         Id = id;
         UnitId = unitId;
@@ -53,6 +55,7 @@ public sealed class Booking : Entity, IAggregateRoot
         Subtotal = subtotal;
         BookingStatus = bookingStatus;
         CancellationPolicy = cancellationPolicy;
+        TimeZoneId = timeZoneId;
     }
 
     // Cross-module references, plain Guid rather than a real FK - same
@@ -102,6 +105,19 @@ public sealed class Booking : Entity, IAggregateRoot
     // for that case rather than fabricating a retroactive claim.
     public CancellationPolicy? CancellationPolicy { get; private set; }
 
+    // The property's IANA zone at confirm time, snapshotted for the same
+    // reason CancellationPolicy is: a host correcting a mis-entered zone must
+    // not retroactively move an existing guest's refund boundary or review
+    // window. See docs/adr/0018.
+    //
+    // Non-nullable, unlike CancellationPolicy - deliberately. A null policy
+    // falls back to CreateDefault(), a defensible business default; a null
+    // zone would fall back to UTC, which is precisely the defect ADR-0018
+    // exists to remove. Same snapshot pattern, different stakes, so different
+    // nullability. Pre-ADR rows were backfilled by migration rather than left
+    // to a runtime guess.
+    public string TimeZoneId { get; private set; }
+
     // Takes its id rather than generating one internally - a redeemed promo
     // code needs the booking's id up front, to write the PromotionRedemption
     // row before the Booking itself is ever saved (see ConfirmBookingHandler),
@@ -120,7 +136,8 @@ public sealed class Booking : Entity, IAggregateRoot
         int guestCount,
         Money totalPrice,
         decimal subtotal,
-        CancellationPolicy cancellationPolicy)
+        CancellationPolicy cancellationPolicy,
+        string timeZoneId)
     {
         Guard.Against.Default(id);
         Guard.Against.Default(unitId);
@@ -148,10 +165,11 @@ public sealed class Booking : Entity, IAggregateRoot
         Guard.Against.NegativeOrZero(totalPrice.Amount);
         Guard.Against.Negative(subtotal);
         Guard.Against.Null(cancellationPolicy);
+        Guard.Against.NullOrWhiteSpace(timeZoneId);
 
         return new Booking(
             id, unitId, holdId, customerId, guestName, guestEmail, guestPhone,
-            checkIn, checkOut, guestCount, totalPrice, subtotal, BookingStatus.Pending, cancellationPolicy);
+            checkIn, checkOut, guestCount, totalPrice, subtotal, BookingStatus.Pending, cancellationPolicy, timeZoneId);
     }
 
     // Idempotent - a repeated cancel (retried request, double-click) is a

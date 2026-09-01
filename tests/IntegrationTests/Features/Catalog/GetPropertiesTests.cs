@@ -94,6 +94,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/catalog/properties");
         request.Content = JsonContent.Create(new CreatePropertyRequest
         {
+                TimeZoneId = "Asia/Kuwait",
             PropertyType = propertyType,
             Name = new Dictionary<string, string> { { "en", "Test Property" } },
             City = city
@@ -276,16 +277,21 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         // Arrange
         (string firstHostToken, Guid firstHostId) = await SeedHostUserAsync();
         (string secondHostToken, _) = await SeedHostUserAsync();
-        Guid firstHostPropertyId = await CreatePropertyAsync(firstHostToken, "Kuwait City");
-        Guid secondHostPropertyId = await CreatePropertyAsync(secondHostToken, "Kuwait City");
 
-        // Act - PageSize maxed out, not left at the default 20: the shared
-        // Testcontainers DB accumulates properties from every other test
-        // in this collection, so relying on the default page size to
-        // still include these two freshly-created ones grows more fragile
-        // over the run.
+        // A city unique to this run, so the assertions below see exactly
+        // these two properties. Maxing out PageSize used to be enough, but
+        // the shared Testcontainers DB accumulates properties from every
+        // test in this collection - and since docs/adr/0018 every seeded
+        // unit brings a property with it - so even a full page stopped
+        // reliably containing two specific freshly-created rows. Scoping by
+        // city doesn't weaken what this asserts: both hosts' properties
+        // still have to come back, which is the whole point.
+        string city = $"Testville-{Guid.NewGuid():N}";
+        Guid firstHostPropertyId = await CreatePropertyAsync(firstHostToken, city);
+        Guid secondHostPropertyId = await CreatePropertyAsync(secondHostToken, city);
+
         HttpResponseMessage response = await _client.GetAsync(
-            $"/api/catalog/properties?HostId={firstHostId}&PageSize={PaginationExtensions.MaxPageSize}", TestContext.Current.CancellationToken);
+            $"/api/catalog/properties?HostId={firstHostId}&City={city}&PageSize={PaginationExtensions.MaxPageSize}", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

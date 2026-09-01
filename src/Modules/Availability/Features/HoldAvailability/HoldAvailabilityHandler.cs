@@ -1,5 +1,6 @@
 using Ardalis.GuardClauses;
 using Availability.Exceptions;
+using BuildingBlocks.Time;
 using Catalog.Contracts;
 using Dapper;
 using Mediator;
@@ -50,7 +51,11 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
             request.GuestCount, nameof(request.GuestCount), 1, pricing.MaxOccupancy,
             $"Guest count exceeds this unit's maximum occupancy of {pricing.MaxOccupancy}.");
 
-        DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().DateTime);
+        // The property's own zone, from the pricing lookup already awaited
+        // above - not UTC. At UTC+3 a UTC "today" lags local and accepts
+        // check-ins already in the past; west of UTC it runs ahead and
+        // rejects valid same-day bookings. See docs/adr/0018.
+        DateOnly today = PropertyTimeZone.Today(timeProvider, pricing.TimeZoneId);
 
         Guard.Against.InvalidInput(
             request.CheckIn, nameof(request.CheckIn),

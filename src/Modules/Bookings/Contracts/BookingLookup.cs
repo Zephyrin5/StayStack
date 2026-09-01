@@ -30,10 +30,8 @@ internal class BookingLookup(AppBookingsDbContext dbContext, TimeProvider timePr
     public async Task<BookingAccessResult?> VerifyBookingAccessAsync(
         Guid bookingId, Guid? customerId, string? managementToken, CancellationToken cancellationToken)
     {
-        DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
-
         Booking? booking = await BookingAccessChecker.ResolveAsync(
-            dbContext, bookingId, customerId, managementToken, today, cancellationToken);
+            dbContext, bookingId, customerId, managementToken, timeProvider, cancellationToken);
 
         return booking is null
             ? null
@@ -45,7 +43,8 @@ internal class BookingLookup(AppBookingsDbContext dbContext, TimeProvider timePr
                 CheckOut = booking.CheckOut,
                 IsConfirmed = booking.BookingStatus == BookingStatus.Confirmed,
                 GuestEmail = booking.GuestEmail,
-                CustomerId = booking.CustomerId
+                CustomerId = booking.CustomerId,
+                TimeZoneId = booking.TimeZoneId
             };
     }
 
@@ -62,7 +61,8 @@ internal class BookingLookup(AppBookingsDbContext dbContext, TimeProvider timePr
                 CheckOut = b.CheckOut,
                 IsConfirmed = true,
                 GuestEmail = b.GuestEmail,
-                CustomerId = b.CustomerId
+                CustomerId = b.CustomerId,
+                TimeZoneId = b.TimeZoneId
             })
             .ToListAsync(cancellationToken);
     }
@@ -79,7 +79,8 @@ internal class BookingLookup(AppBookingsDbContext dbContext, TimeProvider timePr
                 CheckOut = b.CheckOut,
                 IsConfirmed = b.BookingStatus == BookingStatus.Confirmed,
                 GuestEmail = b.GuestEmail,
-                CustomerId = b.CustomerId
+                CustomerId = b.CustomerId,
+                TimeZoneId = b.TimeZoneId
             })
             .SingleOrDefaultAsync(cancellationToken);
     }

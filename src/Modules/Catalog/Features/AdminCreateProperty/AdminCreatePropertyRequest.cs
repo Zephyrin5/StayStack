@@ -13,4 +13,7 @@ public record AdminCreatePropertyRequest : IRequest<CreatePropertyResponse>
     public PropertyType PropertyType { get; init; }
     public Dictionary<string, string> Name { get; init; } = new Dictionary<string, string>();
     public string? City { get; init; }
+
+    // Required - see Property.TimeZoneId.
+    public string TimeZoneId { get; init; } = string.Empty;
 }

@@ -83,7 +83,8 @@ public class ConfirmBookingHandlerTests : IDisposable
                 BasePrice = hold.TotalPrice,
                 PropertyId = Guid.NewGuid(),
                 HostId = Guid.NewGuid(),
-                CancellationPolicy = CancellationPolicy.CreateDefault()
+                CancellationPolicy = CancellationPolicy.CreateDefault(),
+                TimeZoneId = "Asia/Kuwait"
             });
         return unitLookupMock;
     }
@@ -262,7 +263,8 @@ public class ConfirmBookingHandlerPromoPricingTests : IDisposable
                 BasePrice = hold.TotalPrice,
                 PropertyId = Guid.NewGuid(),
                 HostId = Guid.NewGuid(),
-                CancellationPolicy = CancellationPolicy.CreateDefault()
+                CancellationPolicy = CancellationPolicy.CreateDefault(),
+                TimeZoneId = "Asia/Kuwait"
             });
 
         BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(

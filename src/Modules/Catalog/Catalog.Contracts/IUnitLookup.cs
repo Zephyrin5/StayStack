@@ -53,6 +53,12 @@ public record UnitSummary
     public Guid PropertyId { get; init; }
     public Guid HostId { get; init; }
 
+    // The owning property's IANA zone - every business date for this unit
+    // resolves in it (docs/adr/0018). Non-nullable: a unit whose property row
+    // is missing never reaches a caller of GetUnitAsync, it raises
+    // OrphanedUnitException instead.
+    public required string TimeZoneId { get; init; }
+
     // Added for cancellation policies - lets ConfirmBookingHandler
     // snapshot the unit's *current* policy onto the Booking at confirm
     // time, same "the terms they saw are the terms they get" reasoning as
@@ -66,4 +72,9 @@ public record StayPricingResult
     public Money TotalPrice { get; init; }
     public decimal Subtotal { get; init; }
     public Money? LengthOfStayDiscountAmount { get; init; }
+
+    // Carried so HoldAvailabilityHandler can resolve "today" at the
+    // property before its check-in guards run - it already awaits this
+    // call before computing the date, so no extra round trip.
+    public required string TimeZoneId { get; init; }
 }

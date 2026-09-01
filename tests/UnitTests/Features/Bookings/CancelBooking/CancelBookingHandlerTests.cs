@@ -54,7 +54,7 @@ public class CancelBookingHandlerTests : IDisposable
             Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), _customerId,
             "Jane Guest", "jane@example.com", null,
             DateOnly.FromDateTime(DateTime.UtcNow), DateOnly.FromDateTime(DateTime.UtcNow).AddDays(2),
-            2, Money.Of(200m, Currency.KWD), 200m, CancellationPolicy.CreateDefault());
+            2, Money.Of(200m, Currency.KWD), 200m, CancellationPolicy.CreateDefault(), "Asia/Kuwait");
 
         _dbContext.Bookings.Add(booking);
         await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -217,7 +217,7 @@ public class CancelBookingHandlerTests : IDisposable
             Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), _customerId,
             "Jane Guest", "jane@example.com", null,
             checkIn, checkIn.AddDays(2),
-            2, Money.Of(200m, Currency.KWD), 200m, CancellationPolicy.CreateDefault());
+            2, Money.Of(200m, Currency.KWD), 200m, CancellationPolicy.CreateDefault(), "Asia/Kuwait");
 
         dbContext.Bookings.Add(booking);
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -260,5 +260,64 @@ public class CancelBookingHandlerTests : IDisposable
         Assert.Equal(100m, secondResponse.RefundPercent);
         Assert.Equal(200m, secondResponse.RefundAmount);
         Assert.True(secondResponse.RefundPending);
+    }
+
+    [Fact]
+    public async Task Handle_RefundTier_IsMeasuredAtTheProperty_NotInUtc()
+    {
+        // The money proof for docs/adr/0018, and it fails under the old UTC
+        // logic.
+        //
+        // At 21:30 UTC on 2026-08-20 it is already 00:30 on the 21st in
+        // Asia/Kuwait. Against a 2026-08-25 check-in that is 4 days out
+        // locally - the default policy's 1-4 day tier, 50%. A UTC-derived
+        // "today" reads the 20th, makes it 5 days, and pays the 100% tier
+        // instead. Whichever side of UTC a property sits on, someone is paid
+        // the wrong amount; here the business overpays.
+        using SqliteConnection connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+
+        FakeTimeProvider timeProvider = new FakeTimeProvider(
+            new DateTimeOffset(2026, 8, 20, 21, 30, 0, TimeSpan.Zero));
+
+        var options = new DbContextOptionsBuilder<AppBookingsDbContext>()
+            .UseSqlite(connection)
+            .UseSnakeCaseNamingConvention()
+            .Options;
+
+        await using AppBookingsDbContext dbContext = new AppBookingsDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
+
+        Booking booking = Booking.Create(
+            Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), _customerId,
+            "Jane Guest", "jane@example.com", null,
+            new DateOnly(2026, 8, 25), new DateOnly(2026, 8, 27),
+            2, Money.Of(200m, Currency.KWD), 200m, CancellationPolicy.CreateDefault(), "Asia/Kuwait");
+        dbContext.Bookings.Add(booking);
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
+        transactionReversalMock
+            .Setup(x => x.GetSucceededTransactionAmountAsync(booking.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Money.Of(200m, Currency.KWD));
+        transactionReversalMock
+            .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((TransactionRefundSnapshot?)null);
+
+        BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
+            dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
+            new Mock<IPromotionRedemption>().Object, timeProvider, NullLogger<BookingsOutboxDispatcher>.Instance);
+
+        Mock<ICurrentUserProvider> currentUserProviderMock = new Mock<ICurrentUserProvider>();
+        currentUserProviderMock.Setup(x => x.UserId).Returns(_customerId);
+
+        CancelBookingHandler handler = new CancelBookingHandler(
+            dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, timeProvider);
+
+        CancelBookingResponse response = await handler.Handle(
+            new CancelBookingRequest { BookingId = booking.Id }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(50m, response.RefundPercent);
+        Assert.Equal(100m, response.RefundAmount);
     }
 }

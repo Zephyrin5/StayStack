@@ -2,6 +2,7 @@ using Bookings.Entities;
 using Bookings.Features.Common;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
+using BuildingBlocks.Time;
 using Mediator;
 namespace Bookings.Features.GetBookingForManagement;
 
@@ -13,10 +14,8 @@ public class GetBookingForManagementHandler(
     public async ValueTask<GetBookingForManagementResponse> Handle(
         GetBookingForManagementRequest request, CancellationToken cancellationToken)
     {
-        DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
-
         Booking booking = await BookingAccessChecker.ResolveAsync(
-                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken, today, cancellationToken)
+                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken, timeProvider, cancellationToken)
                           ?? throw new NotFoundException(nameof(Booking), request.BookingId);
 
         return new GetBookingForManagementResponse
@@ -29,7 +28,11 @@ public class GetBookingForManagementHandler(
             TotalPrice = booking.TotalPrice.Amount,
             Currency = booking.TotalPrice.Currency,
             CanCancel = booking.BookingStatus != BookingStatus.Cancelled,
-            CanReview = booking.BookingStatus == BookingStatus.Confirmed && booking.CheckOut <= today
+            // The booking's own zone, matching the Reviews handlers' inverted
+            // guard exactly - resolved in different zones they would disagree
+            // on the checkout day itself, offering a review the API rejects.
+            CanReview = booking.BookingStatus == BookingStatus.Confirmed
+                        && booking.CheckOut <= PropertyTimeZone.Today(timeProvider, booking.TimeZoneId)
         };
     }
 }
