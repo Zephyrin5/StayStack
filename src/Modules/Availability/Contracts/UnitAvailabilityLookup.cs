@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using NpgsqlTypes;
 namespace Availability.Contracts;
 
-// internal, same reasoning as HoldLookup - Catalog should only ever reach
+// internal, same reasoning as HoldConfirmation - Catalog should only ever reach
 // this through Catalog.Contracts.IUnitAvailabilityLookup, resolved via DI.
 // Implements a Catalog-defined interface rather than exposing this through
 // Availability's own Contracts project - Availability already legitimately

@@ -463,9 +463,9 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     {
         // Regression test: the active-hold count previously included
         // 'booked' holds, which never revert to 'held' for a completed
-        // booking (ConfirmHoldAsync sets 'booked' and nothing ever clears
-        // it - ReconcileOrphanedBookedHoldsJob depends on that
-        // persistence). That meant a real customer would be locked out of
+        // booking (ConfirmHoldAsync sets 'booked' and only an explicit
+        // release ever clears it, so the row persists for the life of the
+        // booking). That meant a real customer would be locked out of
         // new holds after their 5th completed booking. 'booked' rows must
         // never count toward the cap.
         Unit unit = CreateTestUnit(maxCapacity: 10);

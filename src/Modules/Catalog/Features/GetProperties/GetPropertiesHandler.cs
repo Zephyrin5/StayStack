@@ -96,7 +96,7 @@ public class GetPropertiesHandler(
             // Unbounded by anything other than how many units match Guests -
             // fine at current scale (docs/adr/0004's Consequences already
             // weighs this round-trip cost), but unlike
-            // ReconcileOrphanedBookedHoldsJob's own candidate query, there's
+            // ReconcileOrphanedBookingIntentsJob's own candidate query, there's
             // no cap here. A Guests-only search against tens of thousands
             // of units would send an equally large id array to Availability -
             // not urgent today, worth a cap if unit count grows.

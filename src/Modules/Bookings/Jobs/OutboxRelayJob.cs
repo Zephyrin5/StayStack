@@ -10,8 +10,8 @@ namespace Bookings.Jobs;
 ///     attempt ran at all). See docs/adr/0003.
 ///     <para>
 ///         Runs far more often than ExpiredHoldsSweepJob/
-///         ReconcileOrphanedBookedHoldsJob's 5-minute cadence, since this is
-///         now the primary delivery path for these actions on a failed
+///         ReconcileOrphanedBookingIntentsJob's 5-minute cadence, since this
+///         is now the primary delivery path for these actions on a failed
 ///         inline attempt, not a rare-crash backstop.
 ///     </para>
 /// </summary>

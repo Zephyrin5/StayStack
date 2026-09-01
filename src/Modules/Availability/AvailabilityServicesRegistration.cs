@@ -40,7 +40,6 @@ public static class AvailabilityServicesRegistration
         });
 
         services.AddScoped<IHoldConfirmation, HoldConfirmation>();
-        services.AddScoped<IHoldLookup, HoldLookup>();
 
         // Implements a Catalog-defined interface, not one of Availability's
         // own - see IUnitAvailabilityLookup's own doc comment for why the

@@ -30,11 +30,11 @@ public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAv
             .HasFilter("status = 'held'")
             .HasDatabaseName("ix_unit_availability_holds_holder_token_active");
 
-        // Backs Bookings.Jobs.ReconcileOrphanedBookedHoldsJob's query
-        // (status = 'booked' AND booked_at <= cutoff) - without this it
-        // seq-scans the table every 5 minutes.
-        builder.HasIndex(h => new { h.Status, h.BookedAt }, "ix_unit_availability_holds_status_booked_at")
-            .HasDatabaseName("ix_unit_availability_holds_status_booked_at");
+        // No (status, booked_at) index any more. It existed solely for
+        // ReconcileOrphanedBookedHoldsJob's candidate query, which
+        // docs/adr/0017 replaced with a scan of Bookings' own
+        // pending_booking_intents - nothing queries booked_at now, so the
+        // index was pure write-side cost.
 
         // Covers both cleanup queries' predicate shape - the global sweep
         // (ExpiredHoldsSweepJob: status = 'held' AND hold_expires_at <=
