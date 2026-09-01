@@ -26,13 +26,19 @@ public class HoldAvailabilityEndpoint(IMediator mediator, TimeProvider timeProvi
             s.Response<ValidationProblemDetails>(400, "Validation failed.");
             s.Response(404, "Unit not found.");
             s.Response(409, "Unit is unavailable for some or all of the requested range.");
-            s.Response(429, "Too many concurrent holds for this session, or too many requests.");
+            s.Response(429, "Too many concurrent holds from this network, or too many requests.");
         });
     }
 
     public override async Task HandleAsync(HoldAvailabilityRequest req, CancellationToken ct)
     {
         req.HolderToken = HttpContext.Request.GetOrCreateHoldSessionToken(HttpContext.Response, timeProvider);
+
+        // Assigned unconditionally, overwriting whatever bound - see the
+        // property's own comment. Correct only once ForwardedHeaders is
+        // processing a real proxy's headers, same caveat the "holds"
+        // rate-limit partition already carries.
+        req.ClientKey = ClientNetworkKey.Resolve(HttpContext.Connection.RemoteIpAddress);
 
         HoldAvailabilityResponse result = await mediator.Send(req, ct);
         await Send.OkAsync(result, ct);

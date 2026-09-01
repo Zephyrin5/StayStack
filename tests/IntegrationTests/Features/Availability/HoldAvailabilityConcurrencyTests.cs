@@ -2,8 +2,12 @@ using Availability;
 using Availability.Features.HoldAvailability;
 using Catalog;
 using Catalog.Entities;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Json;
@@ -176,57 +180,92 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         Assert.Equal(2, holdCount);
     }
 
-    [Fact]
-    public async Task Hold_ConcurrentRequestsSharingTheSameHolderToken_NeverExceedTheSessionCap()
+    private const int Cap = 5;
+
+    /// <summary>
+    ///     A host with the hold cap turned down to <see cref="Cap"/> and every
+    ///     request attributed to <paramref name="clientIp"/>.
+    ///     appsettings.Testing.json sets MaxActiveHoldsPerClient absurdly high
+    ///     so the shared factory never trips on ordinary traffic, so a cap test
+    ///     has to turn it back down - same pattern as RateLimitingTests.
+    ///     <para>
+    ///         The IP override is what makes that safe. Every request through
+    ///         TestServer has a null RemoteIpAddress, so without it the whole
+    ///         suite shares ClientNetworkKey.Unknown and a neighbouring test's
+    ///         live holds would count against this one's budget. Pinning a
+    ///         unique address per test gives each its own partition, which is
+    ///         also what the production key means.
+    ///     </para>
+    /// </summary>
+    private WebApplicationFactory<Program> CappedFactoryFor(string clientIp) =>
+        factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+        {
+            services.Configure<HoldCapOptions>(o => o.MaxActiveHoldsPerClient = Cap);
+
+            // An IStartupFilter, not builder.Configure - the latter replaces
+            // the application's pipeline outright rather than prepending to
+            // it, which would leave this host with no endpoints at all.
+            services.AddSingleton<IStartupFilter>(new SetRemoteIpAddress(IPAddress.Parse(clientIp)));
+        }));
+
+    private sealed class SetRemoteIpAddress(IPAddress address) : IStartupFilter
     {
-        // The per-session cap runs as a plain COUNT-then-INSERT under
-        // Postgres' default Read Committed, no explicit row locking -
-        // unlike PricingRuleConcurrencyTests' Serializable transactions.
-        // Distinct target units mean the exclusion constraint can never be
-        // why a request fails, isolating the cap check: if Read Committed
-        // lets two concurrent transactions both COUNT before either
-        // commits its INSERT, the cap can be oversold. Only a real
-        // concurrent test can tell "correctly enforced" apart from
-        // "happens to look correct because nothing has ever raced it".
-        const int cap = 5;
-        Unit[] units = await Task.WhenAll(Enumerable.Range(0, cap + 4).Select(_ => SeedUnitAsync()));
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) =>
+            app =>
+            {
+                app.Use(async (context, nextMiddleware) =>
+                {
+                    context.Connection.RemoteIpAddress = address;
+                    await nextMiddleware();
+                });
+
+                next(app);
+            };
+    }
+
+    [Fact]
+    public async Task Hold_ConcurrentRequestsFromOneClientNetwork_NeverExceedTheCap()
+    {
+        // The cap runs as a plain COUNT-then-INSERT - unlike
+        // PricingRuleConcurrencyTests' Serializable transactions, Postgres'
+        // default Read Committed would happily let two concurrent
+        // transactions both COUNT before either commits its INSERT, and the
+        // cap would be oversold. Distinct target units mean the exclusion
+        // constraint can never be why a request fails, isolating the cap
+        // check. Only a real concurrent test can tell "correctly enforced"
+        // apart from "happens to look correct because nothing has raced it".
+        Unit[] units = await Task.WhenAll(Enumerable.Range(0, Cap + 4).Select(_ => SeedUnitAsync()));
         DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        using HttpClient client = factory.CreateClient();
-
-        // A single sequential warm-up request establishes the hold-session
-        // cookie on this client (and consumes the first of the cap's 5
-        // slots) before any concurrent request fires - otherwise every
-        // "concurrent" request below would race to mint its own fresh
-        // token instead of sharing one, which would test nothing at all.
-        HttpResponseMessage warmUp = await client.PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
-        {
-            UnitId = units[0].Id,
-            CheckIn = today,
-            CheckOut = today.AddDays(2),
-            GuestCount = 2
-        }, TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.OK, warmUp.StatusCode);
+        // No cookie warm-up any more. It used to exist so every "concurrent"
+        // request shared one hold-session token instead of racing to mint its
+        // own - which is precisely the property that made the old cap
+        // worthless. The key is now the caller's network, which is shared
+        // across these clients whether they cooperate or not.
+        using WebApplicationFactory<Program> cappedFactory = CappedFactoryFor("198.51.100.10");
 
         Task<HttpResponseMessage>[] tasks =
         [
-            .. units.Skip(1).Select(unit => client.PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
-            {
-                UnitId = unit.Id,
-                CheckIn = today,
-                CheckOut = today.AddDays(2),
-                GuestCount = 2
-            }, TestContext.Current.CancellationToken))
+            .. units.Select(unit => cappedFactory.CreateClient().PostAsJsonAsync(
+                "/api/availability/holds",
+                new HoldAvailabilityRequest
+                {
+                    UnitId = unit.Id,
+                    CheckIn = today,
+                    CheckOut = today.AddDays(2),
+                    GuestCount = 2
+                },
+                TestContext.Current.CancellationToken))
         ];
 
         HttpResponseMessage[] responses = await Task.WhenAll(tasks);
 
-        int totalSucceeded = 1 + responses.Count(r => r.StatusCode == HttpStatusCode.OK);
+        int totalSucceeded = responses.Count(r => r.StatusCode == HttpStatusCode.OK);
         int totalRejected = responses.Count(r => r.StatusCode == HttpStatusCode.TooManyRequests);
 
         Assert.Equal(units.Length, totalSucceeded + totalRejected);
-        Assert.True(totalSucceeded <= cap,
-            $"Session cap of {cap} was oversold under real concurrency: {totalSucceeded} holds actually succeeded.");
+        Assert.True(totalSucceeded <= Cap,
+            $"Hold cap of {Cap} was oversold under real concurrency: {totalSucceeded} holds actually succeeded.");
 
         // Cross-checked against the database, not just HTTP status codes -
         // the actual invariant this cap exists to protect.
@@ -234,7 +273,51 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
         int actualActiveHoldCount = await context.UnitAvailabilityHolds
             .CountAsync(h => units.Select(u => u.Id).Contains(h.UnitId), TestContext.Current.CancellationToken);
-        Assert.True(actualActiveHoldCount <= cap,
-            $"Session cap of {cap} was oversold under real concurrency: {actualActiveHoldCount} rows actually persisted.");
+        Assert.True(actualActiveHoldCount <= Cap,
+            $"Hold cap of {Cap} was oversold under real concurrency: {actualActiveHoldCount} rows actually persisted.");
+    }
+
+    [Fact]
+    public async Task Hold_DiscardingTheHoldSessionCookie_DoesNotGrantAFreshBudget()
+    {
+        // The reason the cap moved off the hold-session cookie. That cookie
+        // is whatever the caller sends: delete it, get a new one, get five
+        // more holds, repeat - which made a "cap" that a scripted caller
+        // never encountered, while holds block real inventory through the
+        // exclusion constraint.
+        //
+        // A brand new HttpClient per request is exactly that attack: each has
+        // its own cookie jar, so each mints a fresh hold-session token. Under
+        // the old per-session cap every one of these succeeds. They now share
+        // a client network, so the cap applies across all of them.
+        Unit[] units = await Task.WhenAll(Enumerable.Range(0, Cap + 1).Select(_ => SeedUnitAsync()));
+        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        using WebApplicationFactory<Program> cappedFactory = CappedFactoryFor("198.51.100.20");
+
+        // Sequential, not concurrent - concurrency is the test above's job.
+        // Here each request must be able to see every previous one's hold, so
+        // the only thing being measured is whether a fresh cookie resets the
+        // budget.
+        List<HttpStatusCode> statuses = [];
+        foreach (Unit unit in units)
+        {
+            using HttpClient freshCookieJar = cappedFactory.CreateClient();
+            HttpResponseMessage response = await freshCookieJar.PostAsJsonAsync(
+                "/api/availability/holds",
+                new HoldAvailabilityRequest
+                {
+                    UnitId = unit.Id,
+                    CheckIn = today,
+                    CheckOut = today.AddDays(2),
+                    GuestCount = 2
+                },
+                TestContext.Current.CancellationToken);
+
+            statuses.Add(response.StatusCode);
+        }
+
+        Assert.Equal(Enumerable.Repeat(HttpStatusCode.OK, Cap), statuses.Take(Cap));
+        Assert.Equal(HttpStatusCode.TooManyRequests, statuses[Cap]);
     }
 }

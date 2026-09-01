@@ -23,4 +23,15 @@ public record HoldAvailabilityRequest : IRequest<HoldAvailabilityResponse>
     [JsonIgnore]
     [DontBind(Source.QueryParam | Source.RouteParam | Source.FormField)]
     public string HolderToken { get; set; } = string.Empty;
+
+    // Set by HoldAvailabilityEndpoint from the connection's peer address
+    // (Api.Security.ClientNetworkKey). Same non-bindable treatment as
+    // HolderToken above and for a far more important reason: this one IS a
+    // security control - it's what the concurrent-hold cap counts by - so a
+    // caller who could set it from the body would be back to choosing their
+    // own budget, which is exactly the defect that moved the cap off the
+    // cookie. HandleAsync assigns it unconditionally after binding.
+    [JsonIgnore]
+    [DontBind(Source.QueryParam | Source.RouteParam | Source.FormField)]
+    public string ClientKey { get; set; } = string.Empty;
 }

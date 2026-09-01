@@ -12,7 +12,7 @@ Fifteen endpoints call `AllowAnonymous()`. Some are obviously safe (public prope
 
 | Endpoint | What it does | Rate-limited? | Notes |
 |---|---|---|---|
-| `POST /availability/holds` | Creates a hold (DB write) | Yes (`"holds"` policy) | Also: stay-length cap (90 nights), lead-time cap (730 days), 5-active-holds-per-session cap - see below. |
+| `POST /availability/holds` | Creates a hold (DB write) | Yes (`"holds"` policy) | Also: stay-length cap (90 nights), lead-time cap (730 days), and a 25-concurrent-hold cap per client network - see below. The rate limit is not what bounds held inventory; the concurrent-hold cap is. |
 | `POST /auth/sign-in`, `/auth/register`, `/auth/refresh-token` | Credential/token issuance | Yes (`"auth"` policy) | |
 | `POST /auth/sign-out` | Revokes a refresh token | No | Self-limiting by construction - only ever revokes a token the caller already possesses; there's nothing to abuse by calling it repeatedly with a token that isn't yours. |
 | `POST /bookings/{id}/cancel`, `GET /bookings/{id}/manage` | Booking management for guest checkout | Yes (`"auth"` policy) | Gated by a two-path ownership proof (matching `CustomerId`, or a valid management token) independent of the rate limit. |
@@ -24,13 +24,96 @@ Fifteen endpoints call `AllowAnonymous()`. Some are obviously safe (public prope
 
 ### The hold endpoint's layered defense, and what actually bounds it
 
-Three separate mechanisms now apply to `HoldAvailabilityEndpoint`, and they are not equally load-bearing:
+Three separate mechanisms apply to `HoldAvailabilityEndpoint`, and they are not
+equally load-bearing:
 
 1. **`HoldAvailabilityRequestValidator.MaxStayNights` (90) and `HoldAvailabilityHandler.MaxLeadTimeDays` (730).** These bound how much damage *one* hold can do - a single request can no longer lock a decade of a unit's calendar, only a bounded window.
-2. **The `"holds"` rate-limit policy**, partitioned by caller IP (correct once `ForwardedHeaders` is processing a real proxy's headers - see the forwarded-headers fix this same review pass added). This bounds how *many* requests one caller can fire - and it's the *only* thing actually bounding the "hold out the whole inventory" attack, since (3) below doesn't. This makes it the real backstop against real inventory being blocked, with two accepted costs that follow from an IP being the unit of "one caller": an anonymous hold still blocks a real unit for its full 15-minute expiry regardless of who placed it, and the budget is shared, not per-person - a NAT'd office or shared connection has every legitimate visitor drawing from the same 20/min allowance, so a burst of honest concurrent traffic from one location can trip it. Both are the same shape as the account-lockout tradeoff below (a real, accepted cost of the mechanism doing its job), not something (1) or (3) mitigate.
-3. **The hold-session cookie's per-session cap (5 concurrent active holds).** This is honestly soft: a scripted caller that drops the cookie mints a fresh, unlinked session token on every request and sails straight past it. It does **not** bound the "hold out the whole inventory" attack - (1) and (2) above are what actually do that. It's also, separately, only as strong as the transaction enforcing it - the count-then-insert against `holder_token` originally ran under Postgres' default Read Committed isolation, which does not prevent N concurrent holds from the same session (targeting different, non-conflicting units, so the exclusion constraint never enters into it) from all counting before any of them commits. A concurrency test (`HoldAvailabilityConcurrencyTests.Hold_ConcurrentRequestsSharingTheSameHolderToken_NeverExceedTheSessionCap`) measured this directly - 9 holds succeeded against a cap of 5 - and the transaction now runs under `IsolationLevel.Serializable` (the same fix `CreatePricingRuleHandler`/`UpdatePricingRuleHandler` needed, see [ADR-0012](0012-single-pricing-rule-entity-with-write-time-overlap-rejection.md)) to close it. This doesn't change anything about the cap being *soft* against a token-dropping attacker - it only makes the cap actually hold for the honest, single-session case it was designed for in the first place.
+2. **The `"holds"` rate-limit policy**, partitioned by caller IP (correct once `ForwardedHeaders` is processing a real proxy's headers). This bounds how *many requests* one caller can fire in a window. It is **not** what bounds held inventory - see the correction below. Its accepted cost is that an IP is the unit of "one caller", so a NAT'd office shares one 20/min allowance and a burst of honest concurrent traffic from one location can trip it.
+3. **`HoldAvailabilityHandler`'s concurrent-hold cap (`MaxActiveHoldsPerClient`, 25).** Counts a client network's *live* holds, across every unit, and rejects with 429 past the limit. This is what actually bounds the "hold out the whole inventory" attack.
 
-The cookie's real justification is different, and worth stating plainly rather than dressing it up as a security control it isn't: it's the ownership handle a future "release my hold" endpoint will need, and it's what ties a hold to the confirm that eventually consumes it. An anonymous, unauthenticated flow still benefits from having *some* identity to hang session-scoped features off of - that's what this token is for, not abuse prevention.
+#### Correction: a rate limit does not bound held inventory
+
+An earlier revision of this ADR called the rate-limit policy "the only thing
+actually bounding the 'hold out the whole inventory' attack" and "the real
+backstop against real inventory being blocked." That was wrong, and it is
+recorded here rather than quietly edited away, because it is an easy mistake to
+repeat.
+
+A fixed-window limiter bounds request *rate*. Holds are not requests: they
+persist on their own 15-minute expiry clock and accumulate. At 20 requests per
+60 seconds against a 15-minute hold, a single caller reaches roughly **300
+concurrent live holds** and stays under the limit indefinitely - each blocking
+up to `MaxStayNights` of one unit through the exclusion constraint. One IP can
+saturate a 60-unit property's near calendar in about three minutes without ever
+being rate limited. Rate governs how fast you reach saturation, not how much you
+can hold.
+
+Bounding a *stock* takes a cap on the stock. That is mechanism (3).
+
+#### Why the cap counts by client network, not by the hold-session cookie
+
+The cap was originally 5 concurrent holds per hold-session cookie, and that was
+not an enforcement at all. `HoldSessionCookie` mints a token for anyone who
+presents none, so the attack was: delete the cookie, get five more holds,
+repeat. The cap was keyed on a value the caller supplies. Its comments said so
+honestly - "deliberately soft", "sails past this" - but an enforcement
+documented as bypassable is still an enforcement that reads as a limit in the
+endpoint's 429 contract and in `TooManyActiveHoldsException`, while bounding
+nothing.
+
+It now counts by `Api.Security.ClientNetworkKey`, derived from the connection's
+peer address, which the caller cannot choose. The cookie keeps only the job it
+can do: an ownership handle for a future "release my hold" endpoint.
+
+**Signing the cookie was considered and rejected as ineffective**, not merely
+expensive - a different conclusion from the "Alternatives considered" entry
+below, which had rejected it as unnecessary. The attack is *minting*, not
+*forging*. Data Protection stops a caller crafting an arbitrary token value; it
+does nothing about a caller discarding a valid one and being issued another,
+which is free and unauthenticated by design. Signing would have left the bypass
+intact while making the mechanism look authenticated - strictly worse than the
+honest soft cap it would have replaced.
+
+**Accepted costs of keying on the network**, both the same shape as the rate
+limiter's:
+
+- **A shared address shares a budget.** A NAT'd office or carrier-grade NAT draws
+  from one allowance, which is why the limit is 25 rather than the old 5 - high
+  enough that ordinary shared-connection browsing does not reach it, low enough
+  that saturating a property's calendar does. `MaxActiveHoldsPerClient` is
+  configuration, not a constant, so it can be tuned without a deploy.
+- **IPv6 is masked to the /64**, since a single customer is normally allocated at
+  least that much and keying on the full 128-bit address would make the cap free
+  to bypass. The `"holds"` and `"auth"` rate-limit partitions still key on the
+  full address and carry this gap; it matters far less there, but it is the same
+  gap.
+- **An unattributable request** (null `RemoteIpAddress`) falls back to a single
+  shared `"unknown"` partition rather than getting a private budget.
+
+**What is still not bounded:** an attacker distributing across many networks. No
+per-caller control can address that, and neither this cap nor the rate limiter
+claims to - it is the case a CAPTCHA or proof-of-work challenge would cover (see
+"Alternatives considered").
+
+#### Isolation, and retention
+
+The cap is a COUNT-then-INSERT against a shared predicate, so it runs under
+`IsolationLevel.Serializable` for the same reason
+`CreatePricingRuleHandler`/`UpdatePricingRuleHandler` do (see [ADR-0012](0012-single-pricing-rule-entity-with-write-time-overlap-rejection.md)).
+Read Committed lets N concurrent holds from one client on N different units all
+COUNT before any commits its INSERT;
+`HoldAvailabilityConcurrencyTests.Hold_ConcurrentRequestsFromOneClientNetwork_NeverExceedTheCap`
+measured exactly that - 9 holds succeeded against a cap of 5 - before
+Serializable was applied. That test matters more now than it did under the
+cookie: racing the cap is what is left once discarding the key stops working.
+
+`unit_availability_holds.client_key` is cleared when a hold is confirmed
+(`HoldConfirmation.ConfirmHoldAsync`). The cap only ever reads live `held` rows,
+so a booked hold's copy is dead weight - and it would be a caller's network
+address retained on a row that outlives the hold by years. Clearing it bounds
+retention to the 15 minutes the cap actually needs. `ReleaseHoldAsync` does not
+restore it and does not need to: it resets `hold_expires_at` to now, so the row
+is already outside the cap's predicate.
 
 ### Account lockout creates a symmetric, accepted abuse surface
 
@@ -44,9 +127,11 @@ A tempting improvement - telling a locked-out user why they're locked out instea
 
 - **Require authentication for holds.** Rejected outright: the endpoint's own purpose is pre-checkout availability-checking for guests who haven't signed in yet (and may never - guest checkout is a first-class path through this app). Forcing sign-in here would break the actual product requirement, not just harden it.
 - **A CAPTCHA or proof-of-work challenge on the hold endpoint.** Would meaningfully raise the cost of the "zero out inventory" attack. Not adopted in this pass - it's a larger UX and infrastructure commitment than the stay-length/lead-time/rate-limit combination above, which closes the same hole with tools this codebase already has.
-- **Make the hold-session cookie cryptographically bind to the request (e.g. a signed token tying the session to an IP)**, so it couldn't be trivially regenerated. Rejected for now: it would still only raise the cost of the attack the rate limiter already bounds by a different mechanism, for real added complexity (signing, key rotation) - revisit only if the rate limiter alone proves insufficient in practice.
+- **Make the hold-session cookie cryptographically bind to the request (e.g. a signed token tying the session to an IP)**, so it couldn't be trivially regenerated. Rejected - see "Why the cap counts by client network" above for the full reasoning. Signing addresses forging, not minting, so it would not have raised the cost of this attack at all. An earlier revision of this entry rejected it on the weaker ground that "the rate limiter already bounds" the attack, which was itself the mistake corrected above. Binding the *cap* to the network, rather than binding the *cookie* to it, gets the property that was wanted without signing or key rotation.
 
 ## Consequences
 
 - Any new anonymous endpoint should be added to the inventory table above at the time it's created, with an explicit answer to "what can an unauthenticated caller do here, and how many times per minute" - not left to be discovered later the way both the hold endpoint and the confirm endpoint were.
+- "Rate-limited?" is not the same question as "bounded?". A limiter caps requests per window; anything that *persists* past the request - a hold, a lock, a reservation - needs a cap on the outstanding stock as well. The inventory table asks both, and a new endpoint that creates durable state should answer the second explicitly.
+- An enforcement keyed on a value the caller supplies is not an enforcement, however honestly its comments describe the weakness. If a limit is worth having, key it on something the caller cannot mint; if it isn't, delete it rather than leaving a mechanism that reads as a control in the endpoint's contract.
 - The account-lockout DoS tradeoff should be revisited if this app ever needs a self-service "my account got locked by someone else" recovery path; none exists today beyond waiting out the 15-minute window.

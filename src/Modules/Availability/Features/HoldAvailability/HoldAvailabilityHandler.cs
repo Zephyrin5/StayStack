@@ -6,6 +6,7 @@ using Dapper;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using NpgsqlTypes;
 using System.Data;
@@ -13,7 +14,11 @@ using NotFoundException = BuildingBlocks.Exceptions.NotFoundException;
 
 namespace Availability.Features.HoldAvailability;
 
-public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLookup unitLookup, TimeProvider timeProvider)
+public class HoldAvailabilityHandler(
+    AppAvailabilityDbContext dbContext,
+    IUnitLookup unitLookup,
+    TimeProvider timeProvider,
+    IOptions<HoldCapOptions> holdCapOptions)
     : IRequestHandler<HoldAvailabilityRequest, HoldAvailabilityResponse>
 {
     private static readonly TimeSpan HoldDuration = TimeSpan.FromMinutes(15);
@@ -24,12 +29,20 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
     // exclusion constraint would enforce that block for a decade.
     private const int MaxLeadTimeDays = 730;
 
-    // Concurrent active (held/booked) holds one hold-session token may
-    // accumulate at once. Deliberately soft - a scripted caller dropping
-    // the cookie mints a fresh token per request and sails past this - see
-    // docs/adr/0016 for what actually bounds the abuse case (the stay-
-    // length/lead-time caps above and the "holds" rate-limit policy).
-    private const int MaxActiveHoldsPerSession = 5;
+    // Live holds one client network may have at once, counted by
+    // ClientKey. This used to be 5 per hold-session cookie, which was no
+    // cap at all: the cookie is client-supplied, so discarding it minted a
+    // fresh budget per request.
+    //
+    // It's here rather than in the "holds" rate-limit policy because the
+    // two bound different things and only this one bounds the resource
+    // that matters. A fixed-window limiter caps request *rate*; holds
+    // expire on their own 15-minute clock, so at 20/60s a single caller
+    // accumulates ~300 concurrent live holds without ever tripping it -
+    // each blocking up to MaxStayNights of a unit via the exclusion
+    // constraint. Rate says how fast you reach saturation, not how much
+    // you can hold. See docs/adr/0016.
+    private readonly int _maxActiveHoldsPerClient = holdCapOptions.Value.MaxActiveHoldsPerClient;
 
     public async ValueTask<HoldAvailabilityResponse> Handle(
         HoldAvailabilityRequest request,
@@ -76,13 +89,16 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
         //
         // Serializable, not Read Committed, for the same reason
         // CreatePricingRuleHandler/UpdatePricingRuleHandler need it
-        // (docs/adr/0012): the per-session cap below is a COUNT-then-INSERT
-        // against a shared predicate (holder_token = @HolderToken), and
-        // under Read Committed, N concurrent holds from the same session on
-        // N different units can all COUNT before any commits its own
+        // (docs/adr/0012): the hold cap below is a COUNT-then-INSERT
+        // against a shared predicate (client_key = @ClientKey), and under
+        // Read Committed, N concurrent holds from the same client on N
+        // different units can all COUNT before any commits its own
         // INSERT, oversubscribing the cap - proven empirically via
         // HoldAvailabilityConcurrencyTests, which measured 9 successful
-        // holds against a cap of 5 before this was added. No EF
+        // holds against a cap of 5 before this was added. That matters
+        // more now than it did when the key was the cookie: a caller who
+        // wants to exceed the cap can no longer just discard the key, so
+        // racing it is the remaining way to try. No EF
         // change-tracking risk here on retry - this transaction is pure
         // Dapper, so every retry re-issues a real SQL round trip with no
         // identity map to go stale.
@@ -112,9 +128,8 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
                 transaction.GetDbTransaction(),
                 cancellationToken: cancellationToken));
 
-            // Soft cap, not the real defense (see MaxActiveHoldsPerSession's
-            // own comment) - counts this session's active holds across
-            // every unit. 'booked' is deliberately excluded: ConfirmHoldAsync
+            // Counts this client network's live holds across every unit.
+            // 'booked' is deliberately excluded: ConfirmHoldAsync
             // sets it and nothing ever clears it (the reconciliation job
             // depends on that persistence), so counting it would mean a
             // customer permanently loses hold capacity after their Nth
@@ -124,16 +139,16 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
             // ExpiredHoldsSweepJob reaps it.
             const string activeHoldCountSql = """
                                               SELECT count(*) FROM unit_availability_holds
-                                              WHERE holder_token = @HolderToken AND status = 'held' AND hold_expires_at > @Now;
+                                              WHERE client_key = @ClientKey AND status = 'held' AND hold_expires_at > @Now;
                                               """;
 
             int activeHoldCount = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
                 activeHoldCountSql,
-                new { request.HolderToken, Now = now },
+                new { request.ClientKey, Now = now },
                 transaction.GetDbTransaction(),
                 cancellationToken: cancellationToken));
 
-            if (activeHoldCount >= MaxActiveHoldsPerSession)
+            if (activeHoldCount >= _maxActiveHoldsPerClient)
             {
                 await transaction.RollbackAsync(cancellationToken);
                 throw new TooManyActiveHoldsException();
@@ -143,8 +158,8 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
             DateTimeOffset holdExpiresAt = now.Add(HoldDuration);
 
             const string sql = """
-                               INSERT INTO unit_availability_holds (id, unit_id, stay_range, status, hold_expires_at, created_at, guest_count, total_price, subtotal, currency, length_of_stay_discount_amount, holder_token)
-                               VALUES (@Id, @UnitId, @StayRange, 'held', @HoldExpiresAt, @CreatedAt, @GuestCount, @TotalPrice, @Subtotal, @Currency, @LengthOfStayDiscountAmount, @HolderToken);
+                               INSERT INTO unit_availability_holds (id, unit_id, stay_range, status, hold_expires_at, created_at, guest_count, total_price, subtotal, currency, length_of_stay_discount_amount, holder_token, client_key)
+                               VALUES (@Id, @UnitId, @StayRange, 'held', @HoldExpiresAt, @CreatedAt, @GuestCount, @TotalPrice, @Subtotal, @Currency, @LengthOfStayDiscountAmount, @HolderToken, @ClientKey);
                                """;
 
             try
@@ -166,7 +181,8 @@ public class HoldAvailabilityHandler(AppAvailabilityDbContext dbContext, IUnitLo
                         Subtotal = pricing.Subtotal,
                         Currency = pricing.TotalPrice.Currency.ToString(),
                         LengthOfStayDiscountAmount = pricing.LengthOfStayDiscountAmount?.Amount,
-                        request.HolderToken
+                        request.HolderToken,
+                        request.ClientKey
                     },
                     transaction.GetDbTransaction(),
                     cancellationToken: cancellationToken));

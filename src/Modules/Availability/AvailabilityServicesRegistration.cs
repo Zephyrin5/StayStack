@@ -1,4 +1,5 @@
 using Availability.Contracts;
+using Availability.Features.HoldAvailability;
 using Catalog.Contracts;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -38,6 +39,12 @@ public static class AvailabilityServicesRegistration
 
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
+
+        // Same "RateLimiting" section Api.RateLimiting's options bind to -
+        // MaxActiveHoldsPerClient is a sibling key alongside
+        // HoldPermitLimit/HoldWindowSeconds. Bound here rather than in
+        // Program.cs because the handler that reads it lives in this module.
+        services.Configure<HoldCapOptions>(configuration.GetSection("RateLimiting"));
 
         services.AddScoped<IHoldConfirmation, HoldConfirmation>();
 

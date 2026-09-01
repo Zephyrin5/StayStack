@@ -15,20 +15,25 @@ public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAv
         builder.Property(h => h.Subtotal).HasColumnType("numeric(12,3)").IsRequired();
         builder.Property(h => h.LengthOfStayDiscountAmount).HasColumnType("numeric(12,3)");
         builder.Property(h => h.HolderToken).HasMaxLength(64);
+        builder.Property(h => h.ClientKey).HasMaxLength(UnitAvailabilityHold.ClientKeyMaxLength);
 
         builder.HasIndex(h => h.UnitId);
 
-        // Backs HoldAvailabilityHandler's per-session active-hold count -
-        // partial on 'held' only, matching that query's WHERE clause
-        // exactly. Deliberately excludes 'booked' - see that query's own
-        // comment for why counting a successfully-booked hold would be a
-        // permanent customer-facing bug, not just an index-tuning choice.
+        // Backs HoldAvailabilityHandler's concurrent-hold cap - partial on
+        // 'held' only, matching that query's WHERE clause exactly.
+        // Deliberately excludes 'booked' - see that query's own comment for
+        // why counting a successfully-booked hold would be a permanent
+        // customer-facing bug, not just an index-tuning choice.
         // hold_expires_at > @Now is a residual filter applied after this
-        // index narrows to the session's 'held' rows - a runtime
-        // comparison can't be baked into a static partial-index predicate.
-        builder.HasIndex(h => h.HolderToken, "ix_unit_availability_holds_holder_token_active")
+        // index narrows to the client's 'held' rows - a runtime comparison
+        // can't be baked into a static partial-index predicate.
+        //
+        // Keyed on client_key, not holder_token: the cap moved off the
+        // cookie (docs/adr/0016), and no query filters on holder_token any
+        // more, so an index on it would be pure write-side cost.
+        builder.HasIndex(h => h.ClientKey, "ix_unit_availability_holds_client_key_active")
             .HasFilter("status = 'held'")
-            .HasDatabaseName("ix_unit_availability_holds_holder_token_active");
+            .HasDatabaseName("ix_unit_availability_holds_client_key_active");
 
         // No (status, booked_at) index any more. It existed solely for
         // ReconcileOrphanedBookedHoldsJob's candidate query, which

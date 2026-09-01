@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Availability;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using NpgsqlTypes;
 namespace Availability.Migrations
 {
     [DbContext(typeof(AppAvailabilityDbContext))]
-    partial class AppAvailabilityDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260901184525_AddClientKeyToUnitAvailabilityHolds")]
+    partial class AddClientKeyToUnitAvailabilityHolds
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

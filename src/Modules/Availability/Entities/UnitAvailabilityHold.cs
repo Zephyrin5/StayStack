@@ -14,6 +14,14 @@ namespace Availability.Entities;
 /// </summary>
 public sealed class UnitAvailabilityHold
 {
+    /// <summary>
+    ///     Sized for the longest value Api.Security.ClientNetworkKey can
+    ///     produce - a full-form IPv6 /64 ("xxxx:xxxx:xxxx:xxxx::/64", 42
+    ///     chars). The single source of truth for that column's width, so a
+    ///     wider key can't silently become a Postgres 22001 at insert time.
+    /// </summary>
+    public const int ClientKeyMaxLength = 45;
+
     public Guid Id { get; set; }
 
     // Opaque cross-module id, resolved through Catalog.Contracts.IUnitLookup
@@ -55,8 +63,21 @@ public sealed class UnitAvailabilityHold
 
     // An opaque per-browser correlator, not an identity - see
     // Api.Security.HoldSessionCookie and docs/adr/0016. Null for any hold
-    // predating this column.
+    // predating this column. No longer caps anything: it's the ownership
+    // handle a future "release my hold" endpoint needs, and nothing else.
     public string? HolderToken { get; set; }
+
+    // The caller's network, normalised by Api.Security.ClientNetworkKey.
+    // Counted by HoldAvailabilityHandler's concurrent-hold cap - the one
+    // thing here a caller can't choose for themselves.
+    //
+    // Cleared when the hold is consumed (HoldConfirmation.ConfirmHoldAsync),
+    // so this only ever exists on rows the cap can actually count: a live
+    // hold, for at most its 15-minute expiry. A booked hold keeps no record
+    // of the address that made it, which is the point - the cap needs it,
+    // and a booking that outlives the hold by years does not. Also null for
+    // any hold predating this column.
+    public string? ClientKey { get; set; }
 
     // Snapshotted from the unit at hold-creation time, not read live at
     // confirm time - a unit's price can change between holding and

@@ -8,6 +8,7 @@ using Catalog.Contracts;
 using Catalog.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NpgsqlTypes;
 using SeedWork.Enums;
@@ -61,10 +62,19 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     // (PricingCalculator via Catalog's own database), which a mock would
     // defeat the purpose of. Resolved once per handler construction, same
     // as the real AppAvailabilityDbContext.
-    private HoldAvailabilityHandler CreateHandler(AppAvailabilityDbContext context, TimeProvider timeProvider, IServiceScope scope)
+    //
+    // The cap defaults low here rather than to production's 25 so the cap
+    // tests stay short. That's safe only because every request in this file
+    // carries its own ClientKey - the count is scoped to one key, so holds
+    // left behind by other tests sharing this database can't push a
+    // neighbouring test over the limit.
+    private HoldAvailabilityHandler CreateHandler(
+        AppAvailabilityDbContext context, TimeProvider timeProvider, IServiceScope scope, int maxActiveHoldsPerClient = 5)
     {
         IUnitLookup unitLookup = scope.ServiceProvider.GetRequiredService<IUnitLookup>();
-        return new HoldAvailabilityHandler(context, unitLookup, timeProvider);
+        return new HoldAvailabilityHandler(
+            context, unitLookup, timeProvider,
+            Options.Create(new HoldCapOptions { MaxActiveHoldsPerClient = maxActiveHoldsPerClient }));
     }
 
     [Fact]
@@ -89,7 +99,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(3),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString()
+            HolderToken = Guid.NewGuid().ToString(),
+            ClientKey = Guid.NewGuid().ToString()
         };
 
         // Act
@@ -153,7 +164,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today.AddDays(2), // Aug 22 (Same day previous hold ends)
             CheckOut = today.AddDays(4), // Aug 24
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString()
+            HolderToken = Guid.NewGuid().ToString(),
+            ClientKey = Guid.NewGuid().ToString()
         };
 
         // Act
@@ -203,7 +215,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(2),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString()
+            HolderToken = Guid.NewGuid().ToString(),
+            ClientKey = Guid.NewGuid().ToString()
         };
 
         // Act
@@ -254,7 +267,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(2),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString()
+            HolderToken = Guid.NewGuid().ToString(),
+            ClientKey = Guid.NewGuid().ToString()
         };
 
         // Act & Assert
@@ -287,7 +301,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(3),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString()
+            HolderToken = Guid.NewGuid().ToString(),
+            ClientKey = Guid.NewGuid().ToString()
         };
 
         // Act
@@ -321,7 +336,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(2), // Thu, Fri
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString()
+            HolderToken = Guid.NewGuid().ToString(),
+            ClientKey = Guid.NewGuid().ToString()
         };
 
         // Act
@@ -355,7 +371,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(7),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString()
+            HolderToken = Guid.NewGuid().ToString(),
+            ClientKey = Guid.NewGuid().ToString()
         };
 
         // Act
@@ -384,7 +401,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(2),
             GuestCount = 1,
-            HolderToken = Guid.NewGuid().ToString()
+            HolderToken = Guid.NewGuid().ToString(),
+            ClientKey = Guid.NewGuid().ToString()
         };
 
         // Act & Assert
@@ -417,7 +435,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today.AddDays(731),
             CheckOut = today.AddDays(733),
             GuestCount = 1,
-            HolderToken = Guid.NewGuid().ToString()
+            HolderToken = Guid.NewGuid().ToString(),
+            ClientKey = Guid.NewGuid().ToString()
         };
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
@@ -425,7 +444,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     }
 
     [Fact]
-    public async Task Handle_SixthActiveHoldForSameSession_ThrowsTooManyActiveHoldsException()
+    public async Task Handle_SixthActiveHoldFromSameClientNetwork_ThrowsTooManyActiveHoldsException()
     {
         Unit unit = CreateTestUnit(maxCapacity: 10);
         await SeedCatalogAsync(unit);
@@ -433,6 +452,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
         string holderToken = Guid.NewGuid().ToString();
+        string clientKey = Guid.NewGuid().ToString();
 
         using IServiceScope scope = factory.Services.CreateScope();
         AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
@@ -440,7 +460,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         timeProvider.SetUtcNow(fixedInstant);
         HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
 
-        // Five non-overlapping ranges on the same unit, same session token -
+        // Five non-overlapping ranges on the same unit, same client key -
         // all should succeed, filling the cap exactly.
         for (int i = 0; i < 5; i++)
         {
@@ -450,13 +470,14 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
                 CheckIn = today.AddDays(i * 3),
                 CheckOut = today.AddDays(i * 3 + 2),
                 GuestCount = 1,
-                HolderToken = holderToken
+                HolderToken = holderToken,
+                ClientKey = clientKey
             };
             await handler.Handle(request, CancellationToken.None);
         }
 
         // A 6th, on a range that doesn't even overlap the first five -
-        // the cap is per-session, not per-unit/range, so a clean exclusion-
+        // the cap is per-client, not per-unit/range, so a clean exclusion-
         // constraint check would otherwise let this through.
         HoldAvailabilityRequest sixthRequest = new HoldAvailabilityRequest
         {
@@ -464,7 +485,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today.AddDays(100),
             CheckOut = today.AddDays(102),
             GuestCount = 1,
-            HolderToken = holderToken
+            HolderToken = holderToken,
+            ClientKey = clientKey
         };
 
         await Assert.ThrowsAsync<TooManyActiveHoldsException>(() =>
@@ -487,11 +509,12 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
         string holderToken = Guid.NewGuid().ToString();
+        string clientKey = Guid.NewGuid().ToString();
 
         using IServiceScope scope = factory.Services.CreateScope();
         AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
 
-        // Five already-'booked' holds under the same session token,
+        // Five already-'booked' holds under the same client key,
         // simulating five completed bookings - none of these are "active"
         // in any meaningful sense; the customer already has real bookings,
         // not open holds.
@@ -505,6 +528,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
                 StayRange = new NpgsqlRange<DateOnly>(today.AddDays(i * 3), true, today.AddDays(i * 3 + 2), false),
                 BookedAt = fixedInstant,
                 HolderToken = holderToken,
+                ClientKey = clientKey,
                 TotalPrice = Money.Of(200m, Currency.KWD),
                 Subtotal = 200m
             });
@@ -522,7 +546,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today.AddDays(100),
             CheckOut = today.AddDays(102),
             GuestCount = 1,
-            HolderToken = holderToken
+            HolderToken = holderToken,
+            ClientKey = clientKey
         };
 
         HoldAvailabilityResponse result = await handler.Handle(sixthRequest, CancellationToken.None);
@@ -545,6 +570,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
         string holderToken = Guid.NewGuid().ToString();
+        string clientKey = Guid.NewGuid().ToString();
 
         using IServiceScope scope = factory.Services.CreateScope();
         AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
@@ -559,6 +585,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
                 StayRange = new NpgsqlRange<DateOnly>(today, true, today.AddDays(2), false),
                 HoldExpiresAt = fixedInstant.AddMinutes(-1), // already expired
                 HolderToken = holderToken,
+                ClientKey = clientKey,
                 TotalPrice = Money.Of(100m, Currency.KWD),
                 Subtotal = 100m
             });
@@ -576,7 +603,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(2),
             GuestCount = 1,
-            HolderToken = holderToken
+            HolderToken = holderToken,
+            ClientKey = clientKey
         };
 
         HoldAvailabilityResponse result = await handler.Handle(sixthRequest, CancellationToken.None);
@@ -613,7 +641,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = new DateOnly(2026, 8, 20),
             CheckOut = new DateOnly(2026, 8, 23),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString()
+            HolderToken = Guid.NewGuid().ToString(),
+            ClientKey = Guid.NewGuid().ToString()
         };
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
@@ -643,7 +672,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = new DateOnly(2026, 8, 21),
             CheckOut = new DateOnly(2026, 8, 24),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString()
+            HolderToken = Guid.NewGuid().ToString(),
+            ClientKey = Guid.NewGuid().ToString()
         }, CancellationToken.None);
 
         Assert.NotEqual(Guid.Empty, result.HoldId);

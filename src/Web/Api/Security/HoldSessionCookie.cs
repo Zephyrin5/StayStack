@@ -3,11 +3,17 @@ namespace Api.Security;
 /// <summary>
 ///     An opaque per-browser correlator for anonymous hold requests - not a
 ///     security boundary (a scripted caller can drop the cookie and mint a
-///     fresh one per request), so it's never used for authorization. Its
-///     real purpose is capping how many concurrent holds one ordinary
-///     browser session can accumulate (HoldAvailabilityHandler) and, later,
-///     giving an anonymous caller an ownership handle to release/confirm
-///     their own hold. See docs/adr/0016.
+///     fresh one per request), so it's never used for authorization and no
+///     longer enforces anything.
+///     <para>
+///         It used to carry HoldAvailabilityHandler's concurrent-hold cap,
+///         which meant the cap was keyed on a value the caller chose:
+///         discard the cookie, get a fresh budget. That cap now counts by
+///         <see cref="ClientNetworkKey"/> instead. What's left here is the
+///         one job this token can actually do - an ownership handle letting
+///         an anonymous caller release or confirm their own hold. See
+///         docs/adr/0016.
+///     </para>
 /// </summary>
 public static class HoldSessionCookie
 {

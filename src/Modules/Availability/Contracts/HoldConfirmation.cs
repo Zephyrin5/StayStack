@@ -44,9 +44,17 @@ internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider
         // (the app's TimeProvider), not Postgres' own now() - otherwise
         // the app server and DB server are two different clocks comparing
         // the same expiry.
+        // client_key is cleared here, not merely left to stop counting.
+        // HoldAvailabilityHandler's cap only ever reads live 'held' rows, so
+        // a booked hold's copy is dead weight - and it's a caller's network
+        // address on a row that outlives the hold by years. Nulling it keeps
+        // that retention bounded to the 15 minutes the cap actually needs it
+        // for. ReleaseHoldAsync doesn't restore it, and doesn't need to: it
+        // resets hold_expires_at to now, so the row is already past expiry
+        // and outside the cap's WHERE clause either way.
         const string sql = """
                            UPDATE unit_availability_holds
-                           SET status = 'booked', booked_at = @Now
+                           SET status = 'booked', booked_at = @Now, client_key = NULL
                            WHERE id = @HoldId AND status = 'held' AND hold_expires_at > @Now
                            RETURNING unit_id AS "UnitId", lower(stay_range) AS "CheckIn", upper(stay_range) AS "CheckOut", guest_count AS "GuestCount", total_price AS "TotalPrice", subtotal AS "Subtotal", currency AS "Currency", length_of_stay_discount_amount AS "LengthOfStayDiscountAmount";
                            """;
