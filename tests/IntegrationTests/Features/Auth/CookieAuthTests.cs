@@ -5,6 +5,7 @@ using Identity.Features.SignIn;
 using Identity.Features.SignOut;
 using Microsoft.AspNetCore.Identity;
 using Api.Security;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -126,6 +127,75 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
         string cookieHeader = Assert.Single(setCookieHeaders);
         Assert.Contains(CookieName, cookieHeader);
         Assert.Contains("secure", cookieHeader, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SignIn_WithSameSiteNone_SetsSameSiteNone_ForACrossSiteSpa()
+    {
+        // The escape hatch for a deployment where the SPA and API sit on
+        // different registrable domains. There a Lax cookie is never attached
+        // to the SPA's fetch calls at all - CORS allows the request, the
+        // browser just declines to send the cookie, and cookie auth fails
+        // with nothing logged anywhere. None is the only value that works,
+        // and it has to be reachable by configuration for that deployment to
+        // exist at all.
+        //
+        // RequireSecure comes along with it because browsers reject
+        // SameSite=None without Secure; Program.cs refuses to start on that
+        // combination rather than serving cookies nothing will store.
+        string email = _faker.Internet.Email();
+        string password = $"P@{_faker.Internet.Password()}!";
+        await SeedUserAsync(email, password);
+
+        using WebApplicationFactory<Program> crossSiteFactory = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.Configure<CookieSecurityOptions>(o =>
+            {
+                o.SameSite = SameSiteMode.None;
+                o.RequireSecure = true;
+            })));
+
+        using HttpClient client = crossSiteFactory.CreateClient();
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/auth/sign-in?useCookies=true", new SignInRequest { Email = email, Password = password });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.TryGetValues("Set-Cookie", out var setCookieHeaders));
+
+        string cookieHeader = Assert.Single(setCookieHeaders);
+        Assert.Contains("samesite=none", cookieHeader, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("secure", cookieHeader, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Startup_WithSameSiteNoneButNotSecure_RefusesToStart()
+    {
+        // Guards the guard. SameSite=None without Secure is refused by every
+        // modern browser, so the app would come up healthy and hand out
+        // session cookies nothing stores - a failure that looks like "login
+        // silently doesn't persist" rather than like a config error. Program.cs
+        // throws instead, and this asserts the throw is real and reachable
+        // rather than a comment describing an intention.
+        using WebApplicationFactory<Program> misconfigured = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.Configure<CookieSecurityOptions>(o =>
+            {
+                o.SameSite = SameSiteMode.None;
+                o.RequireSecure = false;
+            })));
+
+        // The host is built lazily, so the throw surfaces on first resolution.
+        InvalidOperationException exception =
+            Assert.Throws<InvalidOperationException>(() => misconfigured.CreateClient());
+
+        Assert.Contains("SameSite is None but RequireSecure is false", exception.Message);
+    }
+
+    [Fact]
+    public void CookieSecurityOptions_DefaultsToLax_TheSameSiteCase()
+    {
+        // Lax, not None. The default deployment shares a registrable domain
+        // between SPA and API - cross-origin at most, which CORS handles -
+        // and Lax is what keeps the CSRF protection None would give up.
+        Assert.Equal(SameSiteMode.Lax, new CookieSecurityOptions().SameSite);
     }
 
     [Fact]

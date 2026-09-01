@@ -34,6 +34,21 @@ public static class ApiServicesRegistration
         // fine since origins are already an explicit config list, never a
         // wildcard. Origins come from config rather than being hardcoded
         // so prod can set a different list without a code change.
+        //
+        // CONSTRAINT worth knowing before adding an origin here: CORS and
+        // SameSite are answering different questions, and only CORS is about
+        // origins. An origin that differs only by port or path is still the
+        // same *site*, so the SameSite=Lax cookie is sent normally - that is
+        // exactly the dev setup (localhost:3000 -> localhost:5277), which
+        // needs AllowCredentials precisely because it IS cross-origin.
+        //
+        // An origin on a different registrable domain, or a different scheme,
+        // is cross-*site*. CORS will happily allow it and the browser will
+        // still refuse to attach a Lax cookie, so cookie-mode auth fails with
+        // no error visible anywhere - refresh simply 401s. Such a deployment
+        // has to set Cookies:SameSite to None (which requires
+        // Cookies:RequireSecure, enforced at startup) and accept the CSRF
+        // exposure that comes with it. See CookieSecurityOptions.SameSite.
         string[] allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
         services.AddCors(options =>
         {

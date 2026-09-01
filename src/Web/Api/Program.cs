@@ -203,6 +203,21 @@ foreach (string proxy in app.Configuration.GetSection("ForwardedHeaders:KnownPro
 {
     forwardedHeadersOptions.KnownProxies.Add(IPAddress.Parse(proxy));
 }
+// A throw, not a warning, unlike the proxy check below: SameSite=None
+// without Secure is refused by every modern browser, so the cookie is never
+// stored and cookie-mode auth cannot work at all. There is no deployment
+// where this combination is what someone meant, which makes starting up and
+// serving broken sessions strictly worse than refusing to start.
+CookieSecurityOptions cookieSecurity =
+    app.Services.GetRequiredService<IOptions<CookieSecurityOptions>>().Value;
+if (cookieSecurity.SameSite == SameSiteMode.None && !cookieSecurity.RequireSecure)
+{
+    throw new InvalidOperationException(
+        $"{CookieSecurityOptions.SectionName}:SameSite is None but RequireSecure is false. Browsers reject " +
+        "SameSite=None cookies that are not Secure, so no session cookie would ever be stored. A cross-site " +
+        "SPA needs both; a same-site one should leave SameSite at Lax.");
+}
+
 if (!app.Environment.IsDevelopment() && forwardedHeadersOptions.KnownProxies.Count == 0)
 {
     // A warning, not a throw: an app exposed directly with its own TLS has

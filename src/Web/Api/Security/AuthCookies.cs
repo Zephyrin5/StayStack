@@ -34,14 +34,21 @@ public static class AuthCookies
                 // without Secure. See CookieSecurityOptions for why the
                 // default is true and which environments opt out.
                 Secure = cookieSecurity.RequireSecure,
-                // Lax, not None: this cookie is only ever attached to
+                // Lax by default: this cookie is only ever attached to
                 // same-site JS-initiated fetch calls, never a cross-site
                 // top-level navigation - and SameSite compares registrable
                 // domain, not port, so localhost:3000/5277 already count as
-                // same-site in dev. Lax also closes the classic CSRF vector
-                // (an attacker page auto-submitting a form POST here) a
-                // cookie-based credential would otherwise reopen.
-                SameSite = SameSiteMode.Lax,
+                // same-site in dev even though they are different origins
+                // (which is why CORS still needs AllowCredentials). Lax also
+                // closes the classic CSRF vector (an attacker page
+                // auto-submitting a form POST here) a cookie-based credential
+                // would otherwise reopen.
+                //
+                // Configurable because a deployment that splits the SPA and
+                // API across registrable domains is genuinely cross-site, and
+                // a Lax cookie is then never sent at all - see
+                // CookieSecurityOptions.SameSite.
+                SameSite = cookieSecurity.SameSite,
                 Expires = timeProvider.GetUtcNow().AddDays(tokenSettings.RefreshTokenLifespanInDays),
                 Path = "/"
             });

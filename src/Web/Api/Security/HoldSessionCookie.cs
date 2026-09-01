@@ -51,7 +51,7 @@ public static class HoldSessionCookie
             {
                 HttpOnly = true,
                 Secure = cookieSecurity.RequireSecure,
-                SameSite = SameSiteMode.Lax,
+                SameSite = cookieSecurity.SameSite,
                 Expires = timeProvider.GetUtcNow().AddDays(1),
                 Path = "/"
             });
