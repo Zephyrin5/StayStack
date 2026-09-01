@@ -5,7 +5,12 @@ public abstract class Entity
 {
     public Guid Id { get; protected set; }
     public Guid? CreatedBy { get; protected set; }
-    public DateTimeOffset CreatedAt { get; protected set; } = DateTime.UtcNow;
+
+    // No default here, deliberately - SetCreated always overwrites this with
+    // TimeProvider's own value before commit (see the interceptor below), so
+    // a DateTime.UtcNow initializer would be dead on every save and a wasted
+    // syscall on every entity EF materializes from a query.
+    public DateTimeOffset CreatedAt { get; protected set; }
     public Guid? ModifiedBy { get; protected set; }
     public DateTimeOffset? ModifiedAt { get; protected set; }
     public EntityStatus Status { get; protected set; } = EntityStatus.Active;
