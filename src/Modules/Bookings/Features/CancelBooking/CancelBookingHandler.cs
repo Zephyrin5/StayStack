@@ -7,6 +7,7 @@ using BuildingBlocks.Identity;
 using BuildingBlocks.Time;
 using Mediator;
 using Outbox;
+using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using Transactions.Contracts;
 namespace Bookings.Features.CancelBooking;
@@ -75,9 +76,21 @@ public class CancelBookingHandler(
         // of how many times this endpoint is called. See docs/adr/0003.
         if (booking.BookingStatus != BookingStatus.Cancelled)
         {
+            // Read *before* enqueueing and dispatching, deliberately. Both
+            // reads further down are invalidated by this request's own inline
+            // dispatch: a ReverseTransactionAsync that lands moves the
+            // transaction past Succeeded, so GetSucceededTransactionAmountAsync
+            // then reports "nothing to refund" while GetRefundSnapshotAsync
+            // starts reporting one. Deciding after the dispatch made the
+            // response a function of whether that attempt happened to win -
+            // the same request answering RefundPending: false with a figure,
+            // or true, depending on a race the caller can't see or control.
+            bool refundOwed =
+                await transactionReversal.GetSucceededTransactionAmountAsync(booking.Id, cancellationToken) is not null;
+
             booking.Cancel();
 
-            (Money refundAmount, _) = ComputeRefund(today);
+            (Money refundAmount, decimal refundPercent) = ComputeRefund(today);
 
             // Enqueued in the same SaveChangesAsync as booking.Cancel() -
             // atomic with the cancellation itself, then dispatched inline so
@@ -100,8 +113,23 @@ public class CancelBookingHandler(
             await dispatcher.TryDispatchAsync(releaseHoldRow, cancellationToken);
             await dispatcher.TryDispatchAsync(reverseTransactionRow, cancellationToken);
             await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
+
+            // Always pending on a fresh cancel, whatever the inline dispatch
+            // just did. The durable outbox row is the guarantee; dispatching
+            // inline is a latency optimisation, and letting its outcome reach
+            // the response gave callers two different shapes for one action.
+            // A caller now has exactly one path here: a figure and
+            // RefundPending: true, or no refund at all. What actually landed
+            // is reported by a later re-cancel, off settled state.
+            return refundOwed
+                ? BuildResponse(booking, refundAmount.Amount, refundAmount.Currency, refundPercent, refundPending: true)
+                : BuildResponse(booking, refundAmount: null, currency: null, refundPercent: null, refundPending: false);
         }
 
+        // Everything below serves the idempotent re-cancel only, so these are
+        // reads of state that settled in some earlier request rather than a
+        // read-back of this one's own writes.
+        //
         // Checked first, preferred over anything computed below - the
         // authoritative record of what was actually applied when the
         // reversal ran, whenever that was. Once this exists, the
@@ -128,15 +156,8 @@ public class CancelBookingHandler(
                 ? null
                 : refundSnapshot.RefundAmount / refundSnapshot.Amount * 100m;
 
-            return new CancelBookingResponse
-            {
-                BookingId = booking.Id,
-                BookingStatus = booking.BookingStatus,
-                RefundAmount = refundSnapshot.RefundAmount,
-                Currency = booking.TotalPrice.Currency,
-                RefundPercent = refundPercent,
-                RefundPending = false
-            };
+            return BuildResponse(
+                booking, refundSnapshot.RefundAmount, booking.TotalPrice.Currency, refundPercent, refundPending: false);
         }
 
         // No snapshot yet - either there was never anything to refund, or a
@@ -150,15 +171,7 @@ public class CancelBookingHandler(
 
         if (!hasSucceededTransaction)
         {
-            return new CancelBookingResponse
-            {
-                BookingId = booking.Id,
-                BookingStatus = booking.BookingStatus,
-                RefundAmount = null,
-                Currency = null,
-                RefundPercent = null,
-                RefundPending = false
-            };
+            return BuildResponse(booking, refundAmount: null, currency: null, refundPercent: null, refundPending: false);
         }
 
         // A Succeeded transaction exists but nothing has reversed it yet -
@@ -178,14 +191,23 @@ public class CancelBookingHandler(
             booking.ModifiedAt ?? timeProvider.GetUtcNow(), booking.TimeZoneId);
         (Money pendingRefundAmount, decimal pendingRefundPercent) = ComputeRefund(cancelledOn);
 
-        return new CancelBookingResponse
+        return BuildResponse(
+            booking, pendingRefundAmount.Amount, pendingRefundAmount.Currency, pendingRefundPercent, refundPending: true);
+    }
+
+    private static CancelBookingResponse BuildResponse(
+        Booking booking,
+        decimal? refundAmount,
+        Currency? currency,
+        decimal? refundPercent,
+        bool refundPending) =>
+        new CancelBookingResponse
         {
             BookingId = booking.Id,
             BookingStatus = booking.BookingStatus,
-            RefundAmount = pendingRefundAmount.Amount,
-            Currency = pendingRefundAmount.Currency,
-            RefundPercent = pendingRefundPercent,
-            RefundPending = true
+            RefundAmount = refundAmount,
+            Currency = currency,
+            RefundPercent = refundPercent,
+            RefundPending = refundPending
         };
-    }
 }

@@ -320,4 +320,86 @@ public class CancelBookingHandlerTests : IDisposable
         Assert.Equal(50m, response.RefundPercent);
         Assert.Equal(100m, response.RefundAmount);
     }
+
+    [Fact]
+    public async Task Handle_FreshCancel_ReturnsTheSameResponse_WhetherTheInlineDispatchLandsOrNot()
+    {
+        // The response used to be a function of whether this request's own
+        // inline dispatch happened to win: if ReverseTransactionAsync landed,
+        // the read-back below it saw a snapshot and reported
+        // RefundPending: false with the settled figure; if it failed, the same
+        // request reported RefundPending: true with a computed one. One
+        // action, two shapes, decided by a race the caller cannot see.
+        //
+        // Both scenarios below are now driven through the handler and the
+        // whole response compared field by field.
+        CancelBookingResponse landed = await CancelFreshBookingAsync(reversalLandsInline: true);
+        CancelBookingResponse didNotLand = await CancelFreshBookingAsync(reversalLandsInline: false);
+
+        Assert.Equal(didNotLand.RefundPending, landed.RefundPending);
+        Assert.Equal(didNotLand.RefundAmount, landed.RefundAmount);
+        Assert.Equal(didNotLand.RefundPercent, landed.RefundPercent);
+        Assert.Equal(didNotLand.Currency, landed.Currency);
+        Assert.Equal(didNotLand.BookingStatus, landed.BookingStatus);
+
+        // Pending either way: the durable outbox row is the guarantee, and
+        // whether it also executed within this request is not something the
+        // contract should express. A later re-cancel reports what landed.
+        Assert.True(landed.RefundPending);
+        Assert.Equal(200m, landed.RefundAmount);
+        Assert.Equal(100m, landed.RefundPercent);
+    }
+
+    private async Task<CancelBookingResponse> CancelFreshBookingAsync(bool reversalLandsInline)
+    {
+        // Check-in well beyond the default policy's 5-day tier, so the refund
+        // is a real 100%/200 rather than the degenerate 0 a same-day check-in
+        // produces - two zero refunds would compare equal without proving
+        // anything.
+        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(10);
+        Booking booking = Booking.Create(
+            Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), _customerId,
+            "Jane Guest", "jane@example.com", null,
+            checkIn, checkIn.AddDays(2),
+            2, Money.Of(200m, Currency.KWD), 200m, CancellationPolicy.CreateDefault(), "Asia/Kuwait");
+        _dbContext.Bookings.Add(booking);
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
+        transactionReversalMock
+            .Setup(x => x.GetSucceededTransactionAmountAsync(booking.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Money.Of(200m, Currency.KWD));
+
+        if (reversalLandsInline)
+        {
+            // ReverseTransactionAsync succeeds (Moq's default), so by the time
+            // the old code re-read, a snapshot existed - the exact state that
+            // used to flip the response to RefundPending: false.
+            transactionReversalMock
+                .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new TransactionRefundSnapshot { Amount = 200m, RefundAmount = 200m });
+        }
+        else
+        {
+            transactionReversalMock
+                .Setup(x => x.ReverseTransactionAsync(booking.Id, It.IsAny<Money>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("Transactions is temporarily unreachable."));
+            transactionReversalMock
+                .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync((TransactionRefundSnapshot?)null);
+        }
+
+        BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
+            _dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
+            new Mock<IPromotionRedemption>().Object, TimeProvider.System, NullLogger<BookingsOutboxDispatcher>.Instance);
+
+        Mock<ICurrentUserProvider> currentUserProviderMock = new Mock<ICurrentUserProvider>();
+        currentUserProviderMock.Setup(x => x.UserId).Returns(_customerId);
+
+        CancelBookingHandler handler = new CancelBookingHandler(
+            _dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, TimeProvider.System);
+
+        return await handler.Handle(
+            new CancelBookingRequest { BookingId = booking.Id }, TestContext.Current.CancellationToken);
+    }
 }
