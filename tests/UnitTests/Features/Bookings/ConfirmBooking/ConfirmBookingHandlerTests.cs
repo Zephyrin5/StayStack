@@ -285,7 +285,13 @@ public class ConfirmBookingHandlerPromoPricingTests : IDisposable
 
         ValidationException validationException = await Assert.ThrowsAsync<ValidationException>(() =>
             handler.Handle(request, CancellationToken.None).AsTask());
-        Assert.Contains("promoCode", validationException.Errors.Keys);
+        // PascalCase here, deliberately: the handler throws with a bare
+        // nameof(request.PromoCode) like every other ValidationException, and
+        // GlobalExceptionHandler.BuildValidationProblem camelCases keys on the
+        // way to the response. This test never reaches that boundary, so it
+        // sees the key as thrown. PromotionRedemptionTests asserts the wire
+        // form ("promoCode") over HTTP.
+        Assert.Contains(nameof(request.PromoCode), validationException.Errors.Keys);
 
         holdConfirmationMock.Verify(x => x.ReleaseHoldAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         promotionRedemptionMock.Verify(x => x.ReverseRedemptionAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Once);

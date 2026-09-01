@@ -23,7 +23,7 @@ public class OutboxRelayJobTests(IntegrationTestWebApplicationFactory factory)
 {
     private static UnitAvailabilityHold CreateBookedHold()
     {
-        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly checkIn = CatalogSeeding.Today();
 
         return new UnitAvailabilityHold
         {

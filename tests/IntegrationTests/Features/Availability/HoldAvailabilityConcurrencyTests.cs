@@ -54,7 +54,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
     {
         // Arrange
         Unit unit = await SeedUnitAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         HoldAvailabilityRequest request = new HoldAvailabilityRequest
         {
             UnitId = unit.Id,
@@ -97,7 +97,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         // too-short stay length once let a request coincidentally succeed
         // alongside the winner by only touching at the half-open boundary.
         Unit unit = await SeedUnitAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
 
         const int concurrentRequests = 10;
         Task<HttpResponseMessage>[] tasks =
@@ -136,7 +136,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         // race is what actually tests GIST's visibility handling under
         // real contention.
         Unit unit = await SeedUnitAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         DateOnly boundary = today.AddDays(5);
 
         HoldAvailabilityRequest rangeA = new HoldAvailabilityRequest
@@ -235,7 +235,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         // check. Only a real concurrent test can tell "correctly enforced"
         // apart from "happens to look correct because nothing has raced it".
         Unit[] units = await Task.WhenAll(Enumerable.Range(0, Cap + 4).Select(_ => SeedUnitAsync()));
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
 
         // No cookie warm-up any more. It used to exist so every "concurrent"
         // request shared one hold-session token instead of racing to mint its
@@ -291,7 +291,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         // the old per-session cap every one of these succeeds. They now share
         // a client network, so the cap applies across all of them.
         Unit[] units = await Task.WhenAll(Enumerable.Range(0, Cap + 1).Select(_ => SeedUnitAsync()));
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
 
         using WebApplicationFactory<Program> cappedFactory = CappedFactoryFor("198.51.100.20");
 

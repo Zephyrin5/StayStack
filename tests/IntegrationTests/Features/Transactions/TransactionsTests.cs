@@ -65,7 +65,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
 
     private async Task<Guid> HoldAndConfirmBookingAsync(Guid unitId)
     {
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         HttpResponseMessage holdResponse = await _client.PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
         {
             UnitId = unitId,

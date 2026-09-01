@@ -411,7 +411,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
             Booking booking = Booking.Create(
                 Guid.CreateVersion7(), unitId, Guid.NewGuid(), null,
                 "Jane Guest", "jane@example.com", null,
-                DateOnly.FromDateTime(DateTime.UtcNow).AddDays(5), DateOnly.FromDateTime(DateTime.UtcNow).AddDays(7),
+                CatalogSeeding.Today().AddDays(5), CatalogSeeding.Today().AddDays(7),
                 2, Money.Of(200m, Currency.KWD), 200m, CancellationPolicy.CreateDefault(), "Asia/Kuwait");
             bookingsDb.Bookings.Add(booking);
             await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);

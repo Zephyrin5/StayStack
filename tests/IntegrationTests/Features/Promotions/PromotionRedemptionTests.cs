@@ -249,7 +249,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         (_, string hostToken, Guid unitId) = await SeedHostWithUnitAsync(100m);
         string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
         Guid promotionId = await CreatePromotionAsync(hostToken, code, PromotionDiscountType.Percentage, 20m);
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unitId, today, today.AddDays(3)); // 3 nights * 100 = 300
 
         ConfirmBookingResponse result = await ConfirmBookingAsync(holdId, "guest@example.com", code);
@@ -273,7 +273,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         (_, string hostToken, Guid unitId) = await SeedHostWithUnitAsync(100m, Currency.KWD);
         string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
         await CreatePromotionAsync(hostToken, code, PromotionDiscountType.FixedAmount, 50m, Currency.KWD);
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unitId, today, today.AddDays(3)); // 300
 
         ConfirmBookingResponse result = await ConfirmBookingAsync(holdId, "guest@example.com", code);
@@ -285,7 +285,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
     public async Task ConfirmBooking_ShouldReturn400_WhenCodeDoesNotExist()
     {
         (_, _, Guid unitId) = await SeedHostWithUnitAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unitId, today, today.AddDays(3));
 
         HttpResponseMessage response = await ConfirmBookingRawAsync(holdId, "guest@example.com", "NOSUCHCODE");
@@ -310,7 +310,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         (_, string hostToken, Guid unitId) = await SeedHostWithUnitAsync();
         string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
         await CreatePromotionAsync(hostToken, code, expiresAt: DateTimeOffset.UtcNow.AddDays(-1));
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unitId, today, today.AddDays(3));
 
         HttpResponseMessage response = await ConfirmBookingRawAsync(holdId, "guest@example.com", code);
@@ -324,7 +324,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         (_, string hostToken, Guid unitId) = await SeedHostWithUnitAsync();
         string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
         await CreatePromotionAsync(hostToken, code);
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid firstHoldId = await HoldUnitAsync(unitId, today, today.AddDays(2));
         await ConfirmBookingAsync(firstHoldId, "repeat@example.com", code);
 
@@ -343,7 +343,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         (_, string hostToken, Guid unitId) = await SeedHostWithUnitAsync();
         string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
         await CreatePromotionAsync(hostToken, code, maxRedemptions: 1);
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid firstHoldId = await HoldUnitAsync(unitId, today, today.AddDays(2));
         await ConfirmBookingAsync(firstHoldId, "first@example.com", code);
 
@@ -362,7 +362,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         await CreatePromotionAsync(ownerToken, code);
 
         (_, _, Guid otherUnitId) = await SeedHostWithUnitAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(otherUnitId, today, today.AddDays(3));
 
         HttpResponseMessage response = await ConfirmBookingRawAsync(holdId, "guest@example.com", code);
@@ -376,7 +376,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         (_, string hostToken, Guid unitId) = await SeedHostWithUnitAsync(100m, Currency.KWD);
         string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
         await CreatePromotionAsync(hostToken, code, PromotionDiscountType.FixedAmount, 10m, Currency.USD);
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unitId, today, today.AddDays(3));
 
         HttpResponseMessage response = await ConfirmBookingRawAsync(holdId, "guest@example.com", code);
@@ -392,7 +392,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
         await CreatePromotionAsync(hostToken, code, PromotionDiscountType.Percentage, 20m);
 
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         // 3 nights * 100 = 300 subtotal; LOS discount alone would give 270.
         Guid holdId = await HoldUnitAsync(unitId, today, today.AddDays(3));
 
@@ -411,7 +411,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         // discount still applies normally.
         (_, string hostToken, Guid unitId) = await SeedHostWithUnitAsync(100m);
         await CreateLengthOfStayDiscountRuleAsync(hostToken, unitId, minNights: 3, discountPercent: 10m);
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unitId, today, today.AddDays(3));
 
         ConfirmBookingResponse result = await ConfirmBookingAsync(holdId, "guest@example.com", null);
@@ -427,7 +427,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         Guid promotionId = await CreatePromotionAsync(hostToken, code, maxRedemptions: 1);
         string customerToken = await SeedSignedInCustomerAsync();
 
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid firstHoldId = await HoldUnitAsync(unitId, today, today.AddDays(2));
         ConfirmBookingResponse firstBooking = await ConfirmBookingAsync(firstHoldId, "guest@example.com", code, customerToken);
 
@@ -469,7 +469,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         Guid promotionId = await CreatePromotionAsync(hostToken, code, maxRedemptions: 1);
 
         const int concurrentRequests = 8;
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid[] holdIds = new Guid[concurrentRequests];
         for (int i = 0; i < concurrentRequests; i++)
         {
@@ -522,7 +522,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
         await CreatePromotionAsync(hostToken, code, PromotionDiscountType.Percentage, 100m);
 
-        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(200);
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(200);
         Guid holdId = await HoldUnitAsync(unitId, checkIn, checkIn.AddDays(3));
 
         HttpResponseMessage response = await ConfirmBookingRawAsync(holdId, _faker.Internet.Email(), code);

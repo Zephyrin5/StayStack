@@ -250,7 +250,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         await SeedCatalogAsync(unit);
         string customerToken = await SeedSignedInCustomerAsync();
         string adminToken = await SignInAsAdministratorAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
         Guid transactionId = await InitiateTransactionAsync(bookingId);
@@ -283,7 +283,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         await SeedCatalogAsync(unit);
         string customerToken = await SeedSignedInCustomerAsync();
         string adminToken = await SignInAsAdministratorAsync();
-        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(daysUntilCheckIn);
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(daysUntilCheckIn);
         Guid holdId = await HoldUnitAsync(unit.Id, checkIn, checkIn.AddDays(3)); // 300 KWD (3 nights @ 100)
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
         Guid transactionId = await InitiateTransactionAsync(bookingId);
@@ -313,7 +313,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         string customerToken = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today.AddDays(10), today.AddDays(13));
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
 
@@ -339,7 +339,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         string customerToken = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
         Guid transactionId = await InitiateTransactionAsync(bookingId);
@@ -364,7 +364,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         await SeedCatalogAsync(unit);
         string customerToken = await SeedSignedInCustomerAsync();
         string adminToken = await SignInAsAdministratorAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
         Guid transactionId = await InitiateTransactionAsync(bookingId);
@@ -391,7 +391,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         string customerToken = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
 
@@ -420,7 +420,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         string customerToken = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
         await CancelBookingAsync(bookingId, customerToken);
@@ -442,7 +442,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         string ownerToken = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
         Guid bookingId = await ConfirmBookingAsAsync(holdId, ownerToken);
 
@@ -487,7 +487,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         // Arrange
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
         ConfirmBookingResponse booking = await ConfirmBookingAsGuestAsync(holdId);
         Assert.NotNull(booking.ManagementToken);
@@ -508,7 +508,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         // Arrange
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
         ConfirmBookingResponse booking = await ConfirmBookingAsGuestAsync(holdId);
 
@@ -526,7 +526,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         // BookingAccessChecker's 90-day-after-CheckOut grace window.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unit.Id, today.AddDays(-95), today.AddDays(-91));
         string managementToken = await SeedManagementTokenAsync(bookingId);
 
@@ -544,7 +544,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         // BookingAccessChecker's grace window (today <= CheckOut + 90).
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unit.Id, today.AddDays(-93), today.AddDays(-90));
         string managementToken = await SeedManagementTokenAsync(bookingId);
 
@@ -564,7 +564,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         string customerToken = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
 
         using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/bookings")

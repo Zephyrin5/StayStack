@@ -525,7 +525,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     public async Task GetProperties_ShouldReturn400_WhenOnlyCheckInIsProvided()
     {
         HttpResponseMessage response = await _client.GetAsync(
-            $"/api/catalog/properties?CheckIn={DateOnly.FromDateTime(DateTime.UtcNow):yyyy-MM-dd}", TestContext.Current.CancellationToken);
+            $"/api/catalog/properties?CheckIn={CatalogSeeding.Today():yyyy-MM-dd}", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }

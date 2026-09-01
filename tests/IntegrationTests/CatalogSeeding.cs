@@ -1,3 +1,4 @@
+using BuildingBlocks.Time;
 using Catalog.Entities;
 using Catalog.Enums;
 using SeedWork.ValueObjects;
@@ -22,6 +23,25 @@ internal static class CatalogSeeding
     // UTC+3 zone: a test pinned to a late-evening UTC instant lands on the
     // next local day here, which is what makes the boundary tests bite.
     public const string TestTimeZoneId = "Asia/Kuwait";
+
+    /// <summary>
+    ///     "Today" as the seeded property reckons it. Any test that seeds a
+    ///     stay date against a <see cref="CreateProperty"/> property must use
+    ///     this rather than CatalogSeeding.Today(), because
+    ///     that is the clock HoldAvailabilityHandler validates CheckIn on
+    ///     (docs/adr/0018).
+    ///     <para>
+    ///         Getting this wrong is invisible for 21 hours a day and then
+    ///         fails everything: between 21:00 and 24:00 UTC, Kuwait is
+    ///         already on the next date, so a UTC-derived "today" is
+    ///         yesterday locally and every hold is rejected with "Check-in
+    ///         date cannot be in the past." The whole reason this fixture
+    ///         picked a UTC+3 zone was to make that skew reachable - it just
+    ///         reached further than intended.
+    ///     </para>
+    /// </summary>
+    public static DateOnly Today(TimeProvider? timeProvider = null) =>
+        PropertyTimeZone.Today(timeProvider ?? TimeProvider.System, TestTimeZoneId);
 
     public static Property CreateProperty(string timeZoneId = TestTimeZoneId) =>
         Property.Create(

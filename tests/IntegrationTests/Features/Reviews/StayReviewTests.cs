@@ -254,7 +254,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
         (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unitId, customerId, today.AddDays(-5), today.AddDays(-2));
 
         // Act
@@ -274,7 +274,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         string hostToken = await SeedHostUserAsync();
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unitId, null, today.AddDays(-5), today.AddDays(-2));
         string managementToken = await SeedManagementTokenAsync(bookingId);
 
@@ -292,7 +292,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         string hostToken = await SeedHostUserAsync();
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unitId, null, today.AddDays(-5), today.AddDays(-2));
         await SeedManagementTokenAsync(bookingId);
 
@@ -311,7 +311,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
         (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unitId, customerId, today.AddDays(-5), today.AddDays(-2), confirmed: false);
 
         // Act
@@ -329,7 +329,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
         (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unitId, customerId, today, today.AddDays(3));
 
         // Act
@@ -347,7 +347,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
         (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unitId, customerId, today.AddDays(-5), today.AddDays(-2));
         await CreateStayReviewAsync(CreateValidReviewRequest(bookingId), customerToken);
 
@@ -366,7 +366,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
         (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unitId, customerId, today.AddDays(-5), today.AddDays(-2));
         await CreateStayReviewAsync(CreateValidReviewRequest(bookingId), customerToken);
 
@@ -393,7 +393,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
         (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
 
         Guid reviewableBookingId = await SeedBookingAsync(unitId, customerId, today.AddDays(-5), today.AddDays(-2));
         Guid alreadyReviewedBookingId = await SeedBookingAsync(unitId, customerId, today.AddDays(-10), today.AddDays(-7));
@@ -419,7 +419,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
         (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unitId, customerId, today.AddDays(-5), today.AddDays(-2));
         HttpResponseMessage createResponse = await CreateStayReviewAsync(CreateValidReviewRequest(bookingId), customerToken);
         CreateStayReviewResponse? created = await createResponse.Content.ReadFromJsonAsync<CreateStayReviewResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
@@ -445,7 +445,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
         (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unitId, customerId, today.AddDays(-5), today.AddDays(-2));
         HttpResponseMessage createResponse = await CreateStayReviewAsync(CreateValidReviewRequest(bookingId), customerToken);
         CreateStayReviewResponse? created = await createResponse.Content.ReadFromJsonAsync<CreateStayReviewResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
@@ -467,7 +467,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
         (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unitId, customerId, today.AddDays(-5), today.AddDays(-2));
         HttpResponseMessage createResponse = await CreateStayReviewAsync(CreateValidReviewRequest(bookingId), customerToken);
         CreateStayReviewResponse? created = await createResponse.Content.ReadFromJsonAsync<CreateStayReviewResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);

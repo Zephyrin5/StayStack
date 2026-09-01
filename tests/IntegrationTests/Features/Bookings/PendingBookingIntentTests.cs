@@ -108,7 +108,7 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
 
     private async Task<Guid> HoldUnitAsync(Guid unitId, int dayOffset = 0)
     {
-        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(dayOffset);
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(dayOffset);
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
         {
             UnitId = unitId,
@@ -368,7 +368,7 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
             // assertions below can tell "returned the already-committed row"
             // apart from "created its own" - otherwise this test would pass
             // just as happily if the seam never fired.
-            DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(100);
+            DateOnly checkIn = CatalogSeeding.Today().AddDays(100);
             db.Bookings.Add(Booking.Create(
                 intent.Id, unit.Id, holdId, null,
                 "Committed By Retry", "jane@example.com", null,

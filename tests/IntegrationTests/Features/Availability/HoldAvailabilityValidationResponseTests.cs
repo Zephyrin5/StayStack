@@ -54,7 +54,7 @@ public class HoldAvailabilityValidationResponseTests(IntegrationTestWebApplicati
     public async Task Hold_GuestCountAboveMaxOccupancy_Returns400WithoutLeakingTheParameterName()
     {
         Unit unit = await SeedUnitAsync(maxOccupancy: 2);
-        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(5);
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(5);
 
         (HttpStatusCode status, string body) = await PostHoldAsync(unit.Id, checkIn, guestCount: 9);
 
@@ -76,7 +76,7 @@ public class HoldAvailabilityValidationResponseTests(IntegrationTestWebApplicati
     public async Task Hold_CheckInInThePast_Returns400AsAFieldLevelError()
     {
         Unit unit = await SeedUnitAsync(maxOccupancy: 4);
-        DateOnly pastCheckIn = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-30);
+        DateOnly pastCheckIn = CatalogSeeding.Today().AddDays(-30);
 
         (HttpStatusCode status, string body) = await PostHoldAsync(unit.Id, pastCheckIn, guestCount: 1);
 
