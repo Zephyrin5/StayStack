@@ -488,4 +488,33 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
             .CountAsync(r => r.PromotionId == promotionId, TestContext.Current.CancellationToken);
         Assert.Equal(1, redemptionRowCount);
     }
+
+    [Fact]
+    public async Task ConfirmBooking_WithAFullyDiscountingCode_IsRejected_NotTurnedIntoAnUnpayableBooking()
+    {
+        // A 100% code drives the total to exactly zero, and Promotion
+        // explicitly permits one (see PromotionTests'
+        // CreateHostPromotion_ShouldAllowPercentageDiscountValueOfExactlyOneHundred).
+        // ComputeDiscountAmount caps a FixedAmount discount at the subtotal
+        // too, so a large enough fixed code lands in the same place.
+        //
+        // The guard here is "discountedPrice >= hold.TotalPrice", and
+        // 0 >= 300 is false - so a zero-total Booking used to be created
+        // happily. Transaction.Create then refuses it
+        // (Guard.Against.NegativeOrZero), leaving the guest holding a booking
+        // they can never pay for: stuck Pending forever, with a raw
+        // guard-clause message surfacing on every payment attempt. Rejected
+        // at checkout now, with Booking.Create enforcing the same invariant
+        // so no other path can reintroduce it.
+        (_, string hostToken, Guid unitId) = await SeedHostWithUnitAsync(100m);
+        string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
+        await CreatePromotionAsync(hostToken, code, PromotionDiscountType.Percentage, 100m);
+
+        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(200);
+        Guid holdId = await HoldUnitAsync(unitId, checkIn, checkIn.AddDays(3));
+
+        HttpResponseMessage response = await ConfirmBookingRawAsync(holdId, _faker.Internet.Email(), code);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }

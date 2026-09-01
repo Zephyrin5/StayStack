@@ -123,12 +123,16 @@ public class BookingTests
     }
 
     [Fact]
-    public void Create_ShouldAllowZeroTotalPrice()
+    public void Create_ShouldThrow_WhenTotalPriceIsZero()
     {
-        Booking booking = Booking.Create(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(0m), 0m, CancellationPolicy.CreateDefault());
-
-        Assert.Equal(0m, booking.TotalPrice.Amount);
+        // A booking has to be payable. Transaction.Create refuses a
+        // zero-amount transaction, so a zero-total booking could never be
+        // paid for - it would sit Pending forever, failing every payment
+        // attempt. Previously allowed, and reachable through a 100% promo
+        // code; see PromotionRedemptionTests'
+        // ConfirmBooking_WithAFullyDiscountingCode_IsRejected_NotTurnedIntoAnUnpayableBooking.
+        Assert.ThrowsAny<ArgumentException>(() => Booking.Create(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "Jane", "jane@example.com", null, Today, Today.AddDays(1), 1, Kwd(0m), 0m, CancellationPolicy.CreateDefault()));
     }
 
     [Fact]

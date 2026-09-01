@@ -106,13 +106,26 @@ public class CancelBookingHandler(
 
         if (refundSnapshot is not null)
         {
+            // Guarded rather than assumed. Transaction.Create's own
+            // Guard.Against.NegativeOrZero means Amount is never zero here,
+            // so this is unreachable today - but that invariant lives in
+            // another module, and decimal division by zero throws
+            // DivideByZeroException rather than yielding infinity, so an
+            // unguarded ratio would turn a future relaxation of that guard
+            // into a 500 on a cancellation. Reporting a null percent
+            // alongside a real amount is the honest answer if the
+            // denominator ever is zero.
+            decimal? refundPercent = refundSnapshot.Amount == 0m
+                ? null
+                : refundSnapshot.RefundAmount / refundSnapshot.Amount * 100m;
+
             return new CancelBookingResponse
             {
                 BookingId = booking.Id,
                 BookingStatus = booking.BookingStatus,
                 RefundAmount = refundSnapshot.RefundAmount,
                 Currency = booking.TotalPrice.Currency,
-                RefundPercent = refundSnapshot.RefundAmount / refundSnapshot.Amount * 100m,
+                RefundPercent = refundPercent,
                 RefundPending = false
             };
         }

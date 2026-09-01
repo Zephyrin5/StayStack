@@ -158,7 +158,17 @@ public class ConfirmBookingHandler(
             // it, rather than losing the 15-minute window and, with the
             // exclusion constraint (docs/adr/0010), possibly the dates
             // themselves.
-            if (discountedPrice.Amount >= hold.TotalPrice.Amount)
+            //
+            // <= 0 as well as the no-savings case above. ComputeDiscountAmount
+            // caps a discount at the subtotal, so a 100% code - or any
+            // FixedAmount code at least as large - lands exactly on zero,
+            // which `>= hold.TotalPrice` does not catch (0 >= 300 is false).
+            // A zero-total booking is unpayable: Transaction.Create refuses
+            // it, so the guest would be left holding a Pending booking that
+            // fails every payment attempt. Booking.Create enforces the same
+            // invariant; this branch exists so the guest gets a real message
+            // rather than a domain guard's.
+            if (discountedPrice.Amount <= 0m || discountedPrice.Amount >= hold.TotalPrice.Amount)
             {
                 OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
                     new ReverseRedemptionOutboxMessage(bookingId), BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
@@ -171,7 +181,9 @@ public class ConfirmBookingHandler(
 
                 throw new ValidationException(
                     JsonNamingPolicy.CamelCase.ConvertName(nameof(request.PromoCode)),
-                    "This code doesn't provide additional savings for your current stay.");
+                    discountedPrice.Amount <= 0m
+                        ? "This code covers the entire stay, which can't be checked out. Please book without it."
+                        : "This code doesn't provide additional savings for your current stay.");
             }
 
             redeemedDiscountAmount = redemption.DiscountAmount;

@@ -132,7 +132,20 @@ public sealed class Booking : Entity, IAggregateRoot
         Guard.Against.InvalidInput(checkOut, nameof(checkOut),
             c => c > checkIn, "Check-out must be after check-in.");
         Guard.Against.NegativeOrZero(guestCount);
-        Guard.Against.Negative(totalPrice.Amount);
+
+        // NegativeOrZero, not Negative: a booking has to be payable. A zero
+        // total is refused by Transaction.Create's own guard, so allowing one
+        // here produced a booking the guest could never pay for - stuck
+        // Pending forever, failing every payment attempt. Reachable via a
+        // 100% promo code, or any FixedAmount code at least as large as the
+        // subtotal (ComputeDiscountAmount caps the discount there).
+        //
+        // This is the invariant, not the user-facing check -
+        // ConfirmBookingHandler rejects the same case with a proper
+        // validation message before it ever reaches here. Supporting genuinely
+        // free stays would mean a confirm-without-payment path, not relaxing
+        // this.
+        Guard.Against.NegativeOrZero(totalPrice.Amount);
         Guard.Against.Negative(subtotal);
         Guard.Against.Null(cancellationPolicy);
 
