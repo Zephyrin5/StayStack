@@ -411,7 +411,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     }
 
     [Fact]
-    public async Task Handle_CheckInBeyondMaxLeadTime_ThrowsArgumentException()
+    public async Task Handle_CheckInBeyondMaxLeadTime_ThrowsValidationException()
     {
         // Without this, an anonymous caller could hold a unit for [today,
         // today+3650) and the exclusion constraint would faithfully enforce
@@ -439,8 +439,13 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             ClientKey = Guid.NewGuid().ToString()
         };
 
-        await Assert.ThrowsAsync<ArgumentException>(() =>
+        // ValidationException, not ArgumentException: these are caller-input
+        // rejections, and asserting the concrete type is what keeps them from
+        // drifting back onto a BCL exception whose message the client would
+        // then see decorated with an internal parameter name.
+        ValidationException exception = await Assert.ThrowsAsync<ValidationException>(() =>
             handler.Handle(command, CancellationToken.None).AsTask());
+        Assert.Equal(nameof(HoldAvailabilityRequest.CheckIn), Assert.Single(exception.Errors).Key);
     }
 
     [Fact]
@@ -645,8 +650,13 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             ClientKey = Guid.NewGuid().ToString()
         };
 
-        await Assert.ThrowsAsync<ArgumentException>(() =>
+        // ValidationException, not ArgumentException: these are caller-input
+        // rejections, and asserting the concrete type is what keeps them from
+        // drifting back onto a BCL exception whose message the client would
+        // then see decorated with an internal parameter name.
+        ValidationException exception = await Assert.ThrowsAsync<ValidationException>(() =>
             handler.Handle(command, CancellationToken.None).AsTask());
+        Assert.Equal(nameof(HoldAvailabilityRequest.CheckIn), Assert.Single(exception.Errors).Key);
     }
 
     [Fact]

@@ -1,5 +1,5 @@
-using Ardalis.GuardClauses;
 using Availability.Exceptions;
+using BuildingBlocks.Exceptions;
 using BuildingBlocks.Time;
 using Catalog.Contracts;
 using Dapper;
@@ -10,7 +10,6 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using NpgsqlTypes;
 using System.Data;
-using NotFoundException = BuildingBlocks.Exceptions.NotFoundException;
 
 namespace Availability.Features.HoldAvailability;
 
@@ -57,12 +56,25 @@ public class HoldAvailabilityHandler(
                                         request.UnitId, request.CheckIn, request.CheckOut, cancellationToken)
                                     ?? throw new NotFoundException("Unit", request.UnitId);
 
-        // Guard clauses for invariants that depend on THIS unit's data -
-        // the request validator already confirmed CheckOut > CheckIn and
-        // GuestCount > 0 as pure shape rules; these need the loaded Unit.
-        Guard.Against.OutOfRange(
-            request.GuestCount, nameof(request.GuestCount), 1, pricing.MaxOccupancy,
-            $"Guest count exceeds this unit's maximum occupancy of {pricing.MaxOccupancy}.");
+        // Checks for invariants that depend on THIS unit's data - the request
+        // validator already confirmed CheckOut > CheckIn and GuestCount > 0 as
+        // pure shape rules; these need the loaded Unit.
+        //
+        // ValidationException, not Guard.Against.*, at all three sites below.
+        // These reject caller input, so they need a 400 carrying a message
+        // written for the caller. A guard clause throws
+        // ArgumentException/ArgumentOutOfRangeException, whose Message the BCL
+        // decorates with "(Parameter 'GuestCount')" - and the only way that
+        // ever became a 400 was GlobalExceptionHandler mapping the whole
+        // ArgumentException family to one, which meant any library's internal
+        // ArgumentException was a 400 leaking its message too. The handler that
+        // knows a value came from the caller is the right place to say so.
+        if (request.GuestCount > pricing.MaxOccupancy)
+        {
+            throw new ValidationException(
+                nameof(request.GuestCount),
+                $"Guest count exceeds this unit's maximum occupancy of {pricing.MaxOccupancy}.");
+        }
 
         // The property's own zone, from the pricing lookup already awaited
         // above - not UTC. At UTC+3 a UTC "today" lags local and accepts
@@ -70,15 +82,17 @@ public class HoldAvailabilityHandler(
         // rejects valid same-day bookings. See docs/adr/0018.
         DateOnly today = PropertyTimeZone.Today(timeProvider, pricing.TimeZoneId);
 
-        Guard.Against.InvalidInput(
-            request.CheckIn, nameof(request.CheckIn),
-            d => d >= today,
-            "Check-in date cannot be in the past.");
+        if (request.CheckIn < today)
+        {
+            throw new ValidationException(nameof(request.CheckIn), "Check-in date cannot be in the past.");
+        }
 
-        Guard.Against.InvalidInput(
-            request.CheckIn, nameof(request.CheckIn),
-            d => d.DayNumber - today.DayNumber <= MaxLeadTimeDays,
-            $"Check-in date cannot be more than {MaxLeadTimeDays} days in the future.");
+        if (request.CheckIn.DayNumber - today.DayNumber > MaxLeadTimeDays)
+        {
+            throw new ValidationException(
+                nameof(request.CheckIn),
+                $"Check-in date cannot be more than {MaxLeadTimeDays} days in the future.");
+        }
 
         // Wrapped in the execution strategy, not called bare - a manually
         // started transaction bypasses EF's per-operation retry wrapping,

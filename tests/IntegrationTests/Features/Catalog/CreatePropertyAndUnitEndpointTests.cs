@@ -197,6 +197,42 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         Assert.Equal(property.PropertyId, unit.PropertyId);
     }
 
+    [Fact]
+    public async Task CreateProperty_WithAnUnknownTimeZoneId_Returns400FromTheValidator()
+    {
+        // Property.SetTimeZoneId has its own Guard.Against.InvalidInput
+        // backstop, but the 400 a caller sees has to come from the request
+        // validator, not from that guard. Guard failures are
+        // ArgumentExceptions, and GlobalExceptionHandler no longer maps those
+        // to 400 - deliberately, since it could not tell one apart from an
+        // ArgumentException thrown inside a library. So if the validator ever
+        // stopped covering this field, the domain guard would surface as a
+        // 500 rather than quietly standing in for it. This test is what makes
+        // that regression visible.
+        string hostAccessToken = await SeedHostUserAsync();
+
+        HttpResponseMessage response = await _client.SendAsync(
+            AuthorizedPost("/api/catalog/properties", new CreatePropertyRequest
+            {
+                TimeZoneId = "Mars/Olympus_Mons",
+                PropertyType = PropertyType.Hotel,
+                Name = new Dictionary<string, string> { { "en", "Marina Hotel" } }
+            }, hostAccessToken),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        string body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        // camelCase here: this key comes from FastEndpoints' FluentValidation
+        // pipeline, which lowercases the leading character. Handler-thrown
+        // ValidationExceptions use nameof() and so stay PascalCase - a
+        // pre-existing divergence in the error-key casing between the two
+        // validation paths, asserted as-is rather than papered over.
+        Assert.Contains("timeZoneId", body);
+        Assert.Contains("not a recognised IANA time zone", body);
+        Assert.DoesNotContain("Parameter", body);
+    }
+
     private async Task<Guid> CreatePropertyAsync(string accessToken)
     {
         HttpResponseMessage response = await _client.SendAsync(

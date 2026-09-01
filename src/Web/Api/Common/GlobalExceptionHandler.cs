@@ -13,7 +13,12 @@ namespace Api.Common;
 ///     a field-name -> messages[] map, not a single flattened string.
 ///     Anything that isn't an AppException is treated as a bug, logged with
 ///     full detail, and returned as a generic 500 - callers never see raw
-///     exception messages or stack traces for unexpected failures.
+///     exception messages or stack traces for unexpected failures. That rule
+///     has no exceptions by design: a status code and a client-visible message
+///     are part of the API contract, so the code that knows a failure is the
+///     caller's fault states it by throwing an AppException subtype. Matching
+///     on BCL exception types here can only guess, and guessing wrong turns a
+///     library's internal error into a 400 quoting its message.
 /// </summary>
 public sealed partial class GlobalExceptionHandler(
     ILogger<GlobalExceptionHandler> logger,
@@ -28,31 +33,34 @@ public sealed partial class GlobalExceptionHandler(
         {
             ValidationException validationEx => BuildValidationProblem(validationEx),
             AppException appEx => BuildProblem(appEx.StatusCode, appEx.Message),
-            // ArgumentNullException derives from ArgumentException, and
-            // Guard.Against.Null/NullOrWhiteSpace do throw it on the null
-            // branch, so this isn't about which exception type Guard
-            // picks. It's still a 500 because every one of those Guard
-            // calls sits inside a domain factory (Booking.Create, etc.)
-            // behind a validator that's supposed to reject a missing
-            // field before the handler ever constructs the entity - a
-            // null reaching the factory anyway means the validator has a
-            // gap, a bug here, not bad input. Ordered before the
-            // ArgumentException arm below so it isn't caught by it -
-            // otherwise the validator-gap bug would return 400 with
-            // "Value cannot be null. (Parameter 'x')" verbatim, masking
-            // the real bug and leaking an internal parameter name.
-            ArgumentNullException => BuildUnhandledProblem(exception),
-            // Guard.Against.* throws ArgumentException/ArgumentOutOfRangeException
-            // for ordinary bad-input cases - caller errors, not bugs,
-            // belonging on the 400 path rather than BuildUnhandledProblem's
-            // generic 500.
-            ArgumentException argEx => BuildProblem(StatusCodes.Status400BadRequest, argEx.Message),
+            // NOTE: there is deliberately no ArgumentException arm here, and
+            // adding one back would reintroduce a real defect. It read as
+            // "Guard.Against.* is how handlers reject bad input, so map its
+            // exception family to 400" - but the switch cannot tell a guard
+            // clause apart from an ArgumentException thrown inside Npgsql,
+            // System.Text.Json, or any other library. Every one of those
+            // became a 400 (a bug reported to the caller as their mistake)
+            // carrying ex.Message verbatim to the client, in production,
+            // where BuildUnhandledProblem is careful never to. The BCL also
+            // appends "(Parameter 'GuestCount')" and, for
+            // ArgumentOutOfRangeException, the rejected value - so an
+            // internal argument name was part of the public contract.
+            //
+            // A carve-out for ArgumentNullException used to sit above that
+            // arm, on the reasoning that a null reaching a domain factory
+            // means a validator gap - a bug, not bad input. That reasoning
+            // was right and was never specific to null: it applies just as
+            // well to every other guard in an entity or value object. The
+            // three handler sites that genuinely validated caller input
+            // (HoldAvailabilityHandler) now throw ValidationException
+            // directly, so bad input is declared where it is known rather
+            // than inferred from an exception type here.
             _ => BuildUnhandledProblem(exception)
         };
 
         problem.Instance = httpContext.Request.Path;
 
-        if (exception is AppException or (ArgumentException and not ArgumentNullException))
+        if (exception is AppException)
         {
             LogHandledAppException(
                 logger,
