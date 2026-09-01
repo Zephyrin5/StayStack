@@ -53,8 +53,24 @@ public static class ObservabilityServicesRegistration
         // EnableSensitiveDataLogging means this category logs full SQL
         // parameter values (usernames today, worse later), fine in a dev
         // console but not something that should ship to shared Grafana.
+        //
+        // Scoped to the OpenTelemetry provider, which is what the sentence
+        // above always claimed but the code did not do: the provider-less
+        // AddFilter overload applies to *every* provider, so this silenced
+        // the dev console too, and would override whatever
+        // Logging:LogLevel says for that category. Those levels are set in
+        // configuration now - Warning in appsettings.json so production
+        // isn't logging a line per SQL statement, Information in
+        // appsettings.Development.json so a developer still sees queries -
+        // and a global code filter here would quietly win over both.
+        //
+        // Latent until this registration is uncalled-for-real: Program.cs
+        // has it commented out pending Grafana config, which is exactly why
+        // the production level had to come from configuration rather than
+        // rely on this line.
         services.AddLogging(logging =>
-            logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.None));
+            logging.AddFilter<OpenTelemetryLoggerProvider>(
+                "Microsoft.EntityFrameworkCore.Database.Command", LogLevel.None));
 
         services.AddOpenTelemetry()
             .ConfigureResource(resource => resource.AddService(
