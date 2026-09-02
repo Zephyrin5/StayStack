@@ -264,6 +264,67 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task GetConfirmedBookingsForCustomer_ReturnsOnlyCheckoutsInsideTheRequestedRange()
+    {
+        // The contract itself, not the endpoint. This lookup used to be
+        // unbounded, so a customer with years of history had every confirmed
+        // booking loaded to build a list that can only span the review window.
+        // Bounding the query bounds the response too - nobody can have more
+        // reviewable stays than fit in the window - which is what makes the
+        // absence of pagination on this endpoint acceptable rather than
+        // merely unnoticed.
+        string hostToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostToken);
+        Guid unitId = await CreateUnitAsync(propertyId, hostToken);
+        (Guid customerId, _) = await SeedSignedInCustomerAsync();
+
+        DateOnly today = CatalogSeeding.Today();
+
+        DateOnly inRangeCheckOut = today.AddDays(-5);
+        Guid inRange = await SeedBookingAsync(unitId, customerId, inRangeCheckOut.AddDays(-3), inRangeCheckOut);
+
+        DateOnly ancientCheckOut = today.AddDays(-(ReviewWindowDays + 400));
+        Guid ancient = await SeedBookingAsync(unitId, customerId, ancientCheckOut.AddDays(-3), ancientCheckOut);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        IBookingLookup lookup = scope.ServiceProvider.GetRequiredService<IBookingLookup>();
+
+        IReadOnlyList<BookingAccessResult> results = await lookup.GetConfirmedBookingsForCustomerAsync(
+            customerId,
+            today.AddDays(-(ReviewWindowDays + 1)),
+            today.AddDays(1),
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains(results, b => b.BookingId == inRange);
+        Assert.DoesNotContain(results, b => b.BookingId == ancient);
+    }
+
+    [Fact]
+    public async Task ListMyReviewableBookings_IncludesAStayAtTheOldestEdgeOfTheWindow()
+    {
+        // The risk in bounding the query is erring narrow and silently
+        // dropping something that belongs in the list - a far worse failure
+        // than the wasted work it replaces, because it is invisible.
+        //
+        // The range is computed in UTC while the real test is property-local,
+        // hence the day of slack either side. This pins the oldest edge: a
+        // stay checking out exactly ReviewWindowDays ago must still appear.
+        string hostToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostToken);
+        Guid unitId = await CreateUnitAsync(propertyId, hostToken);
+        (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
+
+        DateOnly checkOut = CatalogSeeding.Today().AddDays(-ReviewWindowDays);
+        Guid bookingId = await SeedBookingAsync(unitId, customerId, checkOut.AddDays(-3), checkOut);
+
+        HttpResponseMessage response = await ListMyReviewableBookingsAsync(customerToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        string body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(bookingId.ToString(), body);
+    }
+
+    [Fact]
     public async Task ListMyReviewableBookings_OmitsStaysPastTheReviewWindow()
     {
         // The list must not offer what CreateStayReview would then reject -

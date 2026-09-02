@@ -24,16 +24,37 @@ public interface IBookingLookup
         Guid bookingId, Guid? customerId, string? managementToken, CancellationToken cancellationToken);
 
     /// <summary>
-    ///     Every Confirmed booking belonging to this customer - what
-    ///     ListMyReviewableBookingsHandler (Reviews) filters by
-    ///     checkout-passed and not-yet-reviewed, since Reviews has no
-    ///     notion of Booking/CustomerId itself. Same "give me every X
-    ///     owned by Y" shape as IUnitLookup.GetUnitIdsForHostAsync.
-    ///     Unfiltered by checkout date - the caller decides what "past"
-    ///     means for its own purposes.
+    ///     Confirmed bookings for this customer whose checkout falls in
+    ///     <paramref name="checkOutFrom"/>..<paramref name="checkOutTo"/>
+    ///     inclusive - what ListMyReviewableBookingsHandler (Reviews) narrows
+    ///     to not-yet-reviewed, since Reviews has no notion of
+    ///     Booking/CustomerId itself.
+    ///     <para>
+    ///         The range is a parameter rather than a policy this module
+    ///         applies: Bookings has no notion of a review window, and should
+    ///         not acquire one to serve its only caller. The caller passes the
+    ///         span it cares about.
+    ///     </para>
+    ///     <para>
+    ///         It used to be unbounded, on the reasoning that "the caller
+    ///         decides what past means for its own purposes". True, but the
+    ///         caller decided that in memory - so a customer with years of
+    ///         history had every confirmed booking loaded to produce a list
+    ///         that can only ever span the review window, on an endpoint with
+    ///         no pagination. Bounding the query bounds the response too,
+    ///         since no customer can have more reviewable stays than fit in
+    ///         the window.
+    ///     </para>
+    ///     <para>
+    ///         Callers filtering on a property-local date should widen by a
+    ///         day either side: a local date sits within one day of the UTC
+    ///         date in every timezone, so the range is a safe superset and the
+    ///         exact per-zone check belongs at the call site, which is the
+    ///         only place that knows each booking's zone.
+    ///     </para>
     /// </summary>
     Task<IReadOnlyList<BookingAccessResult>> GetConfirmedBookingsForCustomerAsync(
-        Guid customerId, CancellationToken cancellationToken);
+        Guid customerId, DateOnly checkOutFrom, DateOnly checkOutTo, CancellationToken cancellationToken);
 
     /// <summary>
     ///     A raw lookup, no ownership check - what CreateGuestReviewHandler

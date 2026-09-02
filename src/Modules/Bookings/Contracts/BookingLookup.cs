@@ -55,10 +55,13 @@ internal class BookingLookup(AppBookingsDbContext dbContext, TimeProvider timePr
     }
 
     public async Task<IReadOnlyList<BookingAccessResult>> GetConfirmedBookingsForCustomerAsync(
-        Guid customerId, CancellationToken cancellationToken)
+        Guid customerId, DateOnly checkOutFrom, DateOnly checkOutTo, CancellationToken cancellationToken)
     {
         return await dbContext.Bookings.AsNoTracking()
-            .Where(b => b.CustomerId == customerId && b.BookingStatus == BookingStatus.Confirmed)
+            .Where(b => b.CustomerId == customerId
+                        && b.BookingStatus == BookingStatus.Confirmed
+                        && b.CheckOut >= checkOutFrom
+                        && b.CheckOut <= checkOutTo)
             .Select(b => new BookingAccessResult
             {
                 BookingId = b.Id,
