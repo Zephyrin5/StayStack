@@ -30,12 +30,88 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
     public async ValueTask InitializeAsync()
     {
         await _dbContainer.StartAsync();
+        await MigrateAllModulesAsync();
     }
 
-    public new async ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
+        // base first: it disposes the host, which closes its Npgsql data
+        // sources and their pooled connections. Stopping the container out
+        // from under a live pool just makes the shutdown noisier.
+        //
+        // This used to be `public new`, which hid WebApplicationFactory's own
+        // DisposeAsync rather than extending it - so xUnit called this, the
+        // container stopped, and the host was never disposed at all. Same
+        // family of bug as the provider below: something built and never torn
+        // down.
+        await base.DisposeAsync();
         await _dbContainer.StopAsync();
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    ///     Applies every module's real migrations, before the host is built.
+    ///     <para>
+    ///         This used to call services.BuildServiceProvider() inside
+    ///         ConfigureServices (the ASP0000 anti-pattern), which stood up a
+    ///         SECOND container with its own copy of every singleton - a second
+    ///         set of Npgsql data sources and connection pools included - and
+    ///         then never disposed it. The `using` there was on the scope, not
+    ///         the provider, so all of that leaked for the life of the test run.
+    ///     </para>
+    ///     <para>
+    ///         The obvious fix is to migrate from this factory's own Services
+    ///         instead, but that is wrong here: touching Services builds AND
+    ///         starts the host, and this app registers TickerQ unconditionally
+    ///         (Program.cs calls UseTickerQ()), so its scheduler would come up
+    ///         against a database with no schema yet. Ordering is why the
+    ///         original code ran inside ConfigureServices at all.
+    ///     </para>
+    ///     <para>
+    ///         So: no container at all. Each context is constructed directly
+    ///         from the same ConfigureStayStackDefaults the app registers it
+    ///         with, migrated, and disposed. Nothing is left behind, and
+    ///         migrations still complete before anything is hosted.
+    ///     </para>
+    /// </summary>
+    private async Task MigrateAllModulesAsync()
+    {
+        // moduleName must match what each module's own registration passes -
+        // it selects that module's migrations-history table, so a mismatch
+        // would silently re-run every migration into the wrong bookkeeping.
+        await MigrateAsync<AppIdentityDbContext>("identity");
+        await MigrateAsync<AppCatalogDbContext>("catalog");
+        await MigrateAsync<AppHostsDbContext>("hosts");
+        await MigrateAsync<AppPromotionsDbContext>("promotions");
+        await MigrateAsync<AppAvailabilityDbContext>("availability");
+        await MigrateAsync<AppBookingsDbContext>("bookings");
+        await MigrateAsync<AppTransactionsDbContext>("transactions");
+        await MigrateAsync<AppReviewsDbContext>("reviews");
+
+        // TickerQ's migrations live in the Jobs assembly, not alongside its
+        // context - same reason TickerQDbContextDesignTimeFactory spells this
+        // out for dotnet ef.
+        await MigrateAsync<TickerQDbContext>("jobs", migrationsAssembly: "Jobs");
+    }
+
+    // Activator rather than a Func<DbContextOptions<TContext>, TContext>
+    // parameter: passing the factory in would make every call site repeat its
+    // own type name twice. Every context here is a plain EF context with the
+    // standard (DbContextOptions<T>) constructor, and the whole suite fails
+    // loudly on the first test if one ever isn't.
+    private async Task MigrateAsync<TContext>(string moduleName, string? migrationsAssembly = null)
+        where TContext : DbContext
+    {
+        DbContextOptionsBuilder<TContext> builder = new DbContextOptionsBuilder<TContext>();
+        builder.ConfigureStayStackDefaults(
+            _dbContainer.GetConnectionString(), moduleName, isDevelopment: false, migrationsAssembly);
+
+        // All modules share one physical database, which Migrate() handles
+        // safely regardless of call order - each tracks its own applied
+        // migrations in its own history table, rather than checking whether
+        // the database itself already exists the way EnsureCreated() does.
+        await using TContext context = (TContext)Activator.CreateInstance(typeof(TContext), builder.Options)!;
+        await context.Database.MigrateAsync();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -105,24 +181,6 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             services.RemoveAll<DbContextOptions<AppReviewsDbContext>>();
             services.AddDbContext<AppReviewsDbContext>(options =>
                 options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "reviews", false));
-
-            // Build a temporary provider just to apply each module's real
-            // migrations before any test runs. All modules share one
-            // physical database, which Migrate() handles safely regardless
-            // of call order - each tracks its own applied migrations in
-            // its own history table, rather than checking whether the
-            // database itself already exists the way EnsureCreated() does.
-            ServiceProvider sp = services.BuildServiceProvider();
-            using IServiceScope scope = sp.CreateScope();
-            scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>().Database.Migrate();
-            scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>().Database.Migrate();
-            scope.ServiceProvider.GetRequiredService<AppHostsDbContext>().Database.Migrate();
-            scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>().Database.Migrate();
-            scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>().Database.Migrate();
-            scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Database.Migrate();
-            scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>().Database.Migrate();
-            scope.ServiceProvider.GetRequiredService<AppReviewsDbContext>().Database.Migrate();
-            scope.ServiceProvider.GetRequiredService<TickerQDbContext>().Database.Migrate();
         });
     }
 }
