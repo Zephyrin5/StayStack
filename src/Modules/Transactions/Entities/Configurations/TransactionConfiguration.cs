@@ -11,7 +11,13 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
         builder.HasKey(t => t.Id);
 
         builder.ComplexProperty(t => t.Amount, money => money.ConfigureMoney("amount"));
-        builder.Property(t => t.RefundAmount).HasColumnType("numeric(12,3)");
+        // Mapped by backing-field name, not by the Money?-typed RefundAmount
+        // property: the currency lives on amount_currency and is paired back
+        // on read, so this stays exactly the one column it has always been -
+        // a type-only change with no migration. See Transaction.RefundAmount.
+        builder.Property<decimal?>(Transaction.RefundAmountField)
+            .HasColumnName("refund_amount")
+            .HasColumnType("numeric(12,3)");
 
         // Stored as text, not the integer enum value - same reasoning as
         // Booking.BookingStatus: legible in psql, safe against the enum's

@@ -40,9 +40,8 @@ public sealed class Transaction : Entity, IAggregateRoot
 
     // Snapshotted from the booking at initiation time, not a live read -
     // what was actually charged shouldn't drift if the booking's total
-    // changes later. The one Money-typed field here - RefundAmount below
-    // is a plain decimal in this same currency by construction, validated
-    // at MarkRefundPending (docs/adr/0015).
+    // changes later. This is where the transaction's one currency lives;
+    // RefundAmount below derives from it.
     public Money Amount { get; private set; }
 
     // Named TransactionStatus, not Status - Status is already claimed by
@@ -51,12 +50,33 @@ public sealed class Transaction : Entity, IAggregateRoot
     public TransactionStatus TransactionStatus { get; private set; }
     public string? FailureReason { get; private set; }
 
+    // Persisted as one nullable decimal column (the backing field, mapped in
+    // TransactionConfiguration) but exposed as Money?, paired with the one
+    // currency this transaction has.
+    //
+    // docs/adr/0015 originally left this a bare decimal, reasoning that a
+    // second currency column could only ever agree with Amount's. That
+    // storage argument still holds and there is no new column here. What did
+    // not hold is the leap to leaving it untyped: CancelBookingHandler then
+    // had to pair the currency back on by hand, in the one place where
+    // getting it wrong costs real money.
+    //
     // Set only once MarkRefundPending computes it - a cancellation policy's
     // tiered percentage, applied by the caller (CancelBookingHandler, via
     // ITransactionReversal), not necessarily equal to Amount. Transactions
     // has no notion of a cancellation policy itself - it just records
     // whatever amount it was told to refund.
-    public decimal? RefundAmount { get; private set; }
+    private decimal? _refundAmount;
+
+    /// <summary>
+    ///     The name of the backing field above, for the EF.Property lookups
+    ///     TransactionReversal needs - a computed property is not translatable
+    ///     to SQL, and a bare string there would drift silently if the field
+    ///     were ever renamed.
+    /// </summary>
+    public const string RefundAmountField = nameof(_refundAmount);
+
+    public Money? RefundAmount => _refundAmount is { } amount ? Money.Of(amount, Amount.Currency) : null;
 
     public static Transaction Create(Guid bookingId, Money amount)
     {
@@ -104,10 +124,13 @@ public sealed class Transaction : Entity, IAggregateRoot
             throw new TransactionAlreadyFinalizedException(Id);
         }
 
-        // A caller computing a refund in the wrong currency is exactly the
-        // kind of bug Money's own currency-carrying arithmetic can't catch
-        // by itself once the two values reach this boundary as independent
-        // arguments - worth guarding explicitly rather than trusting it.
+        // This guard STAYS, and typing RefundAmount as Money? is exactly why
+        // it has to. Only the decimal is stored; the currency on the way back
+        // out is derived from Amount. So a mismatched refund would not be
+        // rejected by the type - it would be silently relabelled as this
+        // transaction's currency, which is worse than the reattachment the
+        // typing removed. The guard is what licenses discarding the incoming
+        // currency in the first place.
         if (refundAmount.Currency != Amount.Currency)
         {
             throw new CurrencyMismatchException(refundAmount.Currency, Amount.Currency);
@@ -116,7 +139,7 @@ public sealed class Transaction : Entity, IAggregateRoot
         Guard.Against.OutOfRange(refundAmount.Amount, nameof(refundAmount), 0m, Amount.Amount);
 
         TransactionStatus = TransactionStatus.RefundPending;
-        RefundAmount = refundAmount.Amount;
+        _refundAmount = refundAmount.Amount;
     }
 
     public void MarkRefunded()

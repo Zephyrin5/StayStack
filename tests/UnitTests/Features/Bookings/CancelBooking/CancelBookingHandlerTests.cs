@@ -159,7 +159,7 @@ public class CancelBookingHandlerTests : IDisposable
             .ReturnsAsync((Money?)null);
         transactionReversalMock
             .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new TransactionRefundSnapshot { Amount = 200m, RefundAmount = 100m });
+            .ReturnsAsync(new TransactionRefundSnapshot { Amount = Money.Of(200m, Currency.KWD), RefundAmount = Money.Of(100m, Currency.KWD) });
 
         BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
             _dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
@@ -377,7 +377,7 @@ public class CancelBookingHandlerTests : IDisposable
             // used to flip the response to RefundPending: false.
             transactionReversalMock
                 .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new TransactionRefundSnapshot { Amount = 200m, RefundAmount = 200m });
+                .ReturnsAsync(new TransactionRefundSnapshot { Amount = Money.Of(200m, Currency.KWD), RefundAmount = Money.Of(200m, Currency.KWD) });
         }
         else
         {

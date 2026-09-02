@@ -239,7 +239,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         using IServiceScope scope = factory.Services.CreateScope();
         AppTransactionsDbContext context = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
         Transaction transaction = await context.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
-        return transaction.RefundAmount;
+        return transaction.RefundAmount?.Amount;
     }
 
     [Fact]

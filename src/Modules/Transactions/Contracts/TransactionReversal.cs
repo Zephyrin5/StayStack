@@ -67,10 +67,16 @@ internal class TransactionReversal(AppTransactionsDbContext dbContext) : ITransa
         // ComplexProperty mapping the same way BookingLookup.GetBookingAsync
         // already does for TotalPrice.
         Transaction? transaction = await dbContext.Transactions.AsNoTracking()
-            .SingleOrDefaultAsync(t => t.BookingId == bookingId && t.RefundAmount != null, cancellationToken);
+            .SingleOrDefaultAsync(
+                // EF.Property, because RefundAmount is now computed from the
+                // backing field and Amount's currency, and a computed property
+                // has no SQL translation.
+                t => t.BookingId == bookingId
+                     && EF.Property<decimal?>(t, Transaction.RefundAmountField) != null,
+                cancellationToken);
 
         return transaction is null
             ? null
-            : new TransactionRefundSnapshot { Amount = transaction.Amount.Amount, RefundAmount = transaction.RefundAmount!.Value };
+            : new TransactionRefundSnapshot { Amount = transaction.Amount, RefundAmount = transaction.RefundAmount!.Value };
     }
 }

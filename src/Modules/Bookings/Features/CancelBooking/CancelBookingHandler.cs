@@ -152,12 +152,17 @@ public class CancelBookingHandler(
             // into a 500 on a cancellation. Reporting a null percent
             // alongside a real amount is the honest answer if the
             // denominator ever is zero.
-            decimal? refundPercent = refundSnapshot.Amount == 0m
+            decimal? refundPercent = refundSnapshot.Amount.Amount == 0m
                 ? null
-                : refundSnapshot.RefundAmount / refundSnapshot.Amount * 100m;
+                : refundSnapshot.RefundAmount.Amount / refundSnapshot.Amount.Amount * 100m;
 
+            // Currency comes off the snapshot itself now. It used to be paired
+            // back on here from booking.TotalPrice - the same currency, but
+            // asserted at the call site rather than carried by the value, in
+            // the one place getting it wrong costs real money.
             return BuildResponse(
-                booking, refundSnapshot.RefundAmount, booking.TotalPrice.Currency, refundPercent, refundPending: false);
+                booking, refundSnapshot.RefundAmount.Amount, refundSnapshot.RefundAmount.Currency,
+                refundPercent, refundPending: false);
         }
 
         // No snapshot yet - either there was never anything to refund, or a

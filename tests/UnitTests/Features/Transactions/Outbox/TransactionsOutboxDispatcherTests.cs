@@ -88,7 +88,7 @@ public class TransactionsOutboxDispatcherTests : IDisposable
         Transaction reloaded = await _dbContext.Transactions.AsNoTracking()
             .SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
         Assert.Equal(TransactionStatus.RefundPending, reloaded.TransactionStatus);
-        Assert.Equal(100m, reloaded.RefundAmount);
+        Assert.Equal(Money.Of(100m, Currency.KWD), reloaded.RefundAmount);
 
         // The message itself must be resolved (not just dead-lettered) -
         // otherwise SweepDeadLetteredAsync would keep retrying

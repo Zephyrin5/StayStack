@@ -67,6 +67,10 @@ public interface ITransactionReversal
 
 public record TransactionRefundSnapshot
 {
-    public required decimal Amount { get; init; }
-    public required decimal RefundAmount { get; init; }
+    // Money, not bare decimals in an implied currency. The sibling
+    // GetSucceededTransactionAmountAsync above already returns Money?, so
+    // these were the odd ones out - and CancelBookingHandler was pairing a
+    // currency back onto RefundAmount by hand to build its response.
+    public required Money Amount { get; init; }
+    public required Money RefundAmount { get; init; }
 }

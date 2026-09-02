@@ -96,7 +96,7 @@ public class TransactionTests
         transaction.MarkRefundPending(Money.Of(60m, Currency.KWD));
 
         Assert.Equal(TransactionStatus.RefundPending, transaction.TransactionStatus);
-        Assert.Equal(60m, transaction.RefundAmount);
+        Assert.Equal(Money.Of(60m, Currency.KWD), transaction.RefundAmount);
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class TransactionTests
 
         transaction.MarkRefundPending(Money.Of(0m, Currency.KWD));
 
-        Assert.Equal(0m, transaction.RefundAmount);
+        Assert.Equal(Money.Of(0m, Currency.KWD), transaction.RefundAmount);
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public class TransactionTests
 
         transaction.MarkRefundPending(transaction.Amount);
 
-        Assert.Equal(transaction.Amount.Amount, transaction.RefundAmount);
+        Assert.Equal(transaction.Amount, transaction.RefundAmount);
     }
 
     [Fact]
@@ -162,6 +162,10 @@ public class TransactionTests
         Transaction transaction = CreateValidTransaction();
         transaction.MarkSucceeded();
 
+        // This guard is what licenses storing only the decimal. RefundAmount
+        // derives its currency from Amount, so without this a USD refund
+        // against a KWD transaction would come back out relabelled as KWD
+        // rather than rejected - the type cannot catch what it reconstructs.
         Assert.Throws<CurrencyMismatchException>(() => transaction.MarkRefundPending(Money.Of(50m, Currency.USD)));
     }
 
@@ -206,5 +210,34 @@ public class TransactionTests
         transaction.MarkSucceeded();
 
         Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkRefundFailed("Original card closed"));
+    }
+
+    [Fact]
+    public void RefundAmount_ShouldCarryTheTransactionsOwnCurrency_NotAnImpliedOne()
+    {
+        // The point of typing this Money? at all: callers get a currency with
+        // the amount instead of pairing one on themselves.
+        // CancelBookingHandler used to reach for booking.TotalPrice.Currency
+        // to build its response - the same value, but asserted at the call
+        // site, in the one place getting it wrong costs real money.
+        Transaction transaction = Transaction.Create(Guid.NewGuid(), Money.Of(200m, Currency.KWD));
+        transaction.MarkSucceeded();
+
+        transaction.MarkRefundPending(Money.Of(60m, Currency.KWD));
+
+        Assert.NotNull(transaction.RefundAmount);
+        Assert.Equal(transaction.Amount.Currency, transaction.RefundAmount!.Value.Currency);
+        Assert.Equal(60m, transaction.RefundAmount!.Value.Amount);
+    }
+
+    [Fact]
+    public void RefundAmount_ShouldBeNull_BeforeAnyRefundIsRecorded()
+    {
+        // Null, not a zero-valued Money - "no refund recorded" and "a refund
+        // of nothing" are different facts, and the nullable Money? keeps them
+        // distinguishable the same way the nullable decimal did.
+        Transaction transaction = Transaction.Create(Guid.NewGuid(), Money.Of(200m, Currency.KWD));
+
+        Assert.Null(transaction.RefundAmount);
     }
 }

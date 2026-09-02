@@ -88,9 +88,31 @@ consistently with this: that type is a persistence-layer construct (see its
 own doc comment), written by hand-rolled Dapper SQL and never loaded through
 EF change tracking by business logic. `ConfirmedHold` is the contract business
 logic actually consumes, and that is where the typing belongs.
-`Transaction.RefundAmount` also stays as-is - `MarkRefundPending(Money)`
-already validates the incoming currency against `Amount.Currency` at the only
-write path, so the invariant is enforced rather than assumed.
+`Transaction.RefundAmount` is now `Money?` too, for the same reason and by the
+same mechanism - a computed property over a private `decimal?` backing field
+that `TransactionConfiguration` maps to the same column, so again no migration.
+The earlier note here said it could stay a bare decimal because
+`MarkRefundPending(Money)` validates the incoming currency at the only write
+path. That was true and is still true, but it answers a different question:
+enforcing the invariant on the way *in* did nothing for the way *out*, where
+`CancelBookingHandler` was pairing `booking.TotalPrice.Currency` back onto the
+refund by hand to build its response - in the one place a wrong currency costs
+real money.
+
+**The write-side guard stays, and typing the property is exactly why it must.**
+Only the decimal is stored; the currency on the way out is derived from
+`Amount`. So a mismatched refund is not something the type rejects - it is
+something the type would silently *relabel* as the transaction's currency,
+which is worse than the reattachment the typing removed. The guard is what
+licenses discarding the incoming currency at all, and
+`TransactionTests` pins both halves: the mismatch throws, and the currency that
+comes back out is `Amount`'s.
+
+One consequence worth naming: `RefundAmount` is no longer translatable to SQL,
+so `TransactionReversal`'s "has this booking been refunded" query goes through
+`EF.Property<decimal?>(t, Transaction.RefundAmountField)`. The field name is a
+`const` on the entity rather than a literal at the query site, so a rename
+cannot silently produce a query that compiles and matches nothing.
 
 ## Amendment: where rounding happens in a stay total
 
