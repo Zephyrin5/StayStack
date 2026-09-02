@@ -21,6 +21,49 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     private readonly Faker _faker = new Faker();
 
     [Fact]
+    public async Task BecomeHost_ConcurrentRequestsFromTheSameUser_ProduceOneHostAndNoServerError()
+    {
+        // A double-click, or a client retrying a request still in flight.
+        // OpenIntentAsync reads-then-inserts against a unique index on UserId,
+        // so both attempts saw no intent and both inserted: the loser got a
+        // bare DbUpdateException, which GlobalExceptionHandler has no arm for,
+        // and the user got a 500.
+        //
+        // Worse than the 500 was what the fix could have caused. Concurrent
+        // attempts now adopt the SAME intent, and hostId is that intent's id -
+        // so the losing attempt's old compensation would have deleted the very
+        // Host the winner had just linked itself to, leaving a user pointing
+        // at a row that does not exist. That is the permanent lockout, from a
+        // double-click. Hence the assertions below check the Host survives,
+        // not merely that nothing returned 500.
+        (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
+
+        // Separate clients so these genuinely overlap rather than queueing on
+        // one connection - same reasoning as the other concurrency tests here.
+        Task<HttpResponseMessage>[] attempts =
+        [
+            factory.CreateClient().SendAsync(CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken),
+            factory.CreateClient().SendAsync(CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken)
+        ];
+
+        HttpResponseMessage[] responses = await Task.WhenAll(attempts);
+
+        Assert.DoesNotContain(responses, r => r.StatusCode == HttpStatusCode.InternalServerError);
+        Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
+        Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
+
+        // The invariant that actually matters: the user is linked, and linked
+        // to a Host that exists.
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+        ApplicationUser user = await identity.Users.AsNoTracking()
+            .SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(user.HostId);
+        Assert.True(await HostExistsAsync(user.HostId!.Value));
+    }
+
+    [Fact]
     public async Task BecomeHost_WhenTheProcessDiesAfterRegisteringTheHost_TheReconcileJobDeletesTheOrphan()
     {
         // The window BecomeHost had no cover for at all. RegisterHostAsync

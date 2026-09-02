@@ -9,6 +9,7 @@ using Identity.Serialization;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Outbox;
 namespace Identity.Features.BecomeHost;
 
@@ -88,23 +89,25 @@ public class BecomeHostHandler(
             // plain retry that would now correctly hit AlreadyAHostException
             // above gets a generic concurrency-failure message instead.
             //
-            // Enqueued via the outbox (docs/adr/0003) rather than a direct
-            // DeleteAsync - ChangeTracker.Clear() first since UpdateAsync's
-            // failed save leaves `user` tracked with a stale concurrency
-            // token that would otherwise be re-attempted by the
-            // SaveChangesAsync below.
-            dbContext.ChangeTracker.Clear();
-            OutboxMessage deleteHostRow = dispatcher.Enqueue(
-                new DeleteHostOutboxMessage(hostId), IdentityJsonSerializerContext.Default.DeleteHostOutboxMessage);
-            await dbContext.SaveChangesAsync(cancellationToken);
-            await dispatcher.TryDispatchAsync(deleteHostRow, cancellationToken);
-
-            // After the compensating save, deliberately - a crash between the
-            // two leaves the intent alive and the job repeats the (idempotent)
-            // delete, which is safe. Discarding first would drop the marker
-            // before the compensation was durable.
-            await DiscardIntentAsync();
-
+            // Deliberately no host deletion and no intent discard here, which
+            // this branch used to do both of.
+            //
+            // The hostId is the intent's id, and concurrent attempts for one
+            // user now adopt the same intent (see OpenIntentAsync) - so it is
+            // the same Host the winning attempt may have just linked itself
+            // to. Deleting it would leave that user pointing at a row that no
+            // longer exists, with no Host role and AlreadyAHostException
+            // firing forever: the permanent lockout, reachable by a
+            // double-click. Discarding the intent would then remove the only
+            // marker that could recover it.
+            //
+            // Leaving both in place is safe in every case. If a concurrent
+            // attempt won, it deletes the intent itself when it completes and
+            // there is nothing to clean up. If nobody completed, the intent
+            // outlives the grace period and the reconcile job unlinks and
+            // deletes together. The cost is that an abandoned Host lingers for
+            // the grace period rather than going immediately, which is a much
+            // smaller price than deleting a live one.
             if (updateResult.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.ConcurrencyFailure)))
             {
                 throw new AlreadyAHostException();
@@ -250,8 +253,67 @@ public class BecomeHostHandler(
         };
 
         dbContext.PendingHostLinkIntents.Add(intent);
-        await dbContext.SaveChangesAsync(cancellationToken);
 
-        return intent;
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return intent;
+        }
+        catch (DbUpdateException ex)
+            when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            // Another attempt for this user inserted between the read above
+            // and this save - a double-click, or a client retrying a request
+            // still in flight. Unhandled this surfaced as a bare
+            // DbUpdateException, which GlobalExceptionHandler has no arm for,
+            // so two clicks produced a 500. Same shape ConfirmBookingHandler
+            // already handles for its own intent.
+            //
+            // Adopted rather than rejected, because the semantics differ from
+            // Bookings': a hold can only be consumed once, so a second
+            // claimant there is a genuine conflict. Here both attempts want
+            // the same outcome for the same user, so the loser joins the
+            // winner's operation - RegisterHostAsync is idempotent under the
+            // adopted id, so this produces one Host rather than two.
+            //
+            // Detached first, or the failed insert stays Added and the next
+            // SaveChanges on this context retries it.
+            dbContext.Entry(intent).State = EntityState.Detached;
+
+            PendingHostLinkIntent? winners = await dbContext.PendingHostLinkIntents
+                .SingleOrDefaultAsync(i => i.UserId == userId, cancellationToken);
+
+            if (winners is not null)
+            {
+                return winners;
+            }
+
+            // SingleOrDefault, not Single. The first version of this assumed
+            // the row had to be there - a unique violation means the other
+            // transaction committed - and that reasoning missed that the
+            // intent is deliberately short-lived: the winning attempt can
+            // register, link, add the role and delete its own intent inside
+            // the window between our insert failing and this read. It does,
+            // routinely, and Single threw "Sequence contains no elements"
+            // straight back out as the 500 this was meant to remove.
+            //
+            // So ask what actually happened rather than assuming. If the
+            // winner completed, this user is a host now and that is the
+            // honest answer.
+            bool alreadyLinked = await dbContext.Users.AsNoTracking()
+                .AnyAsync(u => u.Id == userId && u.HostId != null, cancellationToken);
+
+            if (alreadyLinked)
+            {
+                throw new AlreadyAHostException();
+            }
+
+            // Intent gone and the user still unlinked: the other attempt
+            // failed and compensated inside the same window. Nothing is wrong
+            // and nothing is owed - the caller just lost a race against a
+            // request that undid itself, and retrying will now succeed.
+            throw new ConflictException(
+                "Another attempt to become a host was in progress and did not complete. Please try again.");
+        }
     }
 }
