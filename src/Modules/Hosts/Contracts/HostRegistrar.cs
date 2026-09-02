@@ -46,7 +46,25 @@ internal class HostRegistrar(AppHostsDbContext dbContext) : IHostRegistrar
 
     public async Task DeleteAsync(Guid hostId, CancellationToken cancellationToken)
     {
-        Host? host = await dbContext.Hosts.SingleOrDefaultAsync(h => h.Id == hostId, cancellationToken);
+        // IgnoreQueryFilters, matching RegisterHostAsync above. The two reads
+        // disagreed, and the asymmetry pointed the wrong way: registration saw
+        // archived rows and would adopt one, while this could not see it to
+        // clean up - so a compensation would silently no-op and leave the user
+        // linked to a Host nothing could remove.
+        //
+        // Fixed by widening this rather than narrowing that, because narrowing
+        // does not actually avoid the problem. An archived Host still occupies
+        // the primary key, so a filtered existence check misses it, the insert
+        // hits a unique violation, and the catch there treats that as "already
+        // registered" - adopting the archived row anyway, just implicitly and
+        // by way of an exception. Registration has to see archived rows; this
+        // therefore has to be able to reach whatever registration adopted.
+        //
+        // Nothing archives a Host today, so this is latent either way - which
+        // is the reason to settle it now rather than after something does.
+        Host? host = await dbContext.Hosts
+            .IgnoreQueryFilters()
+            .SingleOrDefaultAsync(h => h.Id == hostId, cancellationToken);
         if (host is null)
         {
             return;

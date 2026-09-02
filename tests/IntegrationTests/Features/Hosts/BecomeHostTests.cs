@@ -1,3 +1,4 @@
+using Hosts.Entities;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Hosting;
 using Bogus;
@@ -332,6 +333,77 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
 
         Assert.True(await HostExistsAsync(hostId));
         Assert.True(await IntentExistsAsync(hostId));
+    }
+
+    [Fact]
+    public async Task DeleteHost_ForAnArchivedHost_StillRemovesIt()
+    {
+        // The two registrar reads used to disagree about the soft-delete
+        // filter: RegisterHostAsync ignored it, DeleteAsync did not. So an
+        // archived Host would be adopted by registration and then be invisible
+        // to the compensation meant to undo it - the reconcile job's delete
+        // would no-op, and the user would stay linked to a Host nothing could
+        // remove.
+        //
+        // Latent, since nothing archives a Host today. That is exactly why it
+        // is worth pinning now: the first feature that archives one would
+        // otherwise discover this by way of an unremovable link.
+        Guid hostId = Guid.CreateVersion7();
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IHostRegistrar>().RegisterHostAsync(
+                hostId, "Archived Co", "archived@example.com", null, TestContext.Current.CancellationToken);
+
+            AppHostsDbContext hosts = scope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+            Host host = await hosts.Hosts.SingleAsync(h => h.Id == hostId, TestContext.Current.CancellationToken);
+            host.Archive(DateTimeOffset.UtcNow, null);
+            await hosts.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IHostRegistrar>()
+                .DeleteAsync(hostId, TestContext.Current.CancellationToken);
+        }
+
+        Assert.False(await HostExistsAsync(hostId));
+    }
+
+    [Fact]
+    public async Task RegisterHost_WhenAnArchivedHostOccupiesTheId_DoesNotCreateASecond()
+    {
+        // The other half of the symmetry, and the reason the fix widened
+        // DeleteAsync rather than narrowing RegisterHostAsync: an archived Host
+        // still occupies the primary key. Registration has to see it, or the
+        // insert collides and the unique-violation catch adopts it anyway -
+        // implicitly, through an exception, instead of by an explicit check.
+        Guid hostId = Guid.CreateVersion7();
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IHostRegistrar>().RegisterHostAsync(
+                hostId, "Archived Co", "archived@example.com", null, TestContext.Current.CancellationToken);
+
+            AppHostsDbContext hosts = scope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+            Host host = await hosts.Hosts.SingleAsync(h => h.Id == hostId, TestContext.Current.CancellationToken);
+            host.Archive(DateTimeOffset.UtcNow, null);
+            await hosts.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IHostRegistrar>().RegisterHostAsync(
+                hostId, "Archived Co", "archived@example.com", null, TestContext.Current.CancellationToken);
+        }
+
+        using IServiceScope assertScope = factory.Services.CreateScope();
+        AppHostsDbContext assertHosts = assertScope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+        int count = await assertHosts.Hosts
+            .IgnoreQueryFilters()
+            .CountAsync(h => h.Id == hostId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, count);
     }
 
     [Fact]
