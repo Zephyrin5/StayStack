@@ -207,10 +207,20 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         return result.AccessToken;
     }
 
-    private async Task<Guid> InitiateTransactionAsync(Guid bookingId)
+    // Carries the customer's token: initiating a payment now requires proof
+    // of ownership, the same two-path check CancelBooking uses. These
+    // bookings are confirmed by a signed-in customer, so the CustomerId path
+    // is the realistic one - previously this posted anonymously with nothing
+    // but the booking id.
+    private async Task<Guid> InitiateTransactionAsync(Guid bookingId, string customerToken)
     {
-        HttpResponseMessage response = await _client.PostAsJsonAsync(
-            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, TestContext.Current.CancellationToken);
+        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/transactions")
+        {
+            Content = JsonContent.Create(new InitiateTransactionRequest { BookingId = bookingId })
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", customerToken);
+
+        HttpResponseMessage response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         InitiateTransactionResponse? result =
             await response.Content.ReadFromJsonAsync<InitiateTransactionResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
@@ -253,7 +263,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
-        Guid transactionId = await InitiateTransactionAsync(bookingId);
+        Guid transactionId = await InitiateTransactionAsync(bookingId, customerToken);
         await MarkTransactionSucceededAsync(transactionId, adminToken);
 
         // Act
@@ -286,7 +296,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         DateOnly checkIn = CatalogSeeding.Today().AddDays(daysUntilCheckIn);
         Guid holdId = await HoldUnitAsync(unit.Id, checkIn, checkIn.AddDays(3)); // 300 KWD (3 nights @ 100)
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
-        Guid transactionId = await InitiateTransactionAsync(bookingId);
+        Guid transactionId = await InitiateTransactionAsync(bookingId, customerToken);
         await MarkTransactionSucceededAsync(transactionId, adminToken);
 
         // Act
@@ -342,7 +352,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
-        Guid transactionId = await InitiateTransactionAsync(bookingId);
+        Guid transactionId = await InitiateTransactionAsync(bookingId, customerToken);
 
         // Act
         HttpResponseMessage response = await CancelBookingAsync(bookingId, customerToken);
@@ -367,7 +377,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
-        Guid transactionId = await InitiateTransactionAsync(bookingId);
+        Guid transactionId = await InitiateTransactionAsync(bookingId, customerToken);
 
         HttpResponseMessage cancelResponse = await CancelBookingAsync(bookingId, customerToken);
         Assert.Equal(HttpStatusCode.OK, cancelResponse.StatusCode);

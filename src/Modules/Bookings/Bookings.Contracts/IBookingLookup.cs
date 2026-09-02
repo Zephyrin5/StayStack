@@ -69,6 +69,18 @@ public record BookingAccessResult
     // Same bool-not-enum reasoning as BookingSummary.IsPending - Reviews
     // only ever needs this one fact about BookingStatus.
     public bool IsConfirmed { get; init; }
+
+    // Both added for InitiateTransactionHandler, which used to read them off
+    // BookingSummary via the unauthenticated GetBookingAsync. It now goes
+    // through VerifyBookingAccessAsync like every other anonymous
+    // booking-scoped endpoint, so the two facts a payment needs have to
+    // travel on the result that proves access rather than on one that
+    // doesn't.
+    public Money TotalPrice { get; init; }
+
+    // True only while Pending - the one state a transaction can be initiated
+    // from. Same bool-not-enum reasoning as IsConfirmed above.
+    public bool IsPending { get; init; }
     public required string GuestEmail { get; init; }
     public Guid? CustomerId { get; init; }
 

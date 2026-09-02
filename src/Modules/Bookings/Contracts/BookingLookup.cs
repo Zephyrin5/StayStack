@@ -42,6 +42,8 @@ internal class BookingLookup(AppBookingsDbContext dbContext, TimeProvider timePr
                 CheckIn = booking.CheckIn,
                 CheckOut = booking.CheckOut,
                 IsConfirmed = booking.BookingStatus == BookingStatus.Confirmed,
+                IsPending = booking.BookingStatus == BookingStatus.Pending,
+                TotalPrice = booking.TotalPrice,
                 GuestEmail = booking.GuestEmail,
                 CustomerId = booking.CustomerId,
                 TimeZoneId = booking.TimeZoneId
@@ -78,6 +80,8 @@ internal class BookingLookup(AppBookingsDbContext dbContext, TimeProvider timePr
                 CheckIn = b.CheckIn,
                 CheckOut = b.CheckOut,
                 IsConfirmed = b.BookingStatus == BookingStatus.Confirmed,
+                IsPending = b.BookingStatus == BookingStatus.Pending,
+                TotalPrice = b.TotalPrice,
                 GuestEmail = b.GuestEmail,
                 CustomerId = b.CustomerId,
                 TimeZoneId = b.TimeZoneId

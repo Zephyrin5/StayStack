@@ -17,7 +17,7 @@ Fifteen endpoints call `AllowAnonymous()`. Some are obviously safe (public prope
 | `POST /auth/sign-out` | Revokes a refresh token | No | Self-limiting by construction - only ever revokes a token the caller already possesses; there's nothing to abuse by calling it repeatedly with a token that isn't yours. |
 | `POST /bookings/{id}/cancel`, `GET /bookings/{id}/manage` | Booking management for guest checkout | Yes (`"auth"` policy) | Gated by a two-path ownership proof (matching `CustomerId`, or a valid management token) independent of the rate limit. |
 | `POST /bookings` (confirm) | Creates a booking and (via a redeemed code) can mutate promotion state | Yes (`"auth"` policy) | Found as a gap during this same review (anonymous, a real DB write with financial consequences, previously uncapped) and closed the same way `CancelBookingEndpoint`/`GetBookingForManagementEndpoint`/`InitiateTransactionEndpoint` already were, rather than left as a known gap for later. |
-| `POST /transactions/initiate` | Initiates a payment transaction | Yes (`"auth"` policy) | |
+| `POST /transactions/initiate` | Initiates a payment transaction | Yes (`"auth"` policy) | Also gated by the same two-path ownership proof as booking cancellation (matching `CustomerId`, or a management token). See below - it previously took a bare booking id. |
 | `POST /reviews/stays` | Leaves a review for a completed stay | No | Same two-path ownership proof as booking cancellation; one review per booking is enforced at the database level (409 on a second attempt), which bounds repeated-write abuse independent of a rate limit. |
 | `GET /catalog/properties`, `/catalog/properties/{id}`, `/catalog/properties/{id}/price-calendar`, `/reviews/properties/{id}` | Public browse/read | No | Read-only, each wrapped in its own short-TTL cache (see `GetPropertiesHandler`/`GetPriceCalendarHandler`/`GetPropertyByIdHandler`'s own doc comments) - a cache absorbs repeated-request cost far more cheaply than a rate limiter would. |
 | `GET /localization/languages` | Static list | No | No user input, no per-request cost. |
@@ -114,6 +114,45 @@ address retained on a row that outlives the hold by years. Clearing it bounds
 retention to the 15 minutes the cap actually needs. `ReleaseHoldAsync` does not
 restore it and does not need to: it resets `hold_expires_at` to now, so the row
 is already outside the cap's predicate.
+
+### `POST /transactions/initiate` needed an ownership proof, not just a rate limit
+
+This endpoint was the one anonymous booking-scoped endpoint that took a bare
+`BookingId` and nothing else. `CancelBookingEndpoint` and
+`GetBookingForManagementEndpoint` both go through `BookingAccessChecker` -
+a matching `CustomerId`, or a guest-checkout management token - and both
+deliberately refuse to distinguish "doesn't exist" from "isn't yours".
+
+Two consequences followed from the gap, and the smaller one is what surfaced
+first:
+
+- **A status oracle.** The handler answered 404 for an unknown booking and 409
+  for one that exists but isn't payable, to anyone who asked. Impractical to
+  enumerate - Guid v7 carries 74 random bits - but it is exactly what
+  `HostAuthorization.RequireOwnership` returns 404 instead of 403 to avoid, so
+  the codebase was inconsistent with itself.
+- **A payment-denial vector, which is worse.** Anyone holding a booking id
+  could open a `Pending` transaction against it, and
+  `ix_transactions_booking_id_active` would then reject the real guest's
+  payment with 409. Possession of the id was the only credential, and it is an
+  id the guest's own client puts in a URL.
+
+The fix is the sibling-consistent one: route through
+`IBookingLookup.VerifyBookingAccessAsync`, which already implements exactly
+this two-path check. `BookingAccessResult` gained `TotalPrice` and `IsPending`,
+since the facts a payment needs now have to travel on the result that proves
+access rather than on one that doesn't.
+
+**The 404/409 distinction is deliberately kept.** Flattening it was the obvious
+reading of the finding and it is the wrong one: it is only an oracle when
+anyone can ask. A caller who has proven the booking is theirs is entitled to
+know why it cannot be paid for, and answering "not found" about a booking they
+are looking at would be actively misleading - and they are now the only caller
+who can reach that branch. Closing the oracle by requiring proof keeps the
+useful error; closing it by flattening the answer would have degraded the only
+case that can legitimately reach it.
+
+This is a breaking change for any client that was posting a bare booking id.
 
 ### Account lockout creates a symmetric, accepted abuse surface
 
