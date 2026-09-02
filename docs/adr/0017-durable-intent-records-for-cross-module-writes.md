@@ -125,12 +125,44 @@ merely present:
   on `UserId` is the backstop for two attempts racing past that lookup, failing
   the second insert before any cross-module call happens.
 
-Known remaining gap, recorded rather than fixed: a death after the `HostId`
-link commits but before `AddToRoleAsync` leaves a user linked to a real `Host`
-without the `Host` role. That is not an orphan - nothing is unreferenced - and
-it is not what this pattern addresses, but it does leave the user unable to
-retry, since the `AlreadyAHostException` guard now trips. Fixing it belongs
-with role assignment, not with intent records.
+### Correction: the intent has to span the whole operation, not its first half
+
+The paragraph above originally recorded a "known remaining gap" - a death after
+the `HostId` link commits but before `AddToRoleAsync` - and argued it was out of
+scope because nothing is left unreferenced. That was wrong on the consequence.
+It is a **permanent lockout**: the user is linked to a real `Host`, holds no
+`Host` role, and `user.HostId is not null` makes `AlreadyAHostException` fire on
+every future attempt. No path back existed, in the handler, the outbox, or the
+reconcile job.
+
+The cause was the very thing the original design was proud of. Staging
+`Remove(intent)` before the `HostId` update made the marker atomic with the
+link - correct for the first half, and precisely wrong for the second, because
+the marker vanished at the exact moment the *next* cross-module inconsistency
+became possible.
+
+Three changes close it:
+
+- **The intent delete is staged before `AddToRoleAsync` instead.**
+  `UserManager.AddToRoleAsync` calls through to `UpdateUserAsync` on the same
+  scoped context, so the delete flushes in that save. The marker now covers the
+  whole operation - register, link, add role - and disappears only when it
+  completes. Nothing flushes it on a failure path: a missing role throws before
+  the save, and a failed `IdentityResult` means the same.
+- **The reconcile job undoes both halves.** A surviving intent no longer implies
+  the user is unlinked, so deleting only the `Host` would leave them pointing at
+  a row that no longer exists - causing the lockout this job exists to prevent.
+  It clears `HostId` (guarded on the id, so an unrelated later link is left
+  alone) in the same transaction as the intent delete, then deletes the `Host`.
+- **The compensating unlink's result is checked.** It was discarded. If
+  unlinking fails, the host deletion is *not* enqueued and the intent is *not*
+  discarded: deleting a `Host` the user still points at is strictly worse than
+  leaving both in place for the job to resolve.
+
+The general lesson, since the first design got this exactly backwards: an intent
+record has to outlive **every** step whose failure it is meant to recover, not
+just the one that motivated it. Making it atomic with an early step is the same
+bug as never writing it.
 
 ## Consequences
 

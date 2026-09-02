@@ -76,18 +76,6 @@ public class BecomeHostHandler(
 
         Guid hostId = intent.Id;
 
-        // Marked for deletion BEFORE UpdateAsync, deliberately: UserManager
-        // resolves this same scoped AppIdentityDbContext, so its SaveChanges
-        // carries this delete with it and the two commit atomically. That is
-        // the structural guarantee the reconcile job depends on - a user whose
-        // HostId is set can never have a surviving intent, so the job can
-        // never delete a live Host. Resolving the intent separately, after the
-        // update, would open exactly that window.
-        //
-        // If UpdateAsync fails, the delete rolls back with it and the intent
-        // survives, which is what the compensating branch below needs.
-        dbContext.PendingHostLinkIntents.Remove(intent);
-
         user.HostId = hostId;
         IdentityResult updateResult = await userManager.UpdateAsync(user);
         if (!updateResult.Succeeded)
@@ -127,6 +115,27 @@ public class BecomeHostHandler(
                 string.Join(" ", updateResult.Errors.Select(e => e.Description)));
         }
 
+        // Staged here rather than before the HostId write, so the intent spans
+        // the WHOLE cross-module operation instead of only its first half.
+        // UserManager.AddToRoleAsync calls through to UpdateUserAsync on this
+        // same scoped context, so this delete flushes in that save and the
+        // marker disappears exactly when the operation completes.
+        //
+        // It used to be staged before the HostId update, which made it atomic
+        // with the link - correct for the first half, and precisely wrong for
+        // the second: the durable marker vanished at the moment the next
+        // cross-module inconsistency became possible. A crash between the link
+        // committing and the role being added left a user linked to a real
+        // Host with no Host role, no marker, and AlreadyAHostException firing
+        // on every retry. There was no path back - not in this handler, the
+        // outbox, or the job.
+        //
+        // Nothing flushes this on a failure path: AddToRoleAsync throwing (a
+        // missing role) never reaches its save, and a failed IdentityResult
+        // means the same. The branch below un-stages it explicitly rather than
+        // depending on that.
+        dbContext.PendingHostLinkIntents.Remove(intent);
+
         IdentityResult roleResult;
         try
         {
@@ -144,21 +153,43 @@ public class BecomeHostHandler(
 
         if (!roleResult.Succeeded)
         {
-            user.HostId = null;
-            await userManager.UpdateAsync(user);
+            // Un-stage the pending intent delete before compensating: the
+            // unlink below is a SaveChanges on this same context and would
+            // otherwise carry it along, dropping the marker at exactly the
+            // moment the compensation might fail.
+            dbContext.Entry(intent).State = EntityState.Unchanged;
 
-            // Same ChangeTracker.Clear() as the branch above, even though
-            // this UpdateAsync succeeded - keeps both rollback branches
-            // uniform.
+            user.HostId = null;
+            IdentityResult unlinkResult = await userManager.UpdateAsync(user);
+
+            if (!unlinkResult.Succeeded)
+            {
+                // This result used to be discarded, and that was a permanent
+                // lockout. If unlinking fails the user still points at this
+                // Host, so deleting it anyway leaves them referencing a row
+                // that does not exist, with no Host role and
+                // AlreadyAHostException firing forever - strictly worse than
+                // leaving both in place.
+                //
+                // So: no host deletion, and the intent stays. The reconcile
+                // job owns it from here, unlinking and deleting together, and
+                // retrying every run until both land.
+                throw new ValidationException(
+                    "Role",
+                    string.Join(" ", roleResult.Errors.Select(e => e.Description)));
+            }
+
+            // Same ChangeTracker.Clear() as the branch above - the unlink
+            // succeeded, so this is uniformity rather than necessity.
             dbContext.ChangeTracker.Clear();
             OutboxMessage deleteHostRow = dispatcher.Enqueue(
                 new DeleteHostOutboxMessage(hostId), IdentityJsonSerializerContext.Default.DeleteHostOutboxMessage);
             await dbContext.SaveChangesAsync(cancellationToken);
             await dispatcher.TryDispatchAsync(deleteHostRow, cancellationToken);
 
-            // No DiscardIntentAsync here: the intent already committed away
-            // with the successful UpdateAsync above, so there is nothing left
-            // to delete.
+            // Only now: the user is unlinked and the deletion is durable, so
+            // nothing is left for the job to reconcile.
+            await DiscardIntentAsync();
 
             throw new ValidationException(
                 "Role",

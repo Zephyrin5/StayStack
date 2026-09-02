@@ -65,6 +65,118 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task BecomeHost_WhenTheProcessDiesAfterLinkingButBeforeTheRole_TheJobUnlinksTheUserAndTheyCanRetry()
+    {
+        // The permanent-lockout state. The intent used to be deleted in the
+        // same save as the HostId write, so it vanished exactly when the
+        // second cross-module inconsistency became possible: a crash between
+        // linking the Host and adding the role left a user linked to a real
+        // Host, holding no Host role, with no marker anywhere - and
+        // AlreadyAHostException firing on every future attempt. There was no
+        // path back in the handler, the outbox, or this job.
+        //
+        // Seeded as that exact state: intent alive (it now spans the whole
+        // operation), Host registered, user linked, no role.
+        (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
+        Guid hostId = Guid.CreateVersion7();
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+            identity.PendingHostLinkIntents.Add(new PendingHostLinkIntent
+            {
+                Id = hostId,
+                UserId = userId,
+                CreatedAt = DateTimeOffset.UtcNow - PendingHostLinkIntent.ReconcileGrace.Add(TimeSpan.FromMinutes(1))
+            });
+
+            await scope.ServiceProvider.GetRequiredService<IHostRegistrar>().RegisterHostAsync(
+                hostId, "Half Linked Co", "half@example.com", null, TestContext.Current.CancellationToken);
+
+            ApplicationUser user = await identity.Users.SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
+            user.HostId = hostId;
+            await identity.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using (IServiceScope jobScope = factory.Services.CreateScope())
+        {
+            ReconcileOrphanedHostLinkIntentsJob job = ActivatorUtilities
+                .CreateInstance<ReconcileOrphanedHostLinkIntentsJob>(jobScope.ServiceProvider);
+            await job.ReconcileAsync(default!, TestContext.Current.CancellationToken);
+        }
+
+        // Both halves undone, not just the Host - unlinking is what makes the
+        // difference between recovery and a user pointing at a deleted row.
+        Assert.False(await HostExistsAsync(hostId));
+        Assert.False(await IntentExistsAsync(hostId));
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+            ApplicationUser user = await identity.Users.AsNoTracking()
+                .SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
+            Assert.Null(user.HostId);
+        }
+
+        // The property that actually matters: the user is no longer stuck.
+        // Under the old behaviour this returned 409 AlreadyAHostException,
+        // forever, with nothing able to clear it.
+        HttpResponseMessage retry = await _client.SendAsync(
+            CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+    }
+
+    [Fact]
+    public async Task Reconcile_WhenTheUserIsLinkedToADifferentHost_LeavesThatLinkAlone()
+    {
+        // The unlink is guarded on the id. If the user became a host some
+        // other way after this intent was abandoned, clearing their HostId
+        // would break a perfectly good link to undo an unrelated one.
+        (Guid userId, _) = await SeedAndSignInUserAsync();
+        Guid abandonedHostId = Guid.CreateVersion7();
+        Guid realHostId = Guid.CreateVersion7();
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+            identity.PendingHostLinkIntents.Add(new PendingHostLinkIntent
+            {
+                Id = abandonedHostId,
+                UserId = userId,
+                CreatedAt = DateTimeOffset.UtcNow - PendingHostLinkIntent.ReconcileGrace.Add(TimeSpan.FromMinutes(1))
+            });
+
+            IHostRegistrar registrar = scope.ServiceProvider.GetRequiredService<IHostRegistrar>();
+            await registrar.RegisterHostAsync(
+                abandonedHostId, "Abandoned Co", "abandoned@example.com", null, TestContext.Current.CancellationToken);
+            await registrar.RegisterHostAsync(
+                realHostId, "Real Co", "real@example.com", null, TestContext.Current.CancellationToken);
+
+            ApplicationUser user = await identity.Users.SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
+            user.HostId = realHostId;
+            await identity.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using (IServiceScope jobScope = factory.Services.CreateScope())
+        {
+            ReconcileOrphanedHostLinkIntentsJob job = ActivatorUtilities
+                .CreateInstance<ReconcileOrphanedHostLinkIntentsJob>(jobScope.ServiceProvider);
+            await job.ReconcileAsync(default!, TestContext.Current.CancellationToken);
+        }
+
+        Assert.False(await HostExistsAsync(abandonedHostId));
+        Assert.True(await HostExistsAsync(realHostId));
+
+        using IServiceScope assertScope = factory.Services.CreateScope();
+        AppIdentityDbContext assertIdentity = assertScope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+        ApplicationUser linked = await assertIdentity.Users.AsNoTracking()
+            .SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(realHostId, linked.HostId);
+    }
+
+    [Fact]
     public async Task BecomeHost_WhenTheIntentIsStillInsideTheGracePeriod_TheJobLeavesItAlone()
     {
         // The other half: a slow-but-healthy request must not have its Host

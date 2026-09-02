@@ -20,14 +20,19 @@ namespace Identity.Jobs;
 ///         was permanent, with nothing pointing at it.
 ///     </para>
 ///     <para>
-///         <b>Why this cannot delete a live Host.</b> BecomeHostHandler marks
-///         the intent for deletion before calling UserManager.UpdateAsync,
-///         and UserManager resolves the same scoped AppIdentityDbContext, so
-///         the intent delete and the ApplicationUser.HostId write commit in
-///         one SaveChanges. A user who is linked therefore has no intent, and
-///         an intent that survives means the link never committed. The grace
-///         period is not what makes that safe - it only decides how long an
-///         orphan lingers before collection.
+///         <b>What a surviving intent means.</b> BecomeHostHandler stages the
+///         intent delete before AddToRoleAsync, which flushes it in that
+///         call's own save, so the marker covers the whole operation:
+///         register the Host, link it, add the role. A surviving intent
+///         therefore means the operation did not finish, and the user may or
+///         may not already be linked - which is why this undoes both halves
+///         rather than only deleting the Host.
+///     </para>
+///     <para>
+///         The two Identity-side writes - clearing HostId and deleting the
+///         intent - commit together, so this cannot half-recover. The grace
+///         period is not what makes that safe; it only decides how long a
+///         partial BecomeHost lingers before collection.
 ///     </para>
 /// </summary>
 public partial class ReconcileOrphanedHostLinkIntentsJob(
@@ -111,8 +116,29 @@ public partial class ReconcileOrphanedHostLinkIntentsJob(
                 return false;
             }
 
+            // Unlink first, in this same transaction as the intent delete.
+            // The intent now spans the whole BecomeHost operation rather than
+            // just its first half, so a surviving one can mean the user was
+            // already linked - a crash after the HostId write but before the
+            // role was added. Deleting only the Host there would leave them
+            // pointing at a row that no longer exists, which is the lockout
+            // this job exists to prevent rather than cause.
+            //
+            // Guarded on the id: if the user became a host some other way
+            // since, this intent is not about that link and must not clear it.
+            ApplicationUser? user = await dbContext.Users
+                .SingleOrDefaultAsync(u => u.Id == intent.UserId, cancellationToken);
+
+            if (user is not null && user.HostId == intent.Id)
+            {
+                user.HostId = null;
+            }
+
             // Intent.Id IS the host id - that is why this needs no
-            // cross-module lookup to find what to clean up.
+            // cross-module lookup to find what to clean up. Before the commit
+            // deliberately: if this succeeds and the commit then fails, the
+            // intent survives and the next run repeats an idempotent delete.
+            // The reverse order could unlink and never delete.
             await hostRegistrar.DeleteAsync(intent.Id, cancellationToken);
 
             dbContext.PendingHostLinkIntents.Remove(intent);
