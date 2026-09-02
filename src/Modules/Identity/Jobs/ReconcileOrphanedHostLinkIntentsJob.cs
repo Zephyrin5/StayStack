@@ -81,10 +81,42 @@ public partial class ReconcileOrphanedHostLinkIntentsJob(
     ///     in between would strand the orphan again, which is the exact
     ///     failure this job exists to remove.
     ///     <para>
-    ///         Precisely: <b>the claim and the intent delete commit together;
-    ///         DeleteAsync runs on AppHostsDbContext and may repeat.</b> That
-    ///         is safe because it no-ops on a Host that is already gone, so a
-    ///         rollback anywhere just means the next run repeats it.
+    ///         Precisely: <b>the claim, the unlink and the intent delete commit
+    ///         together; DeleteAsync does not.</b> The first three are all
+    ///         writes on this same AppIdentityDbContext inside one transaction,
+    ///         which is what makes half-recovery impossible - a user cannot end
+    ///         up unlinked with the intent still present, or the reverse.
+    ///         <c>hostRegistrar.DeleteAsync</c> runs on AppHostsDbContext: a
+    ///         different connection, committing independently and before this
+    ///         transaction does. An earlier version of this note said "the
+    ///         claim and the intent delete", which was written before the
+    ///         unlink existed and omitted the member of that set that matters
+    ///         most.
+    ///     </para>
+    ///     <para>
+    ///         So the reachable partial state is: Host deleted, Identity
+    ///         transaction rolled back. The next run then repeats the unlink
+    ///         and an idempotent delete against a Host that is already gone,
+    ///         and converges. The reverse ordering - committing Identity first
+    ///         - could unlink and then never delete, leaving an orphan with no
+    ///         intent pointing at it, which is the failure this job exists to
+    ///         remove.
+    ///     </para>
+    ///     <para>
+    ///         <c>DeleteAsync</c> can also run more than once for a single
+    ///         logical reconciliation without any rollback at all: the
+    ///         execution strategy re-runs this whole delegate on a transient
+    ///         failure, and a failure at commit re-runs it after the delete has
+    ///         already landed. Same requirement as the outbox dispatcher's
+    ///         handlers - the cross-module call has to be idempotent, and this
+    ///         one is by no-opping on a Host that no longer exists.
+    ///     </para>
+    ///     <para>
+    ///         Like the outbox dispatcher and its Bookings twin, this holds a
+    ///         row lock across a cross-module round trip. Deliberate rather
+    ///         than accidental: acceptable because it is one row at a time
+    ///         under a per-run cap, and SKIP LOCKED means a concurrent run
+    ///         steps over a locked row instead of blocking behind it.
     ///     </para>
     /// </summary>
     private async Task ClaimAndReconcileAsync(Guid intentId, CancellationToken cancellationToken)
