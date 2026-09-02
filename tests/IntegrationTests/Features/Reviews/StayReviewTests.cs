@@ -1,3 +1,7 @@
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Options;
+using BuildingBlocks.Policies;
 using Bogus;
 using Bookings;
 using Bookings.Entities;
@@ -40,6 +44,13 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();
+
+    // Read from the running host rather than hardcoded: these tests assert
+    // boundaries relative to the configured window, so a deployment that
+    // changes it should still be exercised at its own edges.
+    private int ReviewWindowDays =>
+        factory.Services.GetRequiredService<IOptions<BookingLifecyclePolicyOptions>>()
+            .Value.ReviewWindowDaysAfterCheckOut;
 
     private async Task<string> SeedHostUserAsync()
     {
@@ -152,6 +163,132 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         CreateUnitResponse? result = await response.Content.ReadFromJsonAsync<CreateUnitResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         return result.UnitId;
+    }
+
+    [Fact]
+    public void Startup_WithATokenLifetimeShorterThanTheReviewWindow_RefusesToStart()
+    {
+        // The two settings are independent so each can be chosen on its own
+        // merits, but they are not unrelated: a management token that dies
+        // before the review window closes puts guest checkout back exactly
+        // where it started - reviewable in principle, locked out of its own
+        // booking in practice - so the window would quietly apply to
+        // signed-in customers only.
+        //
+        // That is invisible in production: the symptom is guests not
+        // reviewing. Program.cs refuses to start instead, and this asserts the
+        // throw is reachable rather than merely described.
+        using WebApplicationFactory<Program> misconfigured = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.Configure<BookingLifecyclePolicyOptions>(o =>
+            {
+                o.ReviewWindowDaysAfterCheckOut = 120;
+                o.ManagementTokenLifetimeDaysAfterCheckOut = 90;
+            })));
+
+        InvalidOperationException exception =
+            Assert.Throws<InvalidOperationException>(() => misconfigured.CreateClient());
+
+        Assert.Contains("shorter than", exception.Message);
+    }
+
+    [Fact]
+    public async Task CreateStayReview_ForAStayPastTheReviewWindow_IsRejected_ForAnAuthenticatedCustomerToo()
+    {
+        // Reviews had only a lower bound ("has the stay ended"), so the
+        // effective deadline came from the guest management token's lifetime -
+        // which meant it applied to guest checkout only. An authenticated
+        // customer could review the same stay forever, and two people in the
+        // same room on the same night had different rights depending on
+        // whether they had an account.
+        //
+        // The window is now explicit and applies to both. This is the path
+        // that had no deadline at all before.
+        string hostToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostToken);
+        Guid unitId = await CreateUnitAsync(propertyId, hostToken);
+        (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
+
+        DateOnly today = CatalogSeeding.Today();
+        DateOnly checkOut = today.AddDays(-(ReviewWindowDays + 5));
+        Guid bookingId = await SeedBookingAsync(unitId, customerId, checkOut.AddDays(-3), checkOut);
+
+        HttpResponseMessage response = await CreateStayReviewAsync(
+            new CreateStayReviewRequest
+            {
+                BookingId = bookingId,
+                CleanlinessRating = 5,
+                CommunicationRating = 5,
+                LocationRating = 5,
+                ValueRating = 5,
+                AccuracyRating = 5,
+                Comment = "Lovely stay."
+            },
+            customerToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains(
+            "Reviews close",
+            await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task CreateStayReview_OnTheLastDayOfTheWindow_IsStillAccepted()
+    {
+        // The boundary itself, inclusive - a review exactly ReviewWindowDays
+        // after checkout still lands. Pins which side of the comparison the
+        // deadline falls on, which an off-by-one would otherwise move
+        // silently.
+        string hostToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostToken);
+        Guid unitId = await CreateUnitAsync(propertyId, hostToken);
+        (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
+
+        DateOnly today = CatalogSeeding.Today();
+        DateOnly checkOut = today.AddDays(-ReviewWindowDays);
+        Guid bookingId = await SeedBookingAsync(unitId, customerId, checkOut.AddDays(-3), checkOut);
+
+        HttpResponseMessage response = await CreateStayReviewAsync(
+            new CreateStayReviewRequest
+            {
+                BookingId = bookingId,
+                CleanlinessRating = 5,
+                CommunicationRating = 5,
+                LocationRating = 5,
+                ValueRating = 5,
+                AccuracyRating = 5,
+                Comment = "Lovely stay."
+            },
+            customerToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ListMyReviewableBookings_OmitsStaysPastTheReviewWindow()
+    {
+        // The list must not offer what CreateStayReview would then reject -
+        // the same "UI agrees with the API" rule the lower bound already had,
+        // which an upper bound on only one side would have broken at the far
+        // end.
+        string hostToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostToken);
+        Guid unitId = await CreateUnitAsync(propertyId, hostToken);
+        (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
+
+        DateOnly today = CatalogSeeding.Today();
+
+        DateOnly expiredCheckOut = today.AddDays(-(ReviewWindowDays + 5));
+        Guid expiredBookingId = await SeedBookingAsync(unitId, customerId, expiredCheckOut.AddDays(-3), expiredCheckOut);
+
+        DateOnly recentCheckOut = today.AddDays(-2);
+        Guid recentBookingId = await SeedBookingAsync(unitId, customerId, recentCheckOut.AddDays(-3), recentCheckOut);
+
+        HttpResponseMessage response = await ListMyReviewableBookingsAsync(customerToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        string body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(recentBookingId.ToString(), body);
+        Assert.DoesNotContain(expiredBookingId.ToString(), body);
     }
 
     private async Task<Guid> SeedBookingAsync(

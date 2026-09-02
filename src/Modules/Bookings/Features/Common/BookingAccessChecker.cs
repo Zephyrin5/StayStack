@@ -14,14 +14,6 @@ namespace Bookings.Features.Common;
 /// </summary>
 internal static class BookingAccessChecker
 {
-    // A leaked management link shouldn't stay valid forever - bounded to
-    // the reservation lifecycle plus a grace window covering post-stay
-    // disputes and the review window, rather than a fixed TTL from
-    // issuance like a refresh token: HoldAvailabilityHandler places no
-    // upper bound on how far out CheckIn can be booked, so a
-    // CreatedAt-based expiry could lapse before the stay even happens.
-    private const int ManagementTokenLifetimeDaysAfterCheckOut = 90;
-
     /// <summary>
     ///     Resolves the booking if the caller owns it - via a matching
     ///     CustomerId (authenticated) or a matching, not-yet-expired
@@ -41,6 +33,7 @@ internal static class BookingAccessChecker
         Guid? customerId,
         string? managementToken,
         TimeProvider timeProvider,
+        int managementTokenLifetimeDaysAfterCheckOut,
         CancellationToken cancellationToken)
     {
         Booking? booking = await dbContext.Bookings
@@ -68,7 +61,19 @@ internal static class BookingAccessChecker
         // See docs/adr/0018.
         DateOnly today = PropertyTimeZone.Today(timeProvider, booking.TimeZoneId);
 
-        if (today > booking.CheckOut.AddDays(ManagementTokenLifetimeDaysAfterCheckOut))
+        // A leaked management link shouldn't stay valid forever. Anchored to
+        // checkout rather than issuance: lead time is capped at 730 days
+        // (HoldAvailabilityHandler.MaxLeadTimeDays), so an issuance-anchored
+        // TTL of a few months would kill the token of anyone booking a
+        // holiday well in advance, before they ever arrived.
+        //
+        // This used to also be what bounded the review window - the comment
+        // here said so - which meant the review deadline applied to guest
+        // checkout only, and tightening this for security reasons would have
+        // silently shortened it. Reviews now has its own explicit window
+        // (BookingLifecyclePolicyOptions), so this is purely a question about
+        // how long a bearer link should live.
+        if (today > booking.CheckOut.AddDays(managementTokenLifetimeDaysAfterCheckOut))
         {
             return null;
         }

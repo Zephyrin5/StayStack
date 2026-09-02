@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+using BuildingBlocks.Policies;
 using Bookings.Contracts;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Time;
@@ -15,7 +17,8 @@ public class CreateStayReviewHandler(
     IBookingLookup bookingLookup,
     IUnitLookup unitLookup,
     ICurrentUserProvider currentUserProvider,
-    TimeProvider timeProvider) : IRequestHandler<CreateStayReviewRequest, CreateStayReviewResponse>
+    TimeProvider timeProvider,
+    IOptions<BookingLifecyclePolicyOptions> policy) : IRequestHandler<CreateStayReviewRequest, CreateStayReviewResponse>
 {
     public async ValueTask<CreateStayReviewResponse> Handle(CreateStayReviewRequest request, CancellationToken cancellationToken)
     {
@@ -40,6 +43,19 @@ public class CreateStayReviewHandler(
         if (access.CheckOut > today)
         {
             throw new ValidationException(nameof(request.BookingId), "This stay hasn't ended yet.");
+        }
+
+        // The upper bound, which did not exist before. Reviews only ever
+        // checked "has the stay ended", so the effective deadline came from
+        // the guest management token's lifetime - meaning it applied to guest
+        // checkout only, while an authenticated customer could review the same
+        // stay forever. See BookingLifecyclePolicyOptions.
+        int reviewWindowDays = policy.Value.ReviewWindowDaysAfterCheckOut;
+        if (today > access.CheckOut.AddDays(reviewWindowDays))
+        {
+            throw new ValidationException(
+                nameof(request.BookingId),
+                $"Reviews close {reviewWindowDays} days after checkout, and this stay is past that.");
         }
 
         // Friendly-error fast path - not what actually prevents a second

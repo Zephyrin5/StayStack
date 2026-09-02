@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+using BuildingBlocks.Policies;
 using Bookings.Entities;
 using Bookings.Features.Common;
 using Bookings.Outbox;
@@ -17,7 +19,8 @@ public class CancelBookingHandler(
     BookingsOutboxDispatcher dispatcher,
     ITransactionReversal transactionReversal,
     ICurrentUserProvider currentUserProvider,
-    TimeProvider timeProvider) : IRequestHandler<CancelBookingRequest, CancelBookingResponse>
+    TimeProvider timeProvider,
+    IOptions<BookingLifecyclePolicyOptions> policy) : IRequestHandler<CancelBookingRequest, CancelBookingResponse>
 {
     public async ValueTask<CancelBookingResponse> Handle(CancelBookingRequest request, CancellationToken cancellationToken)
     {
@@ -28,7 +31,8 @@ public class CancelBookingHandler(
         // management token (guest checkout) - see BookingAccessChecker's
         // own doc comment.
         Booking booking = await BookingAccessChecker.ResolveAsync(
-                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken, timeProvider, cancellationToken)
+                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken, timeProvider,
+            policy.Value.ManagementTokenLifetimeDaysAfterCheckOut, cancellationToken)
                           ?? throw new NotFoundException(nameof(Booking), request.BookingId);
 
         // Resolved after the booking loads, from its own snapshotted zone -

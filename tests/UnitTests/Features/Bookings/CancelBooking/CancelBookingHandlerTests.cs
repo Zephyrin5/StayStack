@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+using BuildingBlocks.Policies;
 using Availability.Contracts;
 using Bookings;
 using Bookings.Entities;
@@ -89,7 +91,8 @@ public class CancelBookingHandlerTests : IDisposable
         currentUserProviderMock.Setup(x => x.UserId).Returns(_customerId);
 
         CancelBookingHandler handler = new CancelBookingHandler(
-            _dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, TimeProvider.System);
+            _dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, TimeProvider.System,
+            Options.Create(new BookingLifecyclePolicyOptions()));
 
         CancelBookingRequest request = new CancelBookingRequest { BookingId = booking.Id };
 
@@ -128,7 +131,8 @@ public class CancelBookingHandlerTests : IDisposable
         currentUserProviderMock.Setup(x => x.UserId).Returns(_customerId);
 
         CancelBookingHandler handler = new CancelBookingHandler(
-            _dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, TimeProvider.System);
+            _dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, TimeProvider.System,
+            Options.Create(new BookingLifecyclePolicyOptions()));
 
         CancelBookingRequest request = new CancelBookingRequest { BookingId = booking.Id };
 
@@ -169,7 +173,8 @@ public class CancelBookingHandlerTests : IDisposable
         currentUserProviderMock.Setup(x => x.UserId).Returns(_customerId);
 
         CancelBookingHandler handler = new CancelBookingHandler(
-            _dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, TimeProvider.System);
+            _dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, TimeProvider.System,
+            Options.Create(new BookingLifecyclePolicyOptions()));
 
         CancelBookingRequest request = new CancelBookingRequest { BookingId = booking.Id };
 
@@ -238,7 +243,8 @@ public class CancelBookingHandlerTests : IDisposable
             new Mock<IPromotionRedemption>().Object, timeProvider, NullLogger<BookingsOutboxDispatcher>.Instance);
 
         CancelBookingHandler handler = new CancelBookingHandler(
-            dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, timeProvider);
+            dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, timeProvider,
+            Options.Create(new BookingLifecyclePolicyOptions()));
 
         CancelBookingRequest request = new CancelBookingRequest { BookingId = booking.Id };
 
@@ -312,7 +318,8 @@ public class CancelBookingHandlerTests : IDisposable
         currentUserProviderMock.Setup(x => x.UserId).Returns(_customerId);
 
         CancelBookingHandler handler = new CancelBookingHandler(
-            dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, timeProvider);
+            dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, timeProvider,
+            Options.Create(new BookingLifecyclePolicyOptions()));
 
         CancelBookingResponse response = await handler.Handle(
             new CancelBookingRequest { BookingId = booking.Id }, TestContext.Current.CancellationToken);
@@ -397,7 +404,8 @@ public class CancelBookingHandlerTests : IDisposable
         currentUserProviderMock.Setup(x => x.UserId).Returns(_customerId);
 
         CancelBookingHandler handler = new CancelBookingHandler(
-            _dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, TimeProvider.System);
+            _dbContext, dispatcher, transactionReversalMock.Object, currentUserProviderMock.Object, TimeProvider.System,
+            Options.Create(new BookingLifecyclePolicyOptions()));
 
         return await handler.Handle(
             new CancelBookingRequest { BookingId = booking.Id }, TestContext.Current.CancellationToken);

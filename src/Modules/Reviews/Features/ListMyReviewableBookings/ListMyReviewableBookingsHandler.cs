@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+using BuildingBlocks.Policies;
 using Bookings.Contracts;
 using BuildingBlocks.Time;
 using BuildingBlocks.Identity;
@@ -11,7 +13,8 @@ public class ListMyReviewableBookingsHandler(
     IBookingLookup bookingLookup,
     IUnitLookup unitLookup,
     ICurrentUserProvider currentUserProvider,
-    TimeProvider timeProvider) : IRequestHandler<ListMyReviewableBookingsRequest, ListMyReviewableBookingsResponse>
+    TimeProvider timeProvider,
+    IOptions<BookingLifecyclePolicyOptions> policy) : IRequestHandler<ListMyReviewableBookingsRequest, ListMyReviewableBookingsResponse>
 {
     public async ValueTask<ListMyReviewableBookingsResponse> Handle(
         ListMyReviewableBookingsRequest request, CancellationToken cancellationToken)
@@ -33,11 +36,18 @@ public class ListMyReviewableBookingsHandler(
         // wrong here regardless of which zone it is computed in - and the
         // filter runs before any unit is loaded, so the booking's own
         // snapshot is the only thing available. See docs/adr/0018.
-        bool HasEnded(BookingAccessResult b) =>
-            b.CheckOut <= PropertyTimeZone.Today(timeProvider, b.TimeZoneId);
+        // Both bounds, so this list never offers a review CreateStayReview
+        // would then reject - the same "UI must agree with the API" rule the
+        // lower bound already had.
+        bool IsReviewable(BookingAccessResult b)
+        {
+            DateOnly today = PropertyTimeZone.Today(timeProvider, b.TimeZoneId);
+            return b.CheckOut <= today
+                   && today <= b.CheckOut.AddDays(policy.Value.ReviewWindowDaysAfterCheckOut);
+        }
 
         List<Guid> pastBookingIds = confirmedBookings
-            .Where(HasEnded)
+            .Where(IsReviewable)
             .Select(b => b.BookingId)
             .ToList();
 
@@ -48,7 +58,7 @@ public class ListMyReviewableBookingsHandler(
             .ToListAsync(cancellationToken)).ToHashSet();
 
         List<BookingAccessResult> reviewable = confirmedBookings
-            .Where(b => HasEnded(b) && !alreadyReviewedBookingIds.Contains(b.BookingId))
+            .Where(b => IsReviewable(b) && !alreadyReviewedBookingIds.Contains(b.BookingId))
             .ToList();
 
         // One batched lookup for every distinct unit, not one call per

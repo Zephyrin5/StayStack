@@ -4,6 +4,7 @@ using Api.Security;
 using Api.Serialization;
 using Availability;
 using Bookings;
+using BuildingBlocks.Policies;
 using Catalog;
 using FastEndpoints;
 using FastEndpoints.OpenApi;
@@ -48,6 +49,13 @@ builder.Services.ConfigureBookingsServices(builder.Configuration, builder.Enviro
 builder.Services.ConfigureReviewsServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureTransactionsServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureJobsServices(builder.Configuration, builder.Environment);
+// Post-stay deadlines: how long a stay stays reviewable, and how long a
+// guest-checkout management link stays usable. Two settings rather than one
+// because they answer different questions - see
+// BookingLifecyclePolicyOptions, and the consistency check after Build().
+builder.Services.Configure<BookingLifecyclePolicyOptions>(
+    builder.Configuration.GetSection(BookingLifecyclePolicyOptions.SectionName));
+
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHealthChecks();
 
@@ -203,6 +211,25 @@ foreach (string proxy in app.Configuration.GetSection("ForwardedHeaders:KnownPro
 {
     forwardedHeadersOptions.KnownProxies.Add(IPAddress.Parse(proxy));
 }
+// A throw for the same reason as the SameSite check below: this misconfiguration
+// produces a silently wrong product rule rather than a visible failure. A
+// management token that dies before the review window closes puts guest
+// checkout back exactly where it started - able to review in principle, locked
+// out of its own booking in practice - and the only symptom is guests quietly
+// not reviewing.
+BookingLifecyclePolicyOptions bookingLifecycle =
+    app.Services.GetRequiredService<IOptions<BookingLifecyclePolicyOptions>>().Value;
+if (bookingLifecycle.ManagementTokenLifetimeDaysAfterCheckOut < bookingLifecycle.ReviewWindowDaysAfterCheckOut)
+{
+    throw new InvalidOperationException(
+        $"{BookingLifecyclePolicyOptions.SectionName}:ManagementTokenLifetimeDaysAfterCheckOut " +
+        $"({bookingLifecycle.ManagementTokenLifetimeDaysAfterCheckOut}) is shorter than " +
+        $"ReviewWindowDaysAfterCheckOut ({bookingLifecycle.ReviewWindowDaysAfterCheckOut}). " +
+        "Guest-checkout callers would lose access to their booking before the review window closes, so " +
+        "the window would apply only to signed-in customers - which is the asymmetry these settings exist " +
+        "to remove. Raise the token lifetime to at least the review window.");
+}
+
 // A throw, not a warning, unlike the proxy check below: SameSite=None
 // without Secure is refused by every modern browser, so the cookie is never
 // stored and cookie-mode auth cannot work at all. There is no deployment

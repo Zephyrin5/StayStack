@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+using BuildingBlocks.Policies;
 using Bookings.Contracts;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Time;
@@ -15,7 +17,8 @@ public class CreateGuestReviewHandler(
     IBookingLookup bookingLookup,
     IUnitLookup unitLookup,
     IHostAuthorization hostAuthorization,
-    TimeProvider timeProvider) : IRequestHandler<CreateGuestReviewRequest, CreateGuestReviewResponse>
+    TimeProvider timeProvider,
+    IOptions<BookingLifecyclePolicyOptions> policy) : IRequestHandler<CreateGuestReviewRequest, CreateGuestReviewResponse>
 {
     public async ValueTask<CreateGuestReviewResponse> Handle(CreateGuestReviewRequest request, CancellationToken cancellationToken)
     {
@@ -49,6 +52,17 @@ public class CreateGuestReviewHandler(
         // GetBookingForManagementHandler's CanReview exactly or the UI offers
         // a review the API rejects. See docs/adr/0018.
         DateOnly today = PropertyTimeZone.Today(timeProvider, booking.TimeZoneId);
+
+        // Same window as the guest's own review, deliberately: a one-sided
+        // deadline would let a host review a guest who can no longer answer.
+        int reviewWindowDays = policy.Value.ReviewWindowDaysAfterCheckOut;
+        if (booking.CheckOut <= today && today > booking.CheckOut.AddDays(reviewWindowDays))
+        {
+            throw new ValidationException(
+                nameof(request.BookingId),
+                $"Reviews close {reviewWindowDays} days after checkout, and this stay is past that.");
+        }
+
         if (booking.CheckOut > today)
         {
             throw new ValidationException(nameof(request.BookingId), "This stay hasn't ended yet.");
