@@ -8,7 +8,7 @@ public class HostTests
     [Fact]
     public void Create_ShouldSetAllProperties_WhenInputIsValid()
     {
-        Host host = Host.Create("Gulf Stays Co.", "contact@gulfstays.example", "+965 1234 5678");
+        Host host = Host.Create(Guid.CreateVersion7(), "Gulf Stays Co.", "contact@gulfstays.example", "+965 1234 5678");
 
         Assert.NotEqual(Guid.Empty, host.Id);
         Assert.Equal("Gulf Stays Co.", host.BusinessName);
@@ -21,7 +21,7 @@ public class HostTests
     [Fact]
     public void Create_ShouldAllowNullContactPhone_AndNullDisplayName()
     {
-        Host host = Host.Create("Gulf Stays Co.", "contact@gulfstays.example", null);
+        Host host = Host.Create(Guid.CreateVersion7(), "Gulf Stays Co.", "contact@gulfstays.example", null);
 
         Assert.Null(host.ContactPhone);
         Assert.Null(host.DisplayName);
@@ -32,7 +32,7 @@ public class HostTests
     {
         LocalizedText displayName = LocalizedText.Create(new Dictionary<string, string> { { "en", "Gulf Stays" } }, "en");
 
-        Host host = Host.Create("Gulf Stays Co.", "contact@gulfstays.example", null, displayName);
+        Host host = Host.Create(Guid.CreateVersion7(), "Gulf Stays Co.", "contact@gulfstays.example", null, displayName);
 
         Assert.Equal(displayName, host.DisplayName);
     }
@@ -43,7 +43,7 @@ public class HostTests
     [InlineData("   ")]
     public void Create_ShouldThrow_WhenBusinessNameIsNullOrWhitespace(string? businessName)
     {
-        Assert.ThrowsAny<ArgumentException>(() => Host.Create(businessName!, "contact@gulfstays.example", null));
+        Assert.ThrowsAny<ArgumentException>(() => Host.Create(Guid.CreateVersion7(), businessName!, "contact@gulfstays.example", null));
     }
 
     [Theory]
@@ -54,13 +54,13 @@ public class HostTests
     [InlineData("@missing-local-part.com")]
     public void Create_ShouldThrow_WhenContactEmailIsInvalid(string? contactEmail)
     {
-        Assert.ThrowsAny<ArgumentException>(() => Host.Create("Gulf Stays Co.", contactEmail!, null));
+        Assert.ThrowsAny<ArgumentException>(() => Host.Create(Guid.CreateVersion7(), "Gulf Stays Co.", contactEmail!, null));
     }
 
     [Fact]
     public void UpdateContactInfo_ShouldUpdateEmailAndPhone_WhenValid()
     {
-        Host host = Host.Create("Gulf Stays Co.", "old@gulfstays.example", "+965 1111 1111");
+        Host host = Host.Create(Guid.CreateVersion7(), "Gulf Stays Co.", "old@gulfstays.example", "+965 1111 1111");
 
         host.UpdateContactInfo("new@gulfstays.example", "+965 2222 2222");
 
@@ -71,7 +71,7 @@ public class HostTests
     [Fact]
     public void UpdateContactInfo_ShouldThrow_WhenEmailIsInvalid()
     {
-        Host host = Host.Create("Gulf Stays Co.", "old@gulfstays.example", null);
+        Host host = Host.Create(Guid.CreateVersion7(), "Gulf Stays Co.", "old@gulfstays.example", null);
 
         Assert.ThrowsAny<ArgumentException>(() => host.UpdateContactInfo("not-an-email", null));
     }
@@ -80,7 +80,7 @@ public class HostTests
     public void SetDisplayName_ShouldAllowClearingBackToNull()
     {
         LocalizedText displayName = LocalizedText.Create(new Dictionary<string, string> { { "en", "Gulf Stays" } }, "en");
-        Host host = Host.Create("Gulf Stays Co.", "contact@gulfstays.example", null, displayName);
+        Host host = Host.Create(Guid.CreateVersion7(), "Gulf Stays Co.", "contact@gulfstays.example", null, displayName);
 
         host.SetDisplayName(null);
 
@@ -90,7 +90,7 @@ public class HostTests
     [Fact]
     public void Archive_ShouldSetStatusToArchived_AndRecordWhoAndWhen()
     {
-        Host host = Host.Create("Gulf Stays Co.", "contact@gulfstays.example", null);
+        Host host = Host.Create(Guid.CreateVersion7(), "Gulf Stays Co.", "contact@gulfstays.example", null);
         DateTimeOffset archivedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         Guid archivedBy = Guid.NewGuid();
 

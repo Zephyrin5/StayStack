@@ -8,6 +8,7 @@ using Identity.Outbox;
 using Identity.Serialization;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Outbox;
 namespace Identity.Features.BecomeHost;
 
@@ -17,7 +18,8 @@ public class BecomeHostHandler(
     IdentityOutboxDispatcher dispatcher,
     ICurrentUserProvider currentUserProvider,
     IHostRegistrar hostRegistrar,
-    IAuthTokenProvider authTokenProvider) : IRequestHandler<BecomeHostRequest, BecomeHostResponse>
+    IAuthTokenProvider authTokenProvider,
+    TimeProvider timeProvider) : IRequestHandler<BecomeHostRequest, BecomeHostResponse>
 {
     public async ValueTask<BecomeHostResponse> Handle(BecomeHostRequest request, CancellationToken cancellationToken)
     {
@@ -36,15 +38,55 @@ public class BecomeHostHandler(
             throw new AlreadyAHostException();
         }
 
+        // Durable intent BEFORE the cross-module call, so a hard process
+        // death after RegisterHostAsync commits still leaves something for
+        // ReconcileOrphanedHostLinkIntentsJob to find. This was the last
+        // forward-half cross-module write in the codebase with no such
+        // marker - the failed-update paths below compensate through the
+        // outbox, but a crash between the two wrote nothing anywhere and the
+        // orphaned Host was permanent. See docs/adr/0017.
+        PendingHostLinkIntent intent = await OpenIntentAsync(userId, cancellationToken);
+
+        // ExecuteDelete, not a tracked Remove, on the failure paths: a
+        // zero-row delete just means the reconcile job got here first, which
+        // has to be a clean no-op. Same shape and same reasoning as
+        // ConfirmBookingHandler.DiscardIntentAsync.
+        async Task DiscardIntentAsync()
+        {
+            await dbContext.PendingHostLinkIntents
+                .Where(i => i.Id == intent.Id)
+                .ExecuteDeleteAsync(cancellationToken);
+            dbContext.Entry(intent).State = EntityState.Detached;
+        }
+
         // Cross-module write (AppHostsDbContext + AppIdentityDbContext, no
         // shared transaction) - see docs/adr/0003. A partially-failed
         // BecomeHost leaves the caller as a fully functional Customer
         // either way, never broken.
-        Guid hostId = await hostRegistrar.RegisterHostAsync(
+        //
+        // Idempotent under the intent's id: a client retrying after a timeout
+        // reuses the same intent (see OpenIntentAsync) and this re-registers
+        // the same Host rather than minting another.
+        await hostRegistrar.RegisterHostAsync(
+            intent.Id,
             request.BusinessName,
             request.ContactEmail,
             request.ContactPhone,
             cancellationToken);
+
+        Guid hostId = intent.Id;
+
+        // Marked for deletion BEFORE UpdateAsync, deliberately: UserManager
+        // resolves this same scoped AppIdentityDbContext, so its SaveChanges
+        // carries this delete with it and the two commit atomically. That is
+        // the structural guarantee the reconcile job depends on - a user whose
+        // HostId is set can never have a surviving intent, so the job can
+        // never delete a live Host. Resolving the intent separately, after the
+        // update, would open exactly that window.
+        //
+        // If UpdateAsync fails, the delete rolls back with it and the intent
+        // survives, which is what the compensating branch below needs.
+        dbContext.PendingHostLinkIntents.Remove(intent);
 
         user.HostId = hostId;
         IdentityResult updateResult = await userManager.UpdateAsync(user);
@@ -68,6 +110,12 @@ public class BecomeHostHandler(
                 new DeleteHostOutboxMessage(hostId), IdentityJsonSerializerContext.Default.DeleteHostOutboxMessage);
             await dbContext.SaveChangesAsync(cancellationToken);
             await dispatcher.TryDispatchAsync(deleteHostRow, cancellationToken);
+
+            // After the compensating save, deliberately - a crash between the
+            // two leaves the intent alive and the job repeats the (idempotent)
+            // delete, which is safe. Discarding first would drop the marker
+            // before the compensation was durable.
+            await DiscardIntentAsync();
 
             if (updateResult.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.ConcurrencyFailure)))
             {
@@ -108,6 +156,10 @@ public class BecomeHostHandler(
             await dbContext.SaveChangesAsync(cancellationToken);
             await dispatcher.TryDispatchAsync(deleteHostRow, cancellationToken);
 
+            // No DiscardIntentAsync here: the intent already committed away
+            // with the successful UpdateAsync above, so there is nothing left
+            // to delete.
+
             throw new ValidationException(
                 "Role",
                 string.Join(" ", roleResult.Errors.Select(e => e.Description)));
@@ -130,5 +182,45 @@ public class BecomeHostHandler(
             RefreshToken = refreshToken,
             Roles = [.. roles]
         };
+    }
+
+    /// <summary>
+    ///     Returns this user's in-flight intent, reusing an existing one
+    ///     rather than allocating a second host id.
+    ///     <para>
+    ///         Reuse is the point. RegisterHostAsync used to generate the id,
+    ///         so a client retrying after a timeout looked exactly like a
+    ///         first attempt - the "already a host" guard still saw a null
+    ///         HostId, and each retry left another orphaned Host. Reusing the
+    ///         recorded id makes every retry re-register the same one.
+    ///     </para>
+    ///     <para>
+    ///         The unique index on UserId is the backstop for two attempts
+    ///         racing past this lookup: the second insert fails before any
+    ///         cross-module call happens, so the orphan count is bounded at
+    ///         one either way.
+    ///     </para>
+    /// </summary>
+    private async Task<PendingHostLinkIntent> OpenIntentAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        PendingHostLinkIntent? existing = await dbContext.PendingHostLinkIntents
+            .SingleOrDefaultAsync(i => i.UserId == userId, cancellationToken);
+
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        PendingHostLinkIntent intent = new PendingHostLinkIntent
+        {
+            Id = Guid.CreateVersion7(),
+            UserId = userId,
+            CreatedAt = timeProvider.GetUtcNow()
+        };
+
+        dbContext.PendingHostLinkIntents.Add(intent);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return intent;
     }
 }

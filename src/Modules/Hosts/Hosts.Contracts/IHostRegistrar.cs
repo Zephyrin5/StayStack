@@ -7,7 +7,21 @@ namespace Hosts.Contracts;
 /// </summary>
 public interface IHostRegistrar
 {
-    Task<Guid> RegisterHostAsync(
+    /// <summary>
+    ///     Registers a Host under a caller-supplied id, idempotently: calling
+    ///     it again with the same id is a no-op rather than a second Host.
+    ///     <para>
+    ///         It used to generate the id and return it, which made a retry
+    ///         after a timeout indistinguishable from a first attempt - the
+    ///         caller's "am I already a host" guard still saw null, so a
+    ///         client retrying three times on a flaky connection left three
+    ///         orphaned Hosts. The id has to come from the caller because the
+    ///         caller is what durably records it (Identity's
+    ///         PendingHostLinkIntent) before this is ever called.
+    ///     </para>
+    /// </summary>
+    Task RegisterHostAsync(
+        Guid hostId,
         string businessName,
         string contactEmail,
         string? contactPhone,

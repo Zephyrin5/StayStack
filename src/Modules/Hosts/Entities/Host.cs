@@ -34,18 +34,27 @@ public sealed class Host : Entity
     // customization yet" - callers fall back to BusinessName.
     public LocalizedText? DisplayName { get; private set; }
 
+    /// <summary>
+    ///     <paramref name="id"/> is supplied by the caller, not generated
+    ///     here, so registration can be idempotent: Identity pre-generates it,
+    ///     records it in a PendingHostLinkIntent before calling across, and a
+    ///     retry re-registers the same id rather than minting a second Host.
+    ///     See IHostRegistrar.RegisterHostAsync and docs/adr/0017.
+    /// </summary>
     public static Host Create(
+        Guid id,
         string businessName,
         string contactEmail,
         string? contactPhone,
         LocalizedText? displayName = null)
     {
+        Guard.Against.Default(id);
         Guard.Against.NullOrWhiteSpace(businessName);
         Guard.Against.NullOrWhiteSpace(contactEmail);
         Guard.Against.InvalidFormat(contactEmail, nameof(contactEmail),
             @"^[^@\s]+@[^@\s]+\.[^@\s]+$", "Contact email is not a valid email address.");
 
-        return new Host(Guid.CreateVersion7(), businessName, contactEmail, contactPhone, displayName);
+        return new Host(id, businessName, contactEmail, contactPhone, displayName);
     }
 
     public void UpdateContactInfo(string contactEmail, string? contactPhone)

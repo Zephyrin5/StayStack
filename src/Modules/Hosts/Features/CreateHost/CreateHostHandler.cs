@@ -14,7 +14,11 @@ public class CreateHostHandler(AppHostsDbContext dbContext, IOptions<Localizatio
             ? LocalizedText.Create(request.DisplayName, localizationSettings.Value.DefaultCulture)
             : null;
 
-        Host host = Host.Create(request.BusinessName, request.ContactEmail, request.ContactPhone, displayName);
+        // Generated here: this is the admin-facing create, with no cross-module
+        // retry story to make idempotent - unlike BecomeHost, whose id comes
+        // from a PendingHostLinkIntent recorded before the call.
+        Host host = Host.Create(
+            Guid.CreateVersion7(), request.BusinessName, request.ContactEmail, request.ContactPhone, displayName);
 
         dbContext.Hosts.Add(host);
         await dbContext.SaveChangesAsync(cancellationToken);

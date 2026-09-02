@@ -67,7 +67,7 @@ One EF subtlety this depends on: when the request carries on after its own commi
 
 A second request for a hold whose intent is already live gets a `ConflictException` (409), not a takeover. Adopting the existing intent would replay a redemption that may already hold the `(promotion_id, guest_email)` slot. The two conflict messages are distinguished by the existing row's `CreatedAt`: inside the grace window, a genuinely concurrent confirmation is in progress; outside it, a crashed one is awaiting cleanup - which is accurate rather than claiming something is "in progress" when nothing is.
 
-Note this differs from the shape a future Identity/`BecomeHost` version of this pattern should take, where adopting the pending row is correct because `RegisterHostAsync` can be made idempotent by caller-supplied id. Two shapes, one pattern, because the underlying resources differ: a hold is consumed exactly once by deliberate business rule (the exclusion constraint in ADR-0010 exists for that), while a `Host` row is not.
+Note this differs from the shape the Identity/`BecomeHost` version takes (now implemented - see the amendment below), where adopting the pending row is correct because `RegisterHostAsync` is idempotent by caller-supplied id. Two shapes, one pattern, because the underlying resources differ: a hold is consumed exactly once by deliberate business rule (the exclusion constraint in ADR-0010 exists for that), while a `Host` row is not.
 
 ### The reconcile job's claim must share a fate with its work
 
@@ -80,6 +80,57 @@ Note this differs from the shape a future Identity/`BecomeHost` version of this 
 The old job also covered a hold left `booked` behind a `Cancelled` booking. That coverage is now redundant: `CancelBookingHandler` writes `ReleaseHoldOutboxMessage` in the same `SaveChangesAsync` as `booking.Cancel()`, so the row is guaranteed durable, and `SweepDeadLetteredAsync` retries a dead-lettered row hourly with no terminal give-up. Generic outbox machinery covers it forever.
 
 Because this ADR makes that forever-retry load-bearing, its observability had to become real. Previously a sweep retry that failed again emitted nothing at all - `becameDeadLettered` is false by construction on a re-crossing, since `Attempts` is already past `MaxAttempts` - so a permanently-broken message looped hourly, invisibly. `OutboxTelemetry.DeadLetterRetried` plus a `Warning` now mark each such retry, with the existing `Error` + `DeadLettered` still reserved for the first crossing.
+
+## Amendment: BecomeHost, the last one
+
+`BecomeHostHandler` was the only remaining forward-half cross-module write in
+the codebase not covered by an intent row or an outbox row in the same
+transaction as its state change. It now is, using the shape this ADR predicted
+for it rather than the Bookings shape.
+
+Two distinct defects, both closed:
+
+**The unrecoverable window.** `RegisterHostAsync` commits a `Host` in Hosts'
+database before Identity writes anything. The `!updateResult.Succeeded` and
+failed-role branches compensate correctly through the outbox, but a hard
+process death between the two wrote nothing anywhere - no intent, no outbox
+row, and no reconcile job existed in Identity. The orphaned `Host` was
+permanent, with no row anywhere pointing at it.
+
+**The compounding retry.** `RegisterHostAsync` generated the id and returned
+it, so a client retrying after a timeout was indistinguishable from a first
+attempt: the `user.HostId is not null` guard still saw null, and each retry
+created another orphan. Three retries on a flaky connection left three.
+
+The fix, as written down here originally: a caller-supplied `hostId`,
+`RegisterHostAsync` as an upsert by that id, a `PendingHostLinkIntent` in
+Identity's own database keyed on it, and `ReconcileOrphanedHostLinkIntentsJob`
+calling `DeleteAsync`. Smaller than the Bookings version - there is no
+promotion leg, so one compensating call rather than two.
+
+Two details worth stating, because they are what make it correct rather than
+merely present:
+
+- **The intent delete is batched into `UserManager.UpdateAsync`'s own
+  `SaveChanges`.** `UserManager` resolves the same scoped
+  `AppIdentityDbContext`, so marking the intent `Remove`d *before* calling it
+  makes the delete and the `HostId` write commit atomically. That is what
+  makes it impossible for the job to delete a live `Host`: a linked user has
+  no surviving intent, and a surviving intent means the link never committed.
+  Resolving the intent separately, after the update, would open exactly the
+  window the job exists to close. This is the direct analogue of the tracked
+  delete in `ConfirmBookingHandler`.
+- **A retry reuses the existing intent's id** rather than allocating a new
+  one, which is what actually bounds the orphan count at one; the unique index
+  on `UserId` is the backstop for two attempts racing past that lookup, failing
+  the second insert before any cross-module call happens.
+
+Known remaining gap, recorded rather than fixed: a death after the `HostId`
+link commits but before `AddToRoleAsync` leaves a user linked to a real `Host`
+without the `Host` role. That is not an orphan - nothing is unreferenced - and
+it is not what this pattern addresses, but it does leave the user unable to
+retry, since the `AlreadyAHostException` guard now trips. Fixing it belongs
+with role assignment, not with intent records.
 
 ## Consequences
 
