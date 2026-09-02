@@ -8,6 +8,6 @@ public sealed class GetHostBookingsRequestValidator : Validator<GetHostBookingsR
     public GetHostBookingsRequestValidator()
     {
         RuleFor(x => x.Page).GreaterThanOrEqualTo(1);
-        RuleFor(x => x.PageSize).InclusiveBetween(1, PaginationExtensions.MaxPageSize);
+        RuleFor(x => x.PageSize).InclusiveBetween(1, PaginationDefaults.MaxPageSize);
     }
 }

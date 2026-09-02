@@ -10,5 +10,5 @@ namespace Reviews.Features.GetHostStayReviews;
 public record GetHostStayReviewsRequest : IRequest<PagedResponse<StayReviewSummary>>
 {
     public int Page { get; init; } = 1;
-    public int PageSize { get; init; } = PaginationExtensions.DefaultPageSize;
+    public int PageSize { get; init; } = PaginationDefaults.DefaultPageSize;
 }

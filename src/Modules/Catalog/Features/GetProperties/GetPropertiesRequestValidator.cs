@@ -8,7 +8,7 @@ public sealed class GetPropertiesRequestValidator : Validator<GetPropertiesReque
     public GetPropertiesRequestValidator()
     {
         RuleFor(x => x.Page).GreaterThanOrEqualTo(1);
-        RuleFor(x => x.PageSize).InclusiveBetween(1, PaginationExtensions.MaxPageSize);
+        RuleFor(x => x.PageSize).InclusiveBetween(1, PaginationDefaults.MaxPageSize);
 
         RuleFor(x => x.Guests).GreaterThan(0).When(x => x.Guests is not null);
 

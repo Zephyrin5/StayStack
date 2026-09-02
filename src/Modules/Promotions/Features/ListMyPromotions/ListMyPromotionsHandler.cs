@@ -2,6 +2,7 @@ using BuildingBlocks.Pagination;
 using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Persistence;
 using Promotions.Entities;
 namespace Promotions.Features.ListMyPromotions;
 

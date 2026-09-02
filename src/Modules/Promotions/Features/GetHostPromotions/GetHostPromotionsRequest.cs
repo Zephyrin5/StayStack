@@ -11,5 +11,5 @@ public record GetHostPromotionsRequest : IRequest<PagedResponse<PromotionSummary
 {
     public Guid HostId { get; init; }
     public int Page { get; init; } = 1;
-    public int PageSize { get; init; } = PaginationExtensions.DefaultPageSize;
+    public int PageSize { get; init; } = PaginationDefaults.DefaultPageSize;
 }

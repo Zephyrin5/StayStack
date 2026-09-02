@@ -4,6 +4,7 @@ using Catalog.Entities;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
+using Persistence;
 namespace Catalog.Features.GetProperties;
 
 public class GetPropertiesHandler(

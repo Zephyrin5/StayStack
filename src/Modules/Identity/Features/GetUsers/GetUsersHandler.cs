@@ -2,6 +2,7 @@ using BuildingBlocks.Pagination;
 using Identity.Entities;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Persistence;
 namespace Identity.Features.GetUsers;
 
 public class GetUsersHandler(AppIdentityDbContext dbContext) : IRequestHandler<GetUsersRequest, PagedResponse<UserSummary>>

@@ -8,5 +8,5 @@ namespace Promotions.Features.ListMyPromotions;
 public record ListMyPromotionsRequest : IRequest<PagedResponse<PromotionSummary>>
 {
     public int Page { get; init; } = 1;
-    public int PageSize { get; init; } = PaginationExtensions.DefaultPageSize;
+    public int PageSize { get; init; } = PaginationDefaults.DefaultPageSize;
 }

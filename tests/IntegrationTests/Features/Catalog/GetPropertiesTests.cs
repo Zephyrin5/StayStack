@@ -291,7 +291,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         Guid secondHostPropertyId = await CreatePropertyAsync(secondHostToken, city);
 
         HttpResponseMessage response = await _client.GetAsync(
-            $"/api/catalog/properties?HostId={firstHostId}&City={city}&PageSize={PaginationExtensions.MaxPageSize}", TestContext.Current.CancellationToken);
+            $"/api/catalog/properties?HostId={firstHostId}&City={city}&PageSize={PaginationDefaults.MaxPageSize}", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

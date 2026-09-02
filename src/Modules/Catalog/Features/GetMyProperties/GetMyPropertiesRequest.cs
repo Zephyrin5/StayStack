@@ -11,5 +11,5 @@ namespace Catalog.Features.GetMyProperties;
 public record GetMyPropertiesRequest : IRequest<PagedResponse<PropertySummary>>
 {
     public int Page { get; init; } = 1;
-    public int PageSize { get; init; } = PaginationExtensions.DefaultPageSize;
+    public int PageSize { get; init; } = PaginationDefaults.DefaultPageSize;
 }

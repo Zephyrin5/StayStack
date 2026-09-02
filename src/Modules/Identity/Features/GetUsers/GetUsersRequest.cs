@@ -6,5 +6,5 @@ public record GetUsersRequest : IRequest<PagedResponse<UserSummary>>
 {
     public string? Role { get; init; }
     public int Page { get; init; } = 1;
-    public int PageSize { get; init; } = PaginationExtensions.DefaultPageSize;
+    public int PageSize { get; init; } = PaginationDefaults.DefaultPageSize;
 }

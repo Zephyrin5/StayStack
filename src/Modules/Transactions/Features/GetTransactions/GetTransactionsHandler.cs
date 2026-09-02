@@ -1,6 +1,7 @@
 using BuildingBlocks.Pagination;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Persistence;
 using Transactions.Entities;
 namespace Transactions.Features.GetTransactions;
 

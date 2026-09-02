@@ -4,6 +4,7 @@ using BuildingBlocks.Pagination;
 using Catalog.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Persistence;
 namespace Bookings.Features.GetMyBookings;
 
 public class GetMyBookingsHandler(

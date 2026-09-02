@@ -5,6 +5,7 @@ using Catalog.Features.GetProperties;
 using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Persistence;
 namespace Catalog.Features.GetHostProperties;
 
 public class GetHostPropertiesHandler(

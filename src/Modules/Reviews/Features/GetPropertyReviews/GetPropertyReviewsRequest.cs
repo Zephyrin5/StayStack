@@ -7,5 +7,5 @@ public record GetPropertyReviewsRequest : IRequest<GetPropertyReviewsResponse>
 {
     public Guid PropertyId { get; init; }
     public int Page { get; init; } = 1;
-    public int PageSize { get; init; } = PaginationExtensions.DefaultPageSize;
+    public int PageSize { get; init; } = PaginationDefaults.DefaultPageSize;
 }

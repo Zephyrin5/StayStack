@@ -4,6 +4,7 @@ using Catalog.Contracts;
 using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Persistence;
 namespace Bookings.Features.GetHostBookings;
 
 public class GetHostBookingsHandler(
