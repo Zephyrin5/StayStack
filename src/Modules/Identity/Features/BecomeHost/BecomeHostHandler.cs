@@ -110,7 +110,22 @@ public class BecomeHostHandler(
             // smaller price than deleting a live one.
             if (updateResult.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.ConcurrencyFailure)))
             {
-                throw new AlreadyAHostException();
+                // Ask rather than infer. ConcurrencyFailure only says the user
+                // row changed under this request - it does not say who changed
+                // it or why. Another BecomeHost winning is one cause; a
+                // concurrent profile or role edit is another, and telling
+                // someone they are "already a host" because they happened to
+                // rename themselves mid-request is simply false.
+                bool alreadyLinked = await dbContext.Users.AsNoTracking()
+                    .AnyAsync(u => u.Id == userId && u.HostId != null, cancellationToken);
+
+                if (alreadyLinked)
+                {
+                    throw new AlreadyAHostException();
+                }
+
+                throw new ConflictException(
+                    "This account was modified while the request was in progress. Please try again.");
             }
 
             throw new ValidationException(
@@ -156,14 +171,38 @@ public class BecomeHostHandler(
 
         if (!roleResult.Succeeded)
         {
-            // Un-stage the pending intent delete before compensating: the
-            // unlink below is a SaveChanges on this same context and would
-            // otherwise carry it along, dropping the marker at exactly the
-            // moment the compensation might fail.
-            dbContext.Entry(intent).State = EntityState.Unchanged;
+            // Did the ROLE fail, or did our own intent delete? AddToRoleAsync's
+            // save carries that staged delete, so if ReconcileOrphanedHostLink-
+            // IntentsJob claimed this intent while the request was still in
+            // flight past the grace period, the delete matches zero rows and
+            // UserStore reports it as a plain ConcurrencyFailure on roleResult -
+            // indistinguishable from a genuine role failure by the code alone.
+            //
+            // Read before the Clear below, while `intent` is still usable.
+            bool intentReclaimed = !await dbContext.PendingHostLinkIntents.AsNoTracking()
+                .AnyAsync(i => i.Id == intent.Id, cancellationToken);
 
-            user.HostId = null;
-            IdentityResult unlinkResult = await userManager.UpdateAsync(user);
+            // Compensate against FRESH state, not the tracked graph this
+            // request has been mutating. AddToRoleAsync's failed save left
+            // `user` holding a concurrency stamp the database never accepted
+            // and a role entry that was rolled back, so re-using it made the
+            // unlink below fail too - which then took the "leave it for the
+            // job" path, at the one moment the job has nothing left to act on.
+            // Clearing also drops the staged intent delete, which must not ride
+            // along on the compensating save.
+            dbContext.ChangeTracker.Clear();
+
+            ApplicationUser? current = await userManager.FindByIdAsync(userId.ToString());
+
+            // Only unlink what this attempt linked. If the row already points
+            // somewhere else - the reconcile job cleared it, or another attempt
+            // linked a different host - it is not ours to touch.
+            IdentityResult unlinkResult = IdentityResult.Success;
+            if (current is not null && current.HostId == hostId)
+            {
+                current.HostId = null;
+                unlinkResult = await userManager.UpdateAsync(current);
+            }
 
             if (!unlinkResult.Succeeded)
             {
@@ -177,14 +216,17 @@ public class BecomeHostHandler(
                 // So: no host deletion, and the intent stays. The reconcile
                 // job owns it from here, unlinking and deleting together, and
                 // retrying every run until both land.
+                if (intentReclaimed)
+                {
+                    throw new ConflictException(
+                        "This request took longer than the recovery window allows and was rolled back. Please try again.");
+                }
+
                 throw new ValidationException(
                     "Role",
                     string.Join(" ", roleResult.Errors.Select(e => e.Description)));
             }
 
-            // Same ChangeTracker.Clear() as the branch above - the unlink
-            // succeeded, so this is uniformity rather than necessity.
-            dbContext.ChangeTracker.Clear();
             OutboxMessage deleteHostRow = dispatcher.Enqueue(
                 new DeleteHostOutboxMessage(hostId), IdentityJsonSerializerContext.Default.DeleteHostOutboxMessage);
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -193,6 +235,12 @@ public class BecomeHostHandler(
             // Only now: the user is unlinked and the deletion is durable, so
             // nothing is left for the job to reconcile.
             await DiscardIntentAsync();
+
+            if (intentReclaimed)
+            {
+                throw new ConflictException(
+                    "This request took longer than the recovery window allows and was rolled back. Please try again.");
+            }
 
             throw new ValidationException(
                 "Role",

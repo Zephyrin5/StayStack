@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Hosting;
 using Bogus;
 using Hosts;
 using Hosts.Contracts;
@@ -19,6 +21,85 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();
+
+    [Fact]
+    public async Task BecomeHost_WhenTheReconcileJobReclaimsTheIntentMidRequest_SaysSoRatherThanBlamingTheRole()
+    {
+        // A request still in flight past the ten-minute grace period can have
+        // its intent claimed by ReconcileOrphanedHostLinkIntentsJob. The staged
+        // intent delete then matches zero rows inside AddToRoleAsync's save,
+        // and UserStore reports that as a plain ConcurrencyFailure on
+        // roleResult - indistinguishable, by code alone, from the role genuinely
+        // failing to assign.
+        //
+        // The compensations are correct either way; only the message was wrong.
+        // Reporting a role-assignment error here sends someone hunting through
+        // seed data for what is really just a timeout.
+        //
+        // Driven through a real seam rather than simulated: RegisterHostAsync
+        // runs after the intent is opened and before the delete is staged,
+        // which is exactly where the job's claim lands.
+        (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
+
+        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                ServiceDescriptor original = services.Single(d => d.ServiceType == typeof(IHostRegistrar));
+                services.Remove(original);
+                services.Add(new ServiceDescriptor(
+                    typeof(IHostRegistrar),
+                    sp => new ReclaimIntentOnRegister(
+                        (IHostRegistrar)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!),
+                        () => DeleteIntentForAsync(userId)),
+                    original.Lifetime));
+            }));
+
+        using HttpClient client = host.CreateClient();
+        HttpResponseMessage response = await client.SendAsync(
+            CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken);
+
+        // 409, not the 400 a role validation failure produces.
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        string body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("recovery window", body);
+
+        // And specifically NOT the two wrong answers: a role problem, or
+        // "you are already a host" when they plainly are not.
+        Assert.DoesNotContain("already linked to a host", body);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+        ApplicationUser user = await identity.Users.AsNoTracking()
+            .SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
+
+        // Compensation still ran: the caller is left exactly as they started.
+        Assert.Null(user.HostId);
+    }
+
+    private async Task DeleteIntentForAsync(Guid userId)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+        await identity.PendingHostLinkIntents
+            .Where(i => i.UserId == userId)
+            .ExecuteDeleteAsync();
+    }
+
+    // Stands in for the reconcile job claiming the intent, at the one point in
+    // the production call order where that claim actually lands.
+    private sealed class ReclaimIntentOnRegister(IHostRegistrar inner, Func<Task> onRegister) : IHostRegistrar
+    {
+        public async Task RegisterHostAsync(
+            Guid hostId, string businessName, string contactEmail, string? contactPhone, CancellationToken cancellationToken)
+        {
+            await inner.RegisterHostAsync(hostId, businessName, contactEmail, contactPhone, cancellationToken);
+            await onRegister();
+        }
+
+        public Task DeleteAsync(Guid hostId, CancellationToken cancellationToken) =>
+            inner.DeleteAsync(hostId, cancellationToken);
+    }
 
     [Fact]
     public async Task BecomeHost_ConcurrentRequestsFromTheSameUser_ProduceOneHostAndNoServerError()
