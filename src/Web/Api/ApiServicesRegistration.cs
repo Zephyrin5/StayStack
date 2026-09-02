@@ -62,10 +62,37 @@ public static class ApiServicesRegistration
             });
         });
 
+        // Bound here, and this registration was missing entirely. Handlers
+        // across every module inject IOptions<LocalizationSettings> to know
+        // which culture LocalizedText.Create requires - and IOptions<T>
+        // resolves whether or not anything configured T, handing back a
+        // default-constructed instance. Because the type's own defaults
+        // matched appsettings, nothing looked wrong while the section went
+        // unread. Changing App:Localization:DefaultCulture would have moved
+        // culture negotiation below without moving what LocalizedText demands,
+        // so one setting would have meant two different things.
+        services.Configure<LocalizationSettings>(
+            configuration.AppSection(LocalizationSettings.SectionName));
+
+        // The same bound shape feeds the request pipeline, rather than reading
+        // the same keys again as raw strings. That duplication is what let the
+        // two drift apart in the first place, and it was the only caller of
+        // AppConfiguration.AppValue - a string-path helper with no
+        // compile-time safety, where a typo silently returned null and fell
+        // through to the ?? default. It is gone with its last caller.
+        LocalizationSettings localization =
+            configuration.AppSection(LocalizationSettings.SectionName).Get<LocalizationSettings>()
+            ?? new LocalizationSettings();
+
         services.Configure<RequestLocalizationOptions>(options =>
         {
-            string[] supportedCultures = configuration.AppSection("Localization:SupportedCultures").Get<string[]>() ?? ["en", "ar"];
-            options.SetDefaultCulture(configuration.AppValue("Localization:DefaultCulture") ?? "en")
+            // The fallback lives here rather than as an initializer on the
+            // type - see LocalizationSettings.SupportedCultures for why one
+            // there cannot be overridden, only added to.
+            string[] supportedCultures = localization.SupportedCultures.Length > 0
+                ? localization.SupportedCultures
+                : ["en", "ar"];
+            options.SetDefaultCulture(localization.DefaultCulture)
                 .AddSupportedCultures(supportedCultures)
                 .AddSupportedUICultures(supportedCultures);
             options.RequestCultureProviders =

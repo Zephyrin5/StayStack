@@ -38,14 +38,16 @@ public static class AppConfiguration
     ///     section's own name (usually its options type's
     ///     <c>SectionName</c>), never the prefix - so the prefix can change in
     ///     one edit rather than however many <c>GetSection</c> calls exist.
+    ///     <para>
+    ///         Sections only, deliberately. There was an AppValue counterpart
+    ///         for reading one key by string path, and nothing checked the
+    ///         spelling: a typo returned null and fell through to whatever
+    ///         default the call site supplied. Binding a section to an options
+    ///         type moves that to compile-time - property names are checked,
+    ///         and the section name is a const on the type. If a single value
+    ///         is ever wanted again, it is still worth an options type.
+    ///     </para>
     /// </summary>
     public static IConfigurationSection AppSection(this IConfiguration configuration, string name) =>
         configuration.GetSection($"{RootSection}:{name}");
-
-    /// <summary>
-    ///     Reads a single value from one of this application's sections, for
-    ///     the cases that want one key rather than a bound object.
-    /// </summary>
-    public static string? AppValue(this IConfiguration configuration, string path) =>
-        configuration[$"{RootSection}:{path}"];
 }
