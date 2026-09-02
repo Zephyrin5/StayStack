@@ -30,35 +30,45 @@ public class ListMyReviewableBookingsHandler(
         IReadOnlyList<BookingAccessResult> confirmedBookings =
             await bookingLookup.GetConfirmedBookingsForCustomerAsync(customerId, cancellationToken);
 
-        // Per booking, not once for the whole list. These bookings can span
-        // properties in different zones, so a single "today" is structurally
-        // wrong here regardless of which zone it is computed in - and the
-        // filter runs before any unit is loaded, so the booking's own
-        // snapshot is the only thing available. See docs/adr/0018.
+        // One instant for the whole request, converted per booking's own zone.
+        // The ZONE has to be per booking - these span properties in different
+        // ones, so a single "today" would be structurally wrong, and the filter
+        // runs before any unit is loaded so the booking's snapshot is all there
+        // is (docs/adr/0018). The INSTANT does not: reading the clock per
+        // booking meant one list could be evaluated against several "now"s.
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        int reviewWindowDays = policy.Value.ReviewWindowDaysAfterCheckOut;
+
         // Both bounds, so this list never offers a review CreateStayReview
         // would then reject - the same "UI must agree with the API" rule the
         // lower bound already had.
         bool IsReviewable(BookingAccessResult b)
         {
-            DateOnly today = PropertyTimeZone.Today(timeProvider, b.TimeZoneId);
-            return b.CheckOut <= today
-                   && today <= b.CheckOut.AddDays(policy.Value.ReviewWindowDaysAfterCheckOut);
+            DateOnly today = PropertyTimeZone.ToLocalDate(now, b.TimeZoneId);
+            return b.CheckOut <= today && today <= b.CheckOut.AddDays(reviewWindowDays);
         }
 
-        List<Guid> pastBookingIds = confirmedBookings
-            .Where(IsReviewable)
-            .Select(b => b.BookingId)
-            .ToList();
+        // Materialized once and reused. This used to be evaluated twice over
+        // the whole list - once to build the ids to check for existing
+        // reviews, then again alongside that check - which did the timezone
+        // resolution for every booking twice over an unbounded history.
+        //
+        // It also removed a real, if remote, hazard: the two passes each read
+        // the clock, so they could straddle a local midnight and disagree
+        // about the same booking. A booking crossing INTO the window between
+        // them would appear in the result without its review status ever
+        // having been queried.
+        List<BookingAccessResult> candidates = [.. confirmedBookings.Where(IsReviewable)];
+        List<Guid> candidateIds = [.. candidates.Select(b => b.BookingId)];
 
         HashSet<Guid> alreadyReviewedBookingIds = (await dbContext.StayReviews
             .AsNoTracking()
-            .Where(r => pastBookingIds.Contains(r.BookingId))
+            .Where(r => candidateIds.Contains(r.BookingId))
             .Select(r => r.BookingId)
             .ToListAsync(cancellationToken)).ToHashSet();
 
-        List<BookingAccessResult> reviewable = confirmedBookings
-            .Where(b => IsReviewable(b) && !alreadyReviewedBookingIds.Contains(b.BookingId))
-            .ToList();
+        List<BookingAccessResult> reviewable =
+            [.. candidates.Where(b => !alreadyReviewedBookingIds.Contains(b.BookingId))];
 
         // One batched lookup for every distinct unit, not one call per
         // booking - same reasoning as GetMyBookingsHandler.
