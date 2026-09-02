@@ -21,4 +21,15 @@ public static class BookingsTelemetry
     public static readonly Counter<long> OrphanedIntentReconciled = Meter.CreateCounter<long>(
         "bookings.orphaned_intents.reconciled",
         description: "Number of orphaned booking intents whose hold was released and redemption reversed.");
+
+    /// <summary>
+    ///     The counterpart to OrphanedIntentReconciled, and the reason it is not
+    ///     enough on its own: a run where every row throws reports zero
+    ///     reconciliations, which reads exactly like a run with nothing to do.
+    ///     Alert on this being non-zero and sustained - a row that fails every
+    ///     run is stuck, and the job will keep finding it first.
+    /// </summary>
+    public static readonly Counter<long> OrphanedIntentReconcileFailed = Meter.CreateCounter<long>(
+        "bookings.orphaned_intents.reconcile_failed",
+        description: "Number of booking intents whose reconciliation threw and was skipped for this run.");
 }

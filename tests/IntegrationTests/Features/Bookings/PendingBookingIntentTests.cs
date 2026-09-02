@@ -445,8 +445,16 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
             timeProvider,
             scope.ServiceProvider.GetRequiredService<ILogger<ReconcileOrphanedBookingIntentsJob>>());
 
-        await Assert.ThrowsAnyAsync<InvalidOperationException>(() =>
-            job.ReconcileAsync(null!, TestContext.Current.CancellationToken));
+        // The run completes rather than propagating. It used to rethrow, and
+        // this asserted that - but the throw was incidental to what this test
+        // is named for: a failed compensation must leave the intent behind for
+        // the next run, which is the assertion below and is unchanged.
+        //
+        // Swallowing it per item is the point: the exception escaping here
+        // abandoned every candidate queued behind this one, and nothing it can
+        // throw is classified transient, so EnableRetryOnFailure never absorbed
+        // it either.
+        await job.ReconcileAsync(null!, TestContext.Current.CancellationToken);
 
         Assert.NotNull(await GetIntentAsync(holdId));
     }

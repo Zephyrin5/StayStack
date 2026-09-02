@@ -70,7 +70,28 @@ public partial class ReconcileOrphanedHostLinkIntentsJob(
 
         foreach (Guid intentId in candidateIds)
         {
-            await ClaimAndReconcileAsync(intentId, cancellationToken);
+            // Per item, so one bad row does not end the batch. Nothing here is
+            // classified transient, so EnableRetryOnFailure does not absorb it:
+            // a DbUpdateConcurrencyException - the realistic one, from a row
+            // changing under this claim - would propagate straight out of
+            // ReconcileAsync and abandon every candidate after it.
+            //
+            // Throughput rather than correctness, since the survivors are found
+            // again on the next run. But the next run is five minutes later and
+            // hits the same row first, so a single persistently-conflicting
+            // intent could starve everything behind it indefinitely.
+            //
+            // Cancellation is deliberately NOT swallowed: on shutdown this
+            // should stop, not log a failure per remaining candidate.
+            try
+            {
+                await ClaimAndReconcileAsync(intentId, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                IdentityTelemetry.OrphanedHostLinkIntentReconcileFailed.Add(1);
+                LogReconcileFailed(logger, intentId, ex);
+            }
         }
     }
 
@@ -189,6 +210,10 @@ public partial class ReconcileOrphanedHostLinkIntentsJob(
             LogReconciled(logger, intentId);
         }
     }
+
+    [LoggerMessage(LogLevel.Error,
+        "Failed to reconcile orphaned intent {IntentId}; the batch continued and the next run will retry it. A row failing every run is stuck and needs a look")]
+    private static partial void LogReconcileFailed(ILogger logger, Guid intentId, Exception exception);
 
     [LoggerMessage(LogLevel.Warning,
         "ReconcileOrphanedHostLinkIntents hit its per-run cap of {MaxResultsPerRun} candidates - orphans may be arriving faster than this job clears them")]

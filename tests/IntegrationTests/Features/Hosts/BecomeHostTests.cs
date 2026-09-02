@@ -302,6 +302,89 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task Reconcile_WhenOneIntentThrows_StillProcessesTheRest()
+    {
+        // The loop had no per-item guard, and nothing it can throw is
+        // classified transient - so EnableRetryOnFailure would not absorb it
+        // and the exception ended the whole run, abandoning every candidate
+        // behind the failing one. The next run five minutes later meets the
+        // same row first, so one persistently-conflicting intent could starve
+        // the queue indefinitely.
+        //
+        // Driven by a registrar that throws for one specific host id: the
+        // job's only cross-module call, and the realistic place a single row
+        // fails while its neighbours are fine.
+        (Guid poisonUserId, _) = await SeedAndSignInUserAsync();
+        (Guid healthyUserId, _) = await SeedAndSignInUserAsync();
+
+        Guid poisonHostId = Guid.CreateVersion7();
+        Guid healthyHostId = Guid.CreateVersion7();
+
+        await SeedAbandonedIntentAsync(poisonUserId, poisonHostId);
+        await SeedAbandonedIntentAsync(healthyUserId, healthyHostId);
+
+        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                ServiceDescriptor original = services.Single(d => d.ServiceType == typeof(IHostRegistrar));
+                services.Remove(original);
+                services.Add(new ServiceDescriptor(
+                    typeof(IHostRegistrar),
+                    sp => new ThrowForOneHost(
+                        (IHostRegistrar)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!),
+                        poisonHostId),
+                    original.Lifetime));
+            }));
+
+        using (IServiceScope jobScope = host.Services.CreateScope())
+        {
+            ReconcileOrphanedHostLinkIntentsJob job = ActivatorUtilities
+                .CreateInstance<ReconcileOrphanedHostLinkIntentsJob>(jobScope.ServiceProvider);
+
+            // The run itself must not throw - that was the defect.
+            await job.ReconcileAsync(default!, TestContext.Current.CancellationToken);
+        }
+
+        // The failing row is untouched and will be retried next run.
+        Assert.True(await HostExistsAsync(poisonHostId));
+        Assert.True(await IntentExistsAsync(poisonHostId));
+
+        // And the one behind it was still processed, which is the point.
+        Assert.False(await HostExistsAsync(healthyHostId));
+        Assert.False(await IntentExistsAsync(healthyHostId));
+    }
+
+    private async Task SeedAbandonedIntentAsync(Guid userId, Guid hostId)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+        identity.PendingHostLinkIntents.Add(new PendingHostLinkIntent
+        {
+            Id = hostId,
+            UserId = userId,
+            CreatedAt = DateTimeOffset.UtcNow - PendingHostLinkIntent.ReconcileGrace.Add(TimeSpan.FromMinutes(1))
+        });
+        await identity.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await scope.ServiceProvider.GetRequiredService<IHostRegistrar>().RegisterHostAsync(
+            hostId, "Abandoned Co", "abandoned@example.com", null, TestContext.Current.CancellationToken);
+    }
+
+    // Fails one host id and passes everything else through, so the batch has a
+    // genuine mix rather than an all-or-nothing outcome.
+    private sealed class ThrowForOneHost(IHostRegistrar inner, Guid poisonHostId) : IHostRegistrar
+    {
+        public Task RegisterHostAsync(
+            Guid hostId, string businessName, string contactEmail, string? contactPhone, CancellationToken cancellationToken) =>
+            inner.RegisterHostAsync(hostId, businessName, contactEmail, contactPhone, cancellationToken);
+
+        public Task DeleteAsync(Guid hostId, CancellationToken cancellationToken) =>
+            hostId == poisonHostId
+                ? throw new InvalidOperationException("Hosts is unreachable for this row.")
+                : inner.DeleteAsync(hostId, cancellationToken);
+    }
+
+    [Fact]
     public async Task BecomeHost_WhenTheIntentIsStillInsideTheGracePeriod_TheJobLeavesItAlone()
     {
         // The other half: a slow-but-healthy request must not have its Host

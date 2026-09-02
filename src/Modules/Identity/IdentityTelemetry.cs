@@ -21,4 +21,15 @@ public static class IdentityTelemetry
     public static readonly Counter<long> OrphanedHostLinkIntentReconciled = Meter.CreateCounter<long>(
         "identity.orphaned_host_link_intents.reconciled",
         description: "Number of orphaned host-link intents whose registered Host was deleted.");
+
+    /// <summary>
+    ///     The counterpart to OrphanedHostLinkIntentReconciled, and the reason it is not
+    ///     enough on its own: a run where every row throws reports zero
+    ///     reconciliations, which reads exactly like a run with nothing to do.
+    ///     Alert on this being non-zero and sustained - a row that fails every
+    ///     run is stuck, and the job will keep finding it first.
+    /// </summary>
+    public static readonly Counter<long> OrphanedHostLinkIntentReconcileFailed = Meter.CreateCounter<long>(
+        "identity.orphaned_host_link_intents.reconcile_failed",
+        description: "Number of host-link intents whose reconciliation threw and was skipped for this run.");
 }
