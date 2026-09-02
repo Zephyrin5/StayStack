@@ -150,13 +150,33 @@ public class ConfirmBookingHandler(
             // anyway for zero benefit would overcharge the guest and burn
             // their code for nothing.
             //
-            // Deliberately outside the try/catch above and its hold-release -
-            // unlike a genuinely broken code, this one IS valid, and the
-            // guest did nothing wrong. Only the redemption gets reversed;
-            // the hold stays 'booked' so a retried Confirm can still use
-            // it, rather than losing the 15-minute window and, with the
-            // exclusion constraint (docs/adr/0010), possibly the dates
-            // themselves.
+            // Compensates exactly like the redemption-failure branch above:
+            // release the hold AND reverse the redemption. Both are
+            // post-ConfirmHoldAsync failures of the same operation, so they
+            // owe the same cleanup.
+            //
+            // This branch used to reverse the redemption only, on the
+            // reasoning that the code was valid and the guest did nothing
+            // wrong, so "the hold stays 'booked' so a retried Confirm can
+            // still use it". That premise is false: ConfirmHoldAsync updates
+            // WHERE status = 'held', so a 'booked' hold yields no row and a
+            // retry gets NotFoundException. The hold was not being preserved
+            // for the guest, it was being stranded - and nothing else would
+            // ever collect it. ExpiredHoldsSweepJob only deletes
+            // status = 'held'; ReconcileOrphanedBookingIntentsJob works from
+            // intents, which DiscardIntentAsync below then removes; and the
+            // job that used to scan for booked holds with no booking is gone
+            // (docs/adr/0017). The unit's dates would be blocked forever,
+            // with no row anywhere pointing at them - reached by nothing more
+            // exotic than a guest typing a coupon that doesn't beat their
+            // length-of-stay discount.
+            //
+            // Releasing does cost the guest their 15-minute window, since
+            // ReleaseHoldAsync resets hold_expires_at to now. That is the
+            // right trade against blocking the dates permanently, and it is
+            // recoverable: the expired row no longer blocks a re-hold, because
+            // HoldAvailabilityHandler's own per-unit cleanup DELETE removes
+            // stale 'held' rows before its INSERT.
             //
             // <= 0 as well as the no-savings case above. ComputeDiscountAmount
             // caps a discount at the subtotal, so a 100% code - or any
@@ -169,13 +189,21 @@ public class ConfirmBookingHandler(
             // rather than a domain guard's.
             if (discountedPrice.Amount <= 0m || discountedPrice.Amount >= hold.TotalPrice.Amount)
             {
+                OutboxMessage releaseHoldRow = dispatcher.Enqueue(
+                    new ReleaseHoldOutboxMessage(request.HoldId), BookingsJsonSerializerContext.Default.ReleaseHoldOutboxMessage);
                 OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
                     new ReverseRedemptionOutboxMessage(bookingId), BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
+
                 await dbContext.SaveChangesAsync(cancellationToken);
+                await dispatcher.TryDispatchAsync(releaseHoldRow, cancellationToken);
                 await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
 
-                // The hold deliberately stays 'booked' (see above), so the
-                // intent has to go - otherwise the job would release it.
+                // After the compensating save, deliberately - same ordering
+                // and same reasoning as the branch above: a crash between the
+                // two leaves the intent alive and the job repeats these
+                // (idempotent) compensations, which is safe. Discarding first
+                // would remove the marker before the compensations were
+                // durable.
                 await DiscardIntentAsync();
 
                 throw new ValidationException(

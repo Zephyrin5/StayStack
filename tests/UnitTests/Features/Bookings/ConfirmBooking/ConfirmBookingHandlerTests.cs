@@ -215,7 +215,7 @@ public class ConfirmBookingHandlerPromoPricingTests : IDisposable
     }
 
     [Fact]
-    public async Task Handle_WhenRedeemedDiscountIsSmallerThanTheLengthOfStayDiscountItReplaces_RejectsTheCodeButKeepsTheHold()
+    public async Task Handle_WhenRedeemedDiscountIsSmallerThanTheLengthOfStayDiscountItReplaces_RejectsTheCodeAndReleasesTheHold()
     {
         // Reproduces the reported bug: a hold quoted at 180 KWD (200
         // subtotal, 20 KWD LOS discount already applied), with a 5 KWD
@@ -223,11 +223,17 @@ public class ConfirmBookingHandlerPromoPricingTests : IDisposable
         // subtotal - naive arithmetic gives 200 - 5 = 195, MORE than the
         // 180 KWD the guest already saw. Rather than silently falling back
         // to 180 (burning the code for zero benefit), the code is rejected
-        // outright: a promoCode validation error, and the redemption
-        // already created is reversed. Unlike a genuinely invalid code,
-        // the hold must NOT be released - the code was real and valid, so
-        // the guest shouldn't lose their 15-minute hold just for trying
-        // one that didn't beat their LOS discount.
+        // outright: a promoCode validation error, the redemption already
+        // created is reversed, AND the hold is released.
+        //
+        // This test used to assert the opposite - ReleaseHoldAsync Times.Never
+        // - on the reasoning that the code was valid so the guest shouldn't
+        // lose their hold. It pinned a bug. ConfirmHoldAsync only matches
+        // WHERE status = 'held', so the 'booked' hold this leaves behind can
+        // never be confirmed by a retry, and nothing else collects it either:
+        // the expiry sweep only sees 'held' rows, and the intent that would
+        // have led a reconcile job to it is discarded on this very path. The
+        // dates were blocked permanently.
         Guid holdId = Guid.NewGuid();
         ConfirmedHold hold = new ConfirmedHold
         {
@@ -293,7 +299,8 @@ public class ConfirmBookingHandlerPromoPricingTests : IDisposable
         // form ("promoCode") over HTTP.
         Assert.Contains(nameof(request.PromoCode), validationException.Errors.Keys);
 
-        holdConfirmationMock.Verify(x => x.ReleaseHoldAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        // Both compensations, exactly as the redemption-failure branch does.
+        holdConfirmationMock.Verify(x => x.ReleaseHoldAsync(holdId, It.IsAny<CancellationToken>()), Times.Once);
         promotionRedemptionMock.Verify(x => x.ReverseRedemptionAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 }
