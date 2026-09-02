@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Options;
-using BuildingBlocks.Policies;
 using Bogus;
 using Bookings;
 using Bookings.Entities;
@@ -27,6 +26,7 @@ using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Bookings.Contracts;
 namespace IntegrationTests.Features.Reviews;
 
 // Exercises the guest-facing stay-review slices end-to-end. A real

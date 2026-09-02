@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Options;
-using BuildingBlocks.Policies;
 using Bookings.Entities;
 using Bookings.Features.Common;
 using Microsoft.EntityFrameworkCore;
+using Bookings.Contracts;
 namespace Bookings.Contracts;
 
 // internal, same reasoning as Catalog.Contracts.UnitLookup - Transactions/

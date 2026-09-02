@@ -1,12 +1,20 @@
-namespace BuildingBlocks.Policies;
+namespace Bookings.Contracts;
 
 /// <summary>
 ///     Two post-stay deadlines that have to be set together, and used to be
 ///     one number doing both jobs.
 ///     <para>
-///         Lives in BuildingBlocks because Bookings and Reviews both need it
-///         and neither may reference the other (docs/adr/0004). Five places
-///         decide something from these values -
+///         Lives in Bookings.Contracts because it is a Bookings concept:
+///         checkout dates, review windows and management-token lifetimes have
+///         business meaning, and BuildingBlocks is otherwise Exceptions,
+///         Identity, Localization, Observability, Pagination, Security and
+///         Time - things with none. It started there on the reasoning that
+///         Bookings and Reviews both need it and neither may reference the
+///         other (docs/adr/0004), which is true of the first half only:
+///         Reviews already references Bookings.Contracts for IBookingLookup
+///         and BookingAccessResult, so this home costs nothing and keeps
+///         booking-lifecycle rules off every future module's dependency graph.
+///         Five places decide something from these values -
 ///         <c>CreateStayReviewHandler</c>, <c>CreateGuestReviewHandler</c>,
 ///         <c>ListMyReviewableBookingsHandler</c>,
 ///         <c>GetBookingForManagementHandler</c>'s <c>CanReview</c>, and

@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Options;
-using BuildingBlocks.Policies;
 using Bookings.Entities;
 using Bookings.Features.Common;
 using Bookings.Outbox;
@@ -12,6 +11,7 @@ using Outbox;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using Transactions.Contracts;
+using Bookings.Contracts;
 namespace Bookings.Features.CancelBooking;
 
 public class CancelBookingHandler(

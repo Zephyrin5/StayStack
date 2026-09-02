@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Options;
-using BuildingBlocks.Policies;
 using Bookings.Contracts;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Time;

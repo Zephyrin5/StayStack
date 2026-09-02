@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Options;
-using BuildingBlocks.Policies;
 using Availability.Contracts;
 using Bookings;
 using Bookings.Entities;
@@ -16,6 +15,7 @@ using Promotions.Contracts;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using Transactions.Contracts;
+using Bookings.Contracts;
 namespace UnitTests.Features.Bookings.CancelBooking;
 
 // Proves the fix for a response that couldn't distinguish "nothing to

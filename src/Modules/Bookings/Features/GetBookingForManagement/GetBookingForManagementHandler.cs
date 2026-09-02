@@ -1,11 +1,11 @@
 using Microsoft.Extensions.Options;
-using BuildingBlocks.Policies;
 using Bookings.Entities;
 using Bookings.Features.Common;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using BuildingBlocks.Time;
 using Mediator;
+using Bookings.Contracts;
 namespace Bookings.Features.GetBookingForManagement;
 
 public class GetBookingForManagementHandler(

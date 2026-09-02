@@ -1,3 +1,4 @@
+using Bookings.Contracts;
 using Bookings.Entities;
 using BuildingBlocks.Security;
 using BuildingBlocks.Time;

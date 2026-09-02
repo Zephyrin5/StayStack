@@ -11,6 +11,11 @@
              references EF Core transitively via Persistence, so this isn't
              a new dependency in practice, just a direct one. -->
         <PackageReference Include="Microsoft.EntityFrameworkCore"/>
+        <!-- For AppConfiguration's IConfiguration extensions - configuration
+             plumbing every module uses, with no business meaning, which is
+             what this project is for. It arrived with that helper, not with
+             the booking-lifecycle options that briefly lived here and have
+             since moved to Bookings.Contracts. -->
         <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions"/>
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
     </ItemGroup>
