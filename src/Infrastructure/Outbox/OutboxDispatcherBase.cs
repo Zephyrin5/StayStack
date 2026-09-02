@@ -16,14 +16,44 @@ namespace Outbox;
 ///         caller's own source-generated JsonSerializerContext.
 ///     </para>
 ///     <para>
+///         <b>Delivery is at-least-once, and handlers MUST be idempotent.</b>
+///         This is a hard requirement of the contract, not a property of the
+///         handlers that happen to exist today - see TryHandleAsync for the
+///         three distinct ways one message reaches a handler more than once.
+///         An earlier version of this comment said the handlers "happen to
+///         be idempotent, but that's not something this should keep relying
+///         on", which read as if the row lock below were on its way to
+///         removing the requirement. It cannot: the lock excludes concurrent
+///         dispatchers, which is a different guarantee from delivering once.
+///     </para>
+///     <para>
 ///         Every dispatch claims its row via `SELECT ... FOR UPDATE SKIP
 ///         LOCKED` (Postgres; see ClaimAndDispatchAsync for the Sqlite
-///         fallback tests run under), inside a short transaction held only
-///         for that row. Without it, two overlapping relay runs could claim
-///         and dispatch the same row - today's handlers are all idempotent,
-///         but that's not something this should keep relying on. SKIP
-///         LOCKED means a second claimant simply doesn't see a locked row,
-///         rather than blocking and duplicating work.
+///         fallback tests run under), inside a transaction scoped to that one
+///         row. SKIP LOCKED means a second claimant simply doesn't see a
+///         locked row, rather than blocking and duplicating work.
+///     </para>
+///     <para>
+///         The handler runs INSIDE that transaction, so handler duration is
+///         lock duration - and since handlers here call into other modules'
+///         Contracts, which open their own DbContext against the same
+///         database, a dispatch holds two pooled connections and leaves one
+///         transaction idle-in-transaction for the length of the other's
+///         work. That is a deliberate trade, not an oversight: keeping the
+///         side effect inside the claim is what makes "one dispatcher at a
+///         time per row" true, all the way through the side effect rather
+///         than only up to the moment of claiming.
+///     </para>
+///     <para>
+///         The alternative is a lease: claim, commit, run the handler
+///         unlocked, then commit the outcome separately. It shortens the
+///         transaction but does not remove the idempotency requirement (a
+///         crash mid-handler still re-delivers), and it weakens exclusion -
+///         a handler outliving its lease runs concurrently with the next
+///         claimant, which is strictly worse for anything not idempotent.
+///         Worth revisiting if a handler ever does unbounded work (a network
+///         call, a large batch); today they are all in-process calls whose
+///         duration is bounded by their own database work.
 ///     </para>
 /// </summary>
 public abstract partial class OutboxDispatcherBase<TDbContext>(
@@ -338,10 +368,46 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
     /// <summary>
     ///     Module-specific: switch over message.Type, deserialize via the
     ///     module's own JsonSerializerContext, call the matching Contracts
-    ///     method(s). Returning normally means done - the underlying action
-    ///     is expected to be idempotent (ADR-0003), so there's no
-    ///     "return false to retry" case; let any genuine failure throw and
-    ///     TryDispatchAsync's own catch records it as LastError and retries.
+    ///     method(s). Returning normally means done - there is no
+    ///     "return false to retry" case; let any genuine failure throw, and
+    ///     ClaimAndDispatchAsync's own catch records it as LastError and
+    ///     schedules a retry.
+    ///     <para>
+    ///         <b>This method MUST be idempotent</b> (ADR-0003). Not "should
+    ///         be", and not "is, because today's handlers happen to be" - the
+    ///         dispatcher cannot deliver exactly once, and there are three
+    ///         separate ways it re-runs a handler for one logical message:
+    ///     </para>
+    ///     <list type="number">
+    ///         <item>
+    ///             The execution strategy re-runs the whole delegate on a
+    ///             transient failure. A failure at COMMIT is the interesting
+    ///             one: the handler already ran and its side effect already
+    ///             happened, outside this database's control, and the retry
+    ///             runs it again.
+    ///         </item>
+    ///         <item>
+    ///             The process can die between the handler returning and the
+    ///             commit that records it. The row stays unprocessed and a
+    ///             later poll re-dispatches it. Same for any exception thrown
+    ///             after the handler succeeded.
+    ///         </item>
+    ///         <item>
+    ///             SweepDeadLetteredAsync deliberately replays a message's
+    ///             original payload after it has already been attempted
+    ///             MaxAttempts times - some of which may have had partial
+    ///             effect.
+    ///         </item>
+    ///     </list>
+    ///     <para>
+    ///         In practice that means guarding on state rather than assuming
+    ///         it: ReleaseHoldAsync updates WHERE status = 'booked',
+    ///         ReverseRedemptionAsync WHERE reversed_at IS NULL. A handler
+    ///         that blindly applies a delta - decrementing a counter, issuing
+    ///         a refund without checking whether one was already issued - is
+    ///         a money bug waiting for the first transient commit failure.
+    ///         OutboxIdempotencyTests demonstrates the re-run happening.
+    ///     </para>
     /// </summary>
     protected abstract Task TryHandleAsync(OutboxMessage message, CancellationToken cancellationToken);
 
