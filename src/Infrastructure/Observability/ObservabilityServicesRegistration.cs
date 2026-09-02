@@ -1,4 +1,5 @@
-﻿using BuildingBlocks.Observability;
+﻿using BuildingBlocks.Configuration;
+using BuildingBlocks.Observability;
 using Mediator;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,20 +21,21 @@ public static class ObservabilityServicesRegistration
         IConfiguration configuration)
     {
         ObservabilityConfiguration observability = configuration
-                                                       .GetSection("Observability")
+                                                       .AppSection(ObservabilityConfiguration.SectionName)
                                                        .Get<ObservabilityConfiguration>()
-                                                   ?? throw new InvalidOperationException("The 'Observability' configuration section is missing.");
+                                                   ?? throw new InvalidOperationException($"The '{AppConfiguration.RootSection}:{ObservabilityConfiguration.SectionName}' configuration section is missing.");
 
         if (string.IsNullOrWhiteSpace(observability.OtlpEndpoint))
-            throw new InvalidOperationException("Observability:OtlpEndpoint is not configured.");
+            throw new InvalidOperationException($"{AppConfiguration.RootSection}:{ObservabilityConfiguration.SectionName}:OtlpEndpoint is not configured.");
 
         if (string.IsNullOrWhiteSpace(observability.GrafanaInstanceId))
-            throw new InvalidOperationException("Observability:GrafanaInstanceId is not configured.");
+            throw new InvalidOperationException($"{AppConfiguration.RootSection}:{ObservabilityConfiguration.SectionName}:GrafanaInstanceId is not configured.");
 
         if (string.IsNullOrWhiteSpace(observability.GrafanaAccessPolicyToken))
-            throw new InvalidOperationException("Observability:GrafanaAccessPolicyToken is not configured.");
+            throw new InvalidOperationException($"{AppConfiguration.RootSection}:{ObservabilityConfiguration.SectionName}:GrafanaAccessPolicyToken is not configured.");
 
-        services.Configure<ObservabilityConfiguration>(configuration.GetSection("Observability"));
+        services.Configure<ObservabilityConfiguration>(
+            configuration.AppSection(ObservabilityConfiguration.SectionName));
 
         if (observability.CommandTracingEnabled)
         {

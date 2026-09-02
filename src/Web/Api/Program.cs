@@ -4,6 +4,7 @@ using Api.Security;
 using Api.Serialization;
 using Availability;
 using Bookings;
+using BuildingBlocks.Configuration;
 using BuildingBlocks.Policies;
 using Catalog;
 using FastEndpoints;
@@ -54,7 +55,7 @@ builder.Services.ConfigureJobsServices(builder.Configuration, builder.Environmen
 // because they answer different questions - see
 // BookingLifecyclePolicyOptions, and the consistency check after Build().
 builder.Services.Configure<BookingLifecyclePolicyOptions>(
-    builder.Configuration.GetSection(BookingLifecyclePolicyOptions.SectionName));
+    builder.Configuration.AppSection(BookingLifecyclePolicyOptions.SectionName));
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHealthChecks();
@@ -72,11 +73,13 @@ builder.Services.AddHealthChecks();
 // test factory doesn't trip it on ordinary traffic; RateLimitingTests
 // overrides it back down to actually exercise a 429.
 builder.Services.Configure<CookieSecurityOptions>(
-    builder.Configuration.GetSection(CookieSecurityOptions.SectionName));
-builder.Services.Configure<AuthRateLimitOptions>(builder.Configuration.GetSection("RateLimiting"));
+    builder.Configuration.AppSection(CookieSecurityOptions.SectionName));
+builder.Services.Configure<AuthRateLimitOptions>(
+    builder.Configuration.AppSection(AuthRateLimitOptions.SectionName));
 // Same "RateLimiting" section, sibling keys - HoldPermitLimit/HoldWindowSeconds
 // coexist with AuthPermitLimit/AuthWindowSeconds without colliding.
-builder.Services.Configure<HoldRateLimitOptions>(builder.Configuration.GetSection("RateLimiting"));
+builder.Services.Configure<HoldRateLimitOptions>(
+    builder.Configuration.AppSection(HoldRateLimitOptions.SectionName));
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -207,7 +210,7 @@ ForwardedHeadersOptions forwardedHeadersOptions = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
 };
-foreach (string proxy in app.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [])
+foreach (string proxy in app.Configuration.AppSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [])
 {
     forwardedHeadersOptions.KnownProxies.Add(IPAddress.Parse(proxy));
 }
@@ -254,7 +257,7 @@ if (!app.Environment.IsDevelopment() && forwardedHeadersOptions.KnownProxies.Cou
     // than as a configuration problem, so it is worth saying plainly once
     // at startup.
     app.Logger.LogWarning(
-        "ForwardedHeaders:KnownProxies is empty outside Development. Only loopback proxies are trusted, " +
+        "App:ForwardedHeaders:KnownProxies is empty outside Development. Only loopback proxies are trusted, " +
         "so behind a proxy at any other address X-Forwarded-For/-Proto are ignored: every caller will share " +
         "one rate-limit and concurrent-hold partition keyed on the proxy's address. List the proxy addresses " +
         "if this app is deployed behind one.");

@@ -1,4 +1,5 @@
 ﻿using BuildingBlocks.Identity;
+using BuildingBlocks.Configuration;
 using Identity.Configurations;
 using Identity.Entities;
 using Identity.Features.Common;
@@ -22,14 +23,18 @@ public static class IdentityServicesRegistration
         IWebHostEnvironment? environment = null)
     {
         AuthTokenConfiguration authTokenSettings = new AuthTokenConfiguration();
-        configuration.GetSection("Auth:Token").Bind(authTokenSettings);
+        configuration.AppSection(AuthTokenConfiguration.SectionName).Bind(authTokenSettings);
 
         if (string.IsNullOrWhiteSpace(authTokenSettings.Key))
         {
-            throw new InvalidOperationException("JwtSettings:Key cannot be null or empty.");
+            // Names the real key path. It said "JwtSettings:Key", a section that
+            // does not exist anywhere in this codebase - a message that sends
+            // someone to the wrong place is worse than no message.
+            throw new InvalidOperationException(
+                $"{AppConfiguration.RootSection}:{AuthTokenConfiguration.SectionName}:Key cannot be null or empty.");
         }
 
-        services.Configure<AuthTokenConfiguration>(configuration.GetSection("Auth:Token"));
+        services.Configure<AuthTokenConfiguration>(configuration.AppSection(AuthTokenConfiguration.SectionName));
         services.AddScoped<IAuthTokenProvider, AuthTokenProvider>();
         services.AddScoped<IdentityOutboxDispatcher>();
 

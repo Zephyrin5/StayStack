@@ -2,6 +2,8 @@
 
 public class AuthTokenConfiguration
 {
+    public const string SectionName = "Auth:Token";
+
     public string Key { get; set; } = string.Empty;
     public string? Issuer { get; set; }
     public string? Audience { get; set; }

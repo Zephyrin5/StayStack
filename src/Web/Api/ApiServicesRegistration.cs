@@ -2,6 +2,7 @@
 using Api.Localization;
 using Api.Security;
 using Api.Serialization;
+using BuildingBlocks.Configuration;
 using BuildingBlocks.Identity;
 using BuildingBlocks.Localization;
 using FastEndpoints;
@@ -49,7 +50,7 @@ public static class ApiServicesRegistration
         // has to set Cookies:SameSite to None (which requires
         // Cookies:RequireSecure, enforced at startup) and accept the CSRF
         // exposure that comes with it. See CookieSecurityOptions.SameSite.
-        string[] allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+        string[] allowedOrigins = configuration.AppSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
         services.AddCors(options =>
         {
             options.AddPolicy(ClientAppCorsPolicy, policy =>
@@ -63,8 +64,8 @@ public static class ApiServicesRegistration
 
         services.Configure<RequestLocalizationOptions>(options =>
         {
-            string[] supportedCultures = configuration.GetSection("Localization:SupportedCultures").Get<string[]>() ?? ["en", "ar"];
-            options.SetDefaultCulture(configuration["Localization:DefaultCulture"] ?? "en")
+            string[] supportedCultures = configuration.AppSection("Localization:SupportedCultures").Get<string[]>() ?? ["en", "ar"];
+            options.SetDefaultCulture(configuration.AppValue("Localization:DefaultCulture") ?? "en")
                 .AddSupportedCultures(supportedCultures)
                 .AddSupportedUICultures(supportedCultures);
             options.RequestCultureProviders =

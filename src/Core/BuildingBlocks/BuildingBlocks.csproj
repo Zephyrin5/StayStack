@@ -11,6 +11,7 @@
              references EF Core transitively via Persistence, so this isn't
              a new dependency in practice, just a direct one. -->
         <PackageReference Include="Microsoft.EntityFrameworkCore"/>
+        <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions"/>
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
     </ItemGroup>
 

@@ -1,16 +1,23 @@
 namespace Availability.Features.HoldAvailability;
 
 /// <summary>
-///     Bound from the same "RateLimiting" configuration section as
-///     Api.RateLimiting's Auth/Hold options - sibling key, same concern.
-///     Resolved per request through IOptions rather than captured at
+///     Its own section, not a sibling key under RateLimiting where it started.
+///     A fixed-window limiter caps request *rate*; this caps concurrent held
+///     inventory, and the two are different enough that the distinction is
+///     spelled out at length in HoldAvailabilityHandler. Filing it under
+///     rate limiting contradicted that reasoning.
+///     <para>
+///         Resolved per request through IOptions rather than captured at
 ///     startup, so the integration-test host can raise it the same way it
 ///     raises the rate limits (every request through TestServer shares one
 ///     client key, so a production-sized cap would make the shared suite
-///     trip over its own accumulated holds).
+///         trip over its own accumulated holds).
+///     </para>
 /// </summary>
 public class HoldCapOptions
 {
+    public const string SectionName = "Holds";
+
     /// <summary>
     ///     Live holds one client network may have at once. Sized to bound
     ///     inventory denial without breaking a NAT'd office sharing one
