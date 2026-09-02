@@ -26,5 +26,27 @@ public class PricingRuleConfiguration : IEntityTypeConfiguration<PricingRule>
         // name was only ever set via a trailing HasDatabaseName(...).
         builder.HasIndex(r => new { r.UnitId, r.RuleType }, "ix_pricing_rules_unit_type")
             .HasDatabaseName("ix_pricing_rules_unit_type");
+
+        // "At most one active length-of-stay rule per unit" - the invariant
+        // PricingRuleOverlapChecker.EnsureNoLengthOfStayConflict enforces in
+        // application code, now also held by the database.
+        //
+        // PricingCalculator reads these with FirstOrDefault over an unordered
+        // ToListAsync result, so "at most one match" is not a nicety - it is
+        // what makes the read deterministic. A second active rule would not
+        // throw anywhere; it would silently make the price depend on row
+        // order. That is a data invariant, so it belongs in the schema rather
+        // than resting on every writer remembering to call the checker.
+        //
+        // Partial on status <> 2 (EntityStatus.Archived - Postgres only sees
+        // the stored int), same pattern as ix_promotions_code: an archived
+        // rule must not block creating its replacement.
+        //
+        // rule_type is compared as text because it is stored via
+        // HasConversion<string>(), unlike status.
+        builder.HasIndex(r => r.UnitId, "ix_pricing_rules_unit_length_of_stay_active")
+            .IsUnique()
+            .HasFilter("rule_type = 'LengthOfStayDiscount' AND status <> 2")
+            .HasDatabaseName("ix_pricing_rules_unit_length_of_stay_active");
     }
 }

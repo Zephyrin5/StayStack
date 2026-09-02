@@ -55,16 +55,79 @@ than adding raw migration SQL.
   tie-breaking UX and validation surface the actual product need ("simple, predictable host-set rules")
   doesn't require. Can be introduced later as an additive change without migrating existing rows.
 - **A Postgres GIST exclusion constraint for date-range overlap, mirroring `unit_availability_holds`.**
-  Rejected - that mechanism exists specifically for the double-booking invariant under real concurrent
-  write pressure (many guests racing to book the same unit). Pricing-rule authoring is a low-frequency,
-  single-host admin action; an in-memory EF check keeps the logic in one readable place instead of
-  requiring a raw-SQL migration for a concurrency profile that doesn't exist here.
+  Originally rejected - that mechanism exists specifically for the double-booking invariant under real
+  concurrent write pressure (many guests racing to book the same unit). Pricing-rule authoring is a
+  low-frequency, single-host admin action; an in-memory EF check keeps the logic in one readable place
+  instead of requiring a raw-SQL migration for a concurrency profile that doesn't exist here.
+  **This was later reversed - see "Amendment" below.**
 - **Resolving prices in SQL inside `GetPriceCalendarHandler`'s existing Dapper query**, to avoid the
   extra EF round trip per calendar request. Rejected - it would mean two independent implementations of
   the same precedence logic (one in SQL, one in C# for `HoldAvailabilityHandler`), free to silently drift
   apart. The shared `PricingCalculator` guarantees they can't; the extra query is small, low-cardinality
   reference data, and the handler's existing 30s `HybridCache` wrapper already absorbs its repeat-request
   cost.
+
+## Amendment: the overlap invariants are now enforced in the schema
+
+The rejection recorded in "Alternatives considered" rested on a premise this
+repository subsequently disproved, and on a framing that missed the stronger
+argument.
+
+**The premise didn't survive.** The entry says a GIST constraint was
+unnecessary for "a concurrency profile that doesn't exist here." It does exist:
+`PricingRuleConcurrencyTests` demonstrated that two concurrent conflicting
+inserts could each pass their own overlap check, and both
+`CreatePricingRuleHandler` and `UpdatePricingRuleHandler` had to be moved to
+`IsolationLevel.Serializable` as a result. The comment now sitting above that
+transaction says as much - "the check-then-insert below is still a genuine
+read-then-write race with nothing at the database enforcing it."
+
+**The framing missed the point.** Both the original entry and the Serializable
+fix treat this as a concurrency question. It is really a read-path question.
+`PricingCalculator` resolves a nightly price with `FirstOrDefault` over an
+unordered `ToListAsync()` result, and does the same for the day-of-week and
+length-of-stay lookups. "At most one rule matches" is therefore a precondition
+for the calculator being deterministic at all - and a second matching row would
+not throw anywhere, it would just make the price depend on row order. That is a
+data invariant, and it holds or fails regardless of how the second row arrived:
+a bulk import, a data migration, an admin script, a future handler that forgets
+the checker, or anything issuing raw SQL. Serializable isolation protects
+concurrent writers; it does not protect an invariant the read path depends on.
+
+Two of the three invariants are now held by the schema, using only what was
+already enabled:
+
+- **`DateRangeOverride`** - `pricing_rules_date_range_overlap_excl`, an
+  `EXCLUDE USING gist (unit_id WITH =, date_range WITH &&)` partial on
+  `rule_type = 'DateRangeOverride' AND status <> 2`. `btree_gist` was already
+  enabled for `unit_availability_holds`.
+- **`LengthOfStayDiscount`** - `ix_pricing_rules_unit_length_of_stay_active`, a
+  partial unique index on `unit_id`. "At most one per unit" is plain
+  uniqueness, so this needs no exclusion constraint at all. This is the type
+  where an unordered `FirstOrDefault` is most obviously wrong: two active rules
+  with different `MinNights` both match a long stay, so the discount a guest
+  receives would depend on row order.
+
+**`DayOfWeekMultiplier` is deliberately still application-only.** Its invariant
+is integer-array overlap, and Postgres has no built-in GiST opclass for
+`integer[]`, so it cannot be an exclusion constraint without either enabling the
+`intarray` extension or normalising days into their own rows. Neither is
+justified by this finding alone, so the asymmetry is recorded rather than
+papered over -
+`PricingRuleConstraintTests.DayOfWeekMultiplier_OverlappingDaysForTheSameUnit_IsStillOnlyGuardedByApplicationCode`
+asserts the gap explicitly so it stays known. That type is no worse protected
+than the other two were before this change.
+
+`PricingRuleOverlapChecker` stays exactly as it is. It produces a 409 with a
+message a host can act on; the constraints are a backstop for writers that
+never reach it. A backstop firing is genuinely exceptional, so it is left to
+surface as a 500 rather than being translated into the same 409 - the same
+reasoning `OrphanedUnitException` uses for a data-integrity violation.
+
+The constraint tests write through `DbContext` directly, bypassing the checker
+on purpose, and were verified against a build without the constraint: the
+overlapping insert succeeds there, so they test the schema rather than
+restating the application check.
 
 ## Consequences
 
