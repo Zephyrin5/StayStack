@@ -31,4 +31,15 @@ public static class OutboxTelemetry
     public static readonly Counter<long> DeadLetterRetried = Meter.CreateCounter<long>(
         "outbox.messages.dead_letter_retried",
         description: "Number of dead-letter sweep retries that failed again, tagged by module and message type.");
+
+    /// <summary>
+    ///     Alertable in the other direction from the two above: a purge count
+    ///     that drops to zero while bookings keep being made means retention
+    ///     stopped running, and these tables only ever grow. A count pinned at
+    ///     the per-run cap means the backlog is draining slower than it
+    ///     accumulates.
+    /// </summary>
+    public static readonly Counter<long> Purged = Meter.CreateCounter<long>(
+        "outbox.messages.purged",
+        description: "Number of processed outbox messages deleted by retention, tagged by module.");
 }

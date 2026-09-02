@@ -73,8 +73,14 @@ public class OutboxIdempotencyTests(IntegrationTestWebApplicationFactory factory
             scope.ServiceProvider.GetRequiredService<TimeProvider>(),
             scope.ServiceProvider.GetRequiredService<ILogger<SideEffectThenFailDispatcher>>());
 
+        // TryDispatchAsync, not DispatchPendingAsync: the latter claims
+        // whatever is pending in the shared test database, so this dispatcher
+        // would also handle rows other tests left behind and the count below
+        // would measure them too. Claiming by id scopes it to this message.
+        OutboxMessage seeded = await ReadAsync(messageId);
+
         // First dispatch: the side effect lands, then recording it fails.
-        await dispatcher.DispatchPendingAsync(batchSize: 10, TestContext.Current.CancellationToken);
+        await dispatcher.TryDispatchAsync(seeded, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, dispatcher.SideEffectCount);
 
@@ -82,20 +88,9 @@ public class OutboxIdempotencyTests(IntegrationTestWebApplicationFactory factory
         Assert.Null(afterFirst.ProcessedAt);
         Assert.Equal(1, afterFirst.Attempts);
 
-        // Clear the backoff so the second dispatch is due. This is the only
-        // artificial step - in production the relay job simply comes back
-        // 30 seconds later and does exactly this.
-        using (IServiceScope resetScope = factory.Services.CreateScope())
-        {
-            AppBookingsDbContext resetDb = resetScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
-            await resetDb.BookingsOutboxMessages
-                .Where(m => m.Id == messageId)
-                .ExecuteUpdateAsync(
-                    m => m.SetProperty(x => x.NextAttemptAt, DateTimeOffset.UtcNow.AddMinutes(-1)),
-                    TestContext.Current.CancellationToken);
-        }
-
-        await dispatcher.DispatchPendingAsync(batchSize: 10, TestContext.Current.CancellationToken);
+        // Second dispatch, exactly what the relay job does when it comes back
+        // after the backoff elapses.
+        await dispatcher.TryDispatchAsync(seeded, TestContext.Current.CancellationToken);
 
         // The point of the whole file: ONE message, TWO side effects. Nothing
         // here is concurrent and nothing is misconfigured - this is the

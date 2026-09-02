@@ -2,6 +2,7 @@ using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using Catalog.Entities;
 using Catalog.Enums;
+using Catalog.Exceptions;
 using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
@@ -102,7 +103,20 @@ public class UpdatePricingRuleHandler(
                     throw new ValidationException(nameof(request.RuleType), "Unsupported RuleType.");
             }
 
-            await dbContext.SaveChangesAsync(cancellationToken);
+            // The in-memory checks above catch this first in the ordinary
+            // case; the constraints catch the interleaving where two
+            // transactions each pass their own check. Same conflict either
+            // way, so the caller sees the same 409 - see
+            // PricingRuleOverlapChecker.IsOverlapViolation.
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (Exception exception) when (PricingRuleOverlapChecker.IsOverlapViolation(exception, out string conflict))
+            {
+                throw new PricingRuleConflictException(conflict);
+            }
+
             await transaction.CommitAsync(cancellationToken);
         });
 

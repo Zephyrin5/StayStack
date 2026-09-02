@@ -176,6 +176,76 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
     }
 
     /// <summary>
+    ///     Deletes processed rows older than <paramref name="retention"/>.
+    ///     Without this these tables only grow: every confirm and every cancel
+    ///     writes outbox rows that are dead weight the moment they are
+    ///     dispatched, and nothing was removing them.
+    ///     <para>
+    ///         Only ever deletes rows with a ProcessedAt. An unprocessed row
+    ///         is still owed its side effect, and a dead-lettered one that was
+    ///         never processed is a message a human still has to look at -
+    ///         purging either would turn "this needs attention" into "this
+    ///         never happened". A dead-lettered row that later resolved does
+    ///         have a ProcessedAt and is purged normally.
+    ///     </para>
+    ///     <para>
+    ///         Retention is not zero deliberately. A processed row is the only
+    ///         record that a compensating action was dispatched at all, and
+    ///         these carry money (refunds, redemption reversals) - keeping a
+    ///         window of them is what makes "did we actually reverse that?"
+    ///         answerable after the fact.
+    ///     </para>
+    ///     <para>
+    ///         Batched, and capped per run: a single unbounded DELETE over a
+    ///         long-neglected table would hold locks and bloat WAL for as long
+    ///         as it took. Draining across several daily runs is fine, since
+    ///         nothing depends on the rows being gone promptly.
+    ///     </para>
+    /// </summary>
+    public async Task<int> PurgeProcessedAsync(
+        TimeSpan retention, int batchSize, int maxBatchesPerRun, CancellationToken cancellationToken)
+    {
+        DateTimeOffset cutoff = timeProvider.GetUtcNow() - retention;
+        int purged = 0;
+
+        for (int batch = 0; batch < maxBatchesPerRun; batch++)
+        {
+            // Ids first, then delete by id - ExecuteDeleteAsync does not
+            // reliably translate Take() across providers, and a purge that
+            // silently degrades into "delete everything matching" is not a
+            // failure mode worth risking on this table.
+            List<Guid> ids = await DbContext.Set<OutboxMessage>()
+                .Where(m => m.ProcessedAt != null && m.ProcessedAt < cutoff)
+                .OrderBy(m => m.ProcessedAt)
+                .Take(batchSize)
+                .Select(m => m.Id)
+                .ToListAsync(cancellationToken);
+
+            if (ids.Count == 0)
+            {
+                break;
+            }
+
+            purged += await DbContext.Set<OutboxMessage>()
+                .Where(m => ids.Contains(m.Id))
+                .ExecuteDeleteAsync(cancellationToken);
+
+            if (ids.Count < batchSize)
+            {
+                break;
+            }
+        }
+
+        if (purged > 0)
+        {
+            OutboxTelemetry.Purged.Add(purged, new KeyValuePair<string, object?>("module", ModuleName));
+            LogPurged(logger, ModuleName, purged, cutoff);
+        }
+
+        return purged;
+    }
+
+    /// <summary>
     ///     The actual claim-and-process step every dispatch path funnels
     ///     through. One transaction per row, not per batch - a batch-wide
     ///     transaction would hold every row's lock for the whole batch and
@@ -435,4 +505,8 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
     [LoggerMessage(LogLevel.Warning,
         "Dead-lettered outbox message {MessageId} ({MessageType}, module {Module}) failed again on its sweep retry ({Attempts} attempts so far). Last error: {LastError}")]
     private static partial void LogDeadLetterRetryFailed(ILogger logger, string module, string messageType, Guid messageId, int attempts, string? lastError);
+
+    [LoggerMessage(LogLevel.Information,
+        "Purged {Purged} processed outbox messages for module {Module} older than {Cutoff}.")]
+    private static partial void LogPurged(ILogger logger, string module, int purged, DateTimeOffset cutoff);
 }
