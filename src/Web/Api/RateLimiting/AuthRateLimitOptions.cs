@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 namespace Api.RateLimiting;
 
 public class AuthRateLimitOptions
@@ -6,6 +7,8 @@ public class AuthRateLimitOptions
     // sibling keys are prefixed per policy.
     public const string SectionName = "RateLimiting";
 
+    [Range(1, int.MaxValue)]
     public int AuthPermitLimit { get; set; } = 10;
+    [Range(1, int.MaxValue)]
     public int AuthWindowSeconds { get; set; } = 60;
 }

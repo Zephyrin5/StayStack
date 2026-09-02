@@ -44,7 +44,10 @@ public static class AvailabilityServicesRegistration
         // Bound here rather than in Program.cs because the handler that reads
         // it lives in this module. Its own section - see HoldCapOptions for
         // why it is not a sibling of the rate limits.
-        services.Configure<HoldCapOptions>(configuration.AppSection(HoldCapOptions.SectionName));
+        services.AddOptions<HoldCapOptions>()
+            .Bind(configuration.AppSection(HoldCapOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         services.AddScoped<IHoldConfirmation, HoldConfirmation>();
 

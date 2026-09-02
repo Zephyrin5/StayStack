@@ -71,8 +71,10 @@ public static class ApiServicesRegistration
         // unread. Changing App:Localization:DefaultCulture would have moved
         // culture negotiation below without moving what LocalizedText demands,
         // so one setting would have meant two different things.
-        services.Configure<LocalizationSettings>(
-            configuration.AppSection(LocalizationSettings.SectionName));
+        services.AddOptions<LocalizationSettings>()
+            .Bind(configuration.AppSection(LocalizationSettings.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // The same bound shape feeds the request pipeline, rather than reading
         // the same keys again as raw strings. That duplication is what let the

@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 namespace BuildingBlocks.Localization;
 
 /// <summary>
@@ -19,6 +20,7 @@ public class LocalizationSettings
     // complaint. Bound against init, both of these silently kept the defaults
     // below. Every other options type in the codebase already uses set; this
     // was the odd one out.
+    [Required(AllowEmptyStrings = false)]
     public string DefaultCulture { get; set; } = "en";
     /// <summary>
     ///     No default value, deliberately. The binder does not replace a

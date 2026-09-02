@@ -34,7 +34,10 @@ public static class IdentityServicesRegistration
                 $"{AppConfiguration.RootSection}:{AuthTokenConfiguration.SectionName}:Key cannot be null or empty.");
         }
 
-        services.Configure<AuthTokenConfiguration>(configuration.AppSection(AuthTokenConfiguration.SectionName));
+        services.AddOptions<AuthTokenConfiguration>()
+            .Bind(configuration.AppSection(AuthTokenConfiguration.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         services.AddScoped<IAuthTokenProvider, AuthTokenProvider>();
         services.AddScoped<IdentityOutboxDispatcher>();
 

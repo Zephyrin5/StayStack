@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 namespace Availability.Features.HoldAvailability;
 
 /// <summary>
@@ -23,5 +24,6 @@ public class HoldCapOptions
     ///     inventory denial without breaking a NAT'd office sharing one
     ///     address - see docs/adr/0016 for the tradeoff.
     /// </summary>
+    [Range(1, int.MaxValue)]
     public int MaxActiveHoldsPerClient { get; set; } = 25;
 }

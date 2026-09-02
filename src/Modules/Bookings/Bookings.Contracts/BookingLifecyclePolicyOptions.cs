@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 namespace Bookings.Contracts;
 
 /// <summary>
@@ -50,6 +51,7 @@ public class BookingLifecyclePolicyOptions
     ///         closing disputes.
     ///     </para>
     /// </summary>
+    [Range(1, 3650)]
     public int ReviewWindowDaysAfterCheckOut { get; set; } = 90;
 
     /// <summary>
@@ -70,5 +72,6 @@ public class BookingLifecyclePolicyOptions
     ///         than left to be rediscovered.
     ///     </para>
     /// </summary>
+    [Range(1, 3650)]
     public int ManagementTokenLifetimeDaysAfterCheckOut { get; set; } = 90;
 }

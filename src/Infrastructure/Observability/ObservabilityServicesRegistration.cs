@@ -34,8 +34,10 @@ public static class ObservabilityServicesRegistration
         if (string.IsNullOrWhiteSpace(observability.GrafanaAccessPolicyToken))
             throw new InvalidOperationException($"{AppConfiguration.RootSection}:{ObservabilityConfiguration.SectionName}:GrafanaAccessPolicyToken is not configured.");
 
-        services.Configure<ObservabilityConfiguration>(
-            configuration.AppSection(ObservabilityConfiguration.SectionName));
+        services.AddOptions<ObservabilityConfiguration>()
+            .Bind(configuration.AppSection(ObservabilityConfiguration.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         if (observability.CommandTracingEnabled)
         {

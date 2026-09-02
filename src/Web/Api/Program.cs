@@ -54,8 +54,10 @@ builder.Services.ConfigureJobsServices(builder.Configuration, builder.Environmen
 // guest-checkout management link stays usable. Two settings rather than one
 // because they answer different questions - see
 // BookingLifecyclePolicyOptions, and the consistency check after Build().
-builder.Services.Configure<BookingLifecyclePolicyOptions>(
-    builder.Configuration.AppSection(BookingLifecyclePolicyOptions.SectionName));
+builder.Services.AddOptions<BookingLifecyclePolicyOptions>()
+    .Bind(builder.Configuration.AppSection(BookingLifecyclePolicyOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHealthChecks();
@@ -72,14 +74,20 @@ builder.Services.AddHealthChecks();
 // appsettings.Testing.json sets a high limit so the shared integration-
 // test factory doesn't trip it on ordinary traffic; RateLimitingTests
 // overrides it back down to actually exercise a 429.
-builder.Services.Configure<CookieSecurityOptions>(
-    builder.Configuration.AppSection(CookieSecurityOptions.SectionName));
-builder.Services.Configure<AuthRateLimitOptions>(
-    builder.Configuration.AppSection(AuthRateLimitOptions.SectionName));
+builder.Services.AddOptions<CookieSecurityOptions>()
+    .Bind(builder.Configuration.AppSection(CookieSecurityOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddOptions<AuthRateLimitOptions>()
+    .Bind(builder.Configuration.AppSection(AuthRateLimitOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 // Same "RateLimiting" section, sibling keys - HoldPermitLimit/HoldWindowSeconds
 // coexist with AuthPermitLimit/AuthWindowSeconds without colliding.
-builder.Services.Configure<HoldRateLimitOptions>(
-    builder.Configuration.AppSection(HoldRateLimitOptions.SectionName));
+builder.Services.AddOptions<HoldRateLimitOptions>()
+    .Bind(builder.Configuration.AppSection(HoldRateLimitOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 builder.Services.AddRateLimiter(options =>
 {
