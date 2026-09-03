@@ -148,7 +148,39 @@ public static class ApiServicesRegistration
         // In-process (L1) cache only, no L2 registered. Wraps the
         // GetPriceCalendarHandler/GetPropertiesHandler/GetPropertyByIdHandler
         // read paths.
-        services.AddHybridCache();
+        //
+        // Bounded explicitly rather than left on defaults, because every one
+        // of those read paths is anonymous, unthrottled, and keyed on query
+        // parameters - so the number of distinct cache entries is chosen by
+        // the caller, not by this application. The per-request validators cap
+        // how many keys can exist (see GetPriceCalendarRequestValidator's date
+        // bounds and PaginationDefaults.MaxOffset); these cap what the cache
+        // costs even if a future endpoint arrives without such a cap.
+        //
+        // SizeLimit is in bytes: HybridCache sets each L1 entry's Size to its
+        // serialized length. That pairs with MaximumPayloadBytes below, which
+        // bounds one entry, to bound the whole L1 as well - a limit on entry
+        // size alone still admits unlimited entries. Nothing else in this
+        // application resolves IMemoryCache, so this budget is HybridCache's
+        // alone.
+        services.AddMemoryCache(options => options.SizeLimit = 64 * 1024 * 1024);
+
+        services.AddHybridCache(options =>
+        {
+            // Comfortably above the largest legitimate payload - a 366-day
+            // price calendar runs tens of KB, a 100-item property page under a
+            // couple hundred - and far below anything worth holding. An
+            // oversized payload is simply not cached rather than being an
+            // error, so this degrades to a cache miss, never a 500.
+            options.MaximumPayloadBytes = 512 * 1024;
+
+            // The keys are interpolated from route and query values. The
+            // longest legitimate one is GetProperties' (a normalized city
+            // plus six short fields); 1024 is the library default and is
+            // stated here so the bound is visible next to the reason it
+            // matters rather than being inherited silently.
+            options.MaximumKeyLength = 1024;
+        });
 
         return services;
     }
