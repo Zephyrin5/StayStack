@@ -1,6 +1,7 @@
 using Api.RateLimiting;
 using Availability.Features.HoldAvailability;
 using Bookings.Contracts;
+using BuildingBlocks.Localization;
 using Identity.Configurations;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -76,6 +77,73 @@ public class OptionsValidationTests(IntegrationTestWebApplicationFactory factory
         AssertRefusesToStart(
             "Key",
             ("App:Auth:Token:Key", ""));
+    }
+
+    // The two below go through Configure<T> rather than AssertRefusesToStart's
+    // config keys. Configuration merges array elements by key, so layering an
+    // in-memory provider over appsettings.json can replace
+    // SupportedCultures:0 or append :2, but cannot clear the ["en", "ar"] it
+    // already declares - and an unconfigured list is the case worth rejecting.
+    // Configure<T> replaces the bound value outright, and still runs before
+    // ValidateOnStart, so it exercises the same validation the real startup does.
+    private void AssertRefusesToStart(string expectedMessageFragment, Action<LocalizationSettings> configure)
+    {
+        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.Configure(configure)));
+
+        OptionsValidationException exception =
+            Assert.Throws<OptionsValidationException>(() => host.CreateClient());
+
+        Assert.Contains(expectedMessageFragment, string.Join(" ", exception.Failures));
+    }
+
+    [Fact]
+    public void AnEmptySupportedCulturesList_RefusesToStart()
+    {
+        // The bilingual requirement is a product guarantee. This used to bind
+        // cleanly and fall through to a hardcoded ["en", "ar"] in
+        // ApiServicesRegistration, so a cleared section still served two
+        // languages and nothing anywhere said the config had stopped being
+        // read.
+        AssertRefusesToStart(
+            nameof(LocalizationSettings.SupportedCultures),
+            o => o.SupportedCultures = []);
+    }
+
+    [Fact]
+    public void ADefaultCultureOutsideSupportedCultures_RefusesToStart()
+    {
+        // Each field is individually valid here - non-empty default,
+        // non-empty list - so only a cross-field check catches it. Left
+        // alone, SetDefaultCulture names a culture AddSupportedCultures was
+        // never given, and every request that doesn't negotiate its own
+        // culture falls back to one the deployment never declared.
+        AssertRefusesToStart(
+            "is not one of SupportedCultures",
+            o =>
+            {
+                o.DefaultCulture = "fr";
+                o.SupportedCultures = ["en", "ar"];
+            });
+    }
+
+    [Fact]
+    public void ADefaultCultureListedInADifferentCase_StartsNormally()
+    {
+        // Culture names are case-insensitive to .NET, so this is a spelling
+        // difference rather than a misconfiguration - the check must not
+        // reject it.
+        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.Configure<LocalizationSettings>(o =>
+            {
+                o.DefaultCulture = "EN";
+                o.SupportedCultures = ["en", "ar"];
+            })));
+
+        using IServiceScope scope = host.Services.CreateScope();
+
+        Assert.Equal("EN", scope.ServiceProvider
+            .GetRequiredService<IOptions<LocalizationSettings>>().Value.DefaultCulture);
     }
 
     [Fact]

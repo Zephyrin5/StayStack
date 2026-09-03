@@ -2,15 +2,17 @@ using BuildingBlocks.Localization;
 using System.ComponentModel.DataAnnotations;
 namespace UnitTests.Localization;
 
-// A unit test rather than a case in OptionsValidationTests, which is where the
-// other "refuses to start" assertions live. Those layer an in-memory provider
-// over appsettings.json, and configuration merges array elements by key - so
-// an override can replace SupportedCultures:0 or append :2, but nothing can
-// clear the ["en", "ar"] already declared there. The empty list is only
-// reachable from a deployment whose configuration never declares the section
-// at all, which is exactly the case worth rejecting and the one that harness
-// cannot express. This asserts the same DataAnnotations pass that
-// ValidateDataAnnotations/ValidateOnStart runs at boot.
+// Pins the attributes themselves, without a host. It is not the whole story:
+// OptionsValidationTests covers the same rules through a real ValidateOnStart,
+// which is what proves they are actually wired rather than merely declared.
+//
+// Worth knowing if you extend either file - the two harnesses reach this type
+// differently, and only one of them can produce an empty SupportedCultures.
+// OptionsValidationTests' AssertRefusesToStart layers an in-memory provider
+// over appsettings.json, and configuration merges array elements by key, so an
+// override can replace SupportedCultures:0 or append :2 but nothing can clear
+// the ["en", "ar"] already declared there. Reaching the empty list needs the
+// Configure<T> DI override instead, which replaces the bound value outright.
 public class LocalizationSettingsValidationTests
 {
     private static IReadOnlyList<ValidationResult> Validate(LocalizationSettings settings)

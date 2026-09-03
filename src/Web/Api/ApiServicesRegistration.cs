@@ -8,6 +8,7 @@ using BuildingBlocks.Localization;
 using FastEndpoints;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.Localization;
+using Microsoft.Extensions.Options;
 using BookingsDiscoveredTypes = Bookings.DiscoveredTypes;
 using CatalogDiscoveredTypes = Catalog.DiscoveredTypes;
 using HostsDiscoveredTypes = Hosts.DiscoveredTypes;
@@ -75,6 +76,11 @@ public static class ApiServicesRegistration
             .Bind(configuration.AppSection(LocalizationSettings.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+        // Picked up by the same ValidateOnStart pass above - ValidateDataAnnotations
+        // covers the per-field rules, this covers the one that spans two fields.
+        // See LocalizationSettingsValidator for why it isn't a post-Build() check
+        // in Program.cs like the other two cross-field invariants.
+        services.AddSingleton<IValidateOptions<LocalizationSettings>, LocalizationSettingsValidator>();
 
         // The same bound shape feeds the request pipeline, rather than reading
         // the same keys again as raw strings. That duplication is what let the
