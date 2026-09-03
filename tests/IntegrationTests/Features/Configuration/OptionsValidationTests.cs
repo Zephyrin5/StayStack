@@ -79,6 +79,19 @@ public class OptionsValidationTests(IntegrationTestWebApplicationFactory factory
             ("App:Auth:Token:Key", ""));
     }
 
+    [Fact]
+    public void ASigningKeyTooShortForHmacSha256_RefusesToStart()
+    {
+        // Non-empty, so Required is satisfied and this used to boot - then
+        // fail the first sign-in, because SymmetricSecurityKey's constructor
+        // only rejects a zero-length key and the 128-bit floor is enforced
+        // later, when SymmetricSignatureProvider signs a token. An auth
+        // outage on first use, from a value that looked configured.
+        AssertRefusesToStart(
+            "Key",
+            ("App:Auth:Token:Key", "too-short-for-hmac"));
+    }
+
     // The two below go through Configure<T> rather than AssertRefusesToStart's
     // config keys. Configuration merges array elements by key, so layering an
     // in-memory provider over appsettings.json can replace
