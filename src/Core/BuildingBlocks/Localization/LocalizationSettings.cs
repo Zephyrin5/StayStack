@@ -28,8 +28,18 @@ public class LocalizationSettings
     ///     initializer of ["en", "ar"] plus a configured ["ar", "fr"] produced
     ///     ["en", "ar", "ar", "fr"], meaning a deployment could add supported
     ///     cultures but never remove one, and would silently get duplicates
-    ///     trying. Empty here means "not configured", and the one consumer
-    ///     supplies the fallback.
+    ///     trying.
+    ///     <para>
+    ///         That leaves empty as the only safe initializer, which is why
+    ///         MinLength carries the requirement instead: a deployment that
+    ///         clears or misspells this section is misconfigured, not
+    ///         defaulted. It used to fall back to a hardcoded ["en", "ar"] at
+    ///         the consumer, so the bilingual guarantee this platform is built
+    ///         on lived in C# and silently outvoted appsettings - the endpoint
+    ///         went on reporting two languages nothing had configured. Same
+    ///         treatment as DefaultCulture above: refuse to start.
+    ///     </para>
     /// </summary>
+    [MinLength(1, ErrorMessage = "At least one supported culture must be configured.")]
     public string[] SupportedCultures { get; set; } = [];
 }

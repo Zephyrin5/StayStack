@@ -88,12 +88,13 @@ public static class ApiServicesRegistration
 
         services.Configure<RequestLocalizationOptions>(options =>
         {
-            // The fallback lives here rather than as an initializer on the
-            // type - see LocalizationSettings.SupportedCultures for why one
-            // there cannot be overridden, only added to.
-            string[] supportedCultures = localization.SupportedCultures.Length > 0
-                ? localization.SupportedCultures
-                : ["en", "ar"];
+            // No fallback for an empty SupportedCultures any more - the
+            // ValidateOnStart registration above rejects that at boot, so
+            // the branch that used to substitute a hardcoded ["en", "ar"]
+            // could only ever run in a host that never finished starting.
+            // It also meant a cleared or misspelled section quietly got the
+            // right answer from C# instead of a startup failure.
+            string[] supportedCultures = localization.SupportedCultures;
             options.SetDefaultCulture(localization.DefaultCulture)
                 .AddSupportedCultures(supportedCultures)
                 .AddSupportedUICultures(supportedCultures);
