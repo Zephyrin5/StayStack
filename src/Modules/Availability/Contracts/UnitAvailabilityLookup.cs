@@ -52,15 +52,30 @@ internal class UnitAvailabilityLookup(AppAvailabilityDbContext dbContext) : IUni
         return blockedUnitIds.ToHashSet();
     }
 
-    public Task<bool> HasActiveHoldForUnitAsync(Guid unitId, CancellationToken cancellationToken)
+    public Task<bool> HasActiveHoldForUnitAsync(Guid unitId, DateTimeOffset now, CancellationToken cancellationToken)
     {
-        // Loose check, deliberately - no expiry filter, so an un-swept
-        // expired 'held' row still blocks archival until
-        // ExpiredHoldsSweepJob reaps it. Not tightened here; that's a
-        // separate concern from this lookup's job.
+        // Only claims that are still going somewhere. This used to match
+        // 'held' or 'booked' with no date condition at all, which was a
+        // permanent block rather than a check: nothing deletes a booked row,
+        // so one completed stay made its unit - and its property - impossible
+        // to archive forever. See this method's contract for why the booked
+        // case belongs to IUnitArchivalGuard instead.
+        //
+        // PendingPayment is kept, unlike Booked, because it is not the same
+        // kind of fact. It is a checkout in flight, bounded by the payment
+        // window, and for a moment during confirmation it is the *only*
+        // record of one: the hold commits before the Booking row exists (the
+        // window docs/adr/0017's intents cover), so Bookings' guard cannot
+        // see it yet. Dropping it would let an archival land in that gap and
+        // produce exactly the mid-checkout failure this pair of guards exists
+        // to prevent.
+        //
+        // Null HoldExpiresAt reads as active, matching the two range queries
+        // above - an absent expiry is not an elapsed one.
         return dbContext.UnitAvailabilityHolds.AsNoTracking()
             .AnyAsync(h => h.UnitId == unitId &&
-                           (h.Status == HoldStatuses.Held || h.Status == HoldStatuses.PendingPayment ||
-                            h.Status == HoldStatuses.Booked), cancellationToken);
+                           (h.Status == HoldStatuses.PendingPayment ||
+                            (h.Status == HoldStatuses.Held &&
+                             (h.HoldExpiresAt == null || h.HoldExpiresAt > now))), cancellationToken);
     }
 }

@@ -76,7 +76,11 @@ public class DeleteUnitHandler(
             throw new UnitHasActiveBookingsException(unitId);
         }
 
-        bool hasActiveHold = await availabilityLookup.HasActiveHoldForUnitAsync(unitId, cancellationToken);
+        // The UTC instant, not the property-local `today` above. A hold's
+        // expiry is a timestamp rather than a date - the two questions are
+        // measured in different units and only one of them is a calendar day.
+        bool hasActiveHold = await availabilityLookup.HasActiveHoldForUnitAsync(
+            unitId, timeProvider.GetUtcNow(), cancellationToken);
         if (hasActiveHold)
         {
             throw new UnitHasActiveBookingsException(unitId);

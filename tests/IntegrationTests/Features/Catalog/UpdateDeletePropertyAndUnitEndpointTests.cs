@@ -1,3 +1,5 @@
+using Availability;
+using Availability.Entities;
 using Bogus;
 using Bookings;
 using Bookings.Entities;
@@ -16,6 +18,7 @@ using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NpgsqlTypes;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using System.Net;
@@ -429,4 +432,121 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
         AppCatalogDbContext db = verifyScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         Assert.Equal(EntityStatus.Active, (await db.Units.SingleAsync(u => u.Id == unitId, TestContext.Current.CancellationToken)).Status);
     }
+
+    private async Task SeedHoldAsync(Guid unitId, DateOnly checkIn, string status, DateTimeOffset? holdExpiresAt)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+
+        context.UnitAvailabilityHolds.Add(new UnitAvailabilityHold
+        {
+            Id = Guid.CreateVersion7(),
+            UnitId = unitId,
+            StayRange = new NpgsqlRange<DateOnly>(checkIn, true, checkIn.AddDays(2), false),
+            Status = status,
+            GuestCount = 2,
+            HoldExpiresAt = holdExpiresAt,
+            CreatedAt = DateTimeOffset.UtcNow,
+            TotalPrice = Money.Of(100m, Currency.KWD),
+            Subtotal = 100m
+        });
+
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task DeleteUnit_ShouldSucceed_WhenItsOnlyHoldIsAPastStayThatWasSoldAndCompleted()
+    {
+        // Regression test. HasActiveHoldForUnitAsync matched 'held' or
+        // 'booked' with no date or expiry condition at all, and nothing ever
+        // deletes a booked row - the expiry sweep takes only 'held'. So one
+        // completed stay left a 'booked' hold behind and this check returned
+        // true for the rest of the unit's life: the unit, and any property
+        // containing it, could never be archived again, years after the guest
+        // went home.
+        //
+        // Whether a past booking still blocks archival is IUnitArchivalGuard's
+        // question, and it answers it correctly from the booking's own dates.
+        // Availability was re-deciding it from a row that has none.
+        string hostAccessToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken);
+        Guid unitId = await CreateUnitAsync(hostAccessToken, propertyId);
+
+        // The stay is over: checkout was last month, and the hold that sold
+        // it is still sitting there as 'booked' because nothing reaps those.
+        DateOnly pastCheckIn = CatalogSeeding.Today().AddDays(-30);
+        await SeedHoldAsync(unitId, pastCheckIn, "booked", holdExpiresAt: null);
+
+        using (IServiceScope seedScope = factory.Services.CreateScope())
+        {
+            AppBookingsDbContext bookingsDb = seedScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            Booking booking = Booking.Create(
+                Guid.CreateVersion7(), unitId, Guid.NewGuid(), null,
+                "Jane Guest", "jane@example.com", null,
+                pastCheckIn, pastCheckIn.AddDays(2),
+                2, Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD),
+                CancellationPolicy.CreateDefault(), "Asia/Kuwait", DateTimeOffset.UtcNow.AddMinutes(30));
+            bookingsDb.Bookings.Add(booking);
+            await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        // Act
+        HttpResponseMessage response = await _client.SendAsync(
+            Authorized(HttpMethod.Delete, $"/api/catalog/units/{unitId}", hostAccessToken),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using IServiceScope verifyScope = factory.Services.CreateScope();
+        AppCatalogDbContext db = verifyScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        Assert.Equal(EntityStatus.Archived,
+            (await db.Units.IgnoreQueryFilters().SingleAsync(u => u.Id == unitId, TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Fact]
+    public async Task DeleteUnit_ShouldReturn409_WhenACheckoutIsInProgress()
+    {
+        // The other half, and the reason the check cannot simply be deleted:
+        // a live hold is someone mid-checkout, and archiving out from under
+        // them is the failure this guard exists to prevent. Bookings' guard
+        // cannot answer this one - there is no booking yet.
+        string hostAccessToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken);
+        Guid unitId = await CreateUnitAsync(hostAccessToken, propertyId);
+
+        await SeedHoldAsync(unitId, CatalogSeeding.Today().AddDays(5), "held",
+            holdExpiresAt: DateTimeOffset.UtcNow.AddMinutes(10));
+
+        // Act
+        HttpResponseMessage response = await _client.SendAsync(
+            Authorized(HttpMethod.Delete, $"/api/catalog/units/{unitId}", hostAccessToken),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteUnit_ShouldSucceed_WhenItsOnlyHoldHasExpiredButNotYetBeenSwept()
+    {
+        // An expired hold cannot become a booking - ConfirmHoldAsync requires
+        // hold_expires_at > now - so blocking archival on one only meant
+        // waiting for ExpiredHoldsSweepJob to catch up.
+        string hostAccessToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken);
+        Guid unitId = await CreateUnitAsync(hostAccessToken, propertyId);
+
+        await SeedHoldAsync(unitId, CatalogSeeding.Today().AddDays(5), "held",
+            holdExpiresAt: DateTimeOffset.UtcNow.AddMinutes(-1));
+
+        // Act
+        HttpResponseMessage response = await _client.SendAsync(
+            Authorized(HttpMethod.Delete, $"/api/catalog/units/{unitId}", hostAccessToken),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
 }

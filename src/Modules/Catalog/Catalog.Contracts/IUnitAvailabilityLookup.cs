@@ -42,13 +42,36 @@ public interface IUnitAvailabilityLookup
         DateOnly checkIn, DateOnly checkOut, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>
-    ///     Does this unit have any hold at all right now, active or merely
-    ///     un-swept-yet-expired (same loose "held" || "booked" check the
-    ///     inline query this replaces always used) - what
-    ///     DeleteUnitHandler/DeletePropertyHandler check alongside
+    ///     Is a checkout in progress against this unit right now - what
+    ///     DeleteUnitHandler/DeletePropertyHandler ask alongside
     ///     IUnitArchivalGuard's booking check before archiving a unit.
+    ///     <para>
+    ///         Strictly the claims Availability owns and Bookings cannot yet
+    ///         see: a live unexpired hold, or one claimed by a checkout
+    ///         awaiting payment. Both are time-bounded and resolve on their
+    ///         own.
+    ///     </para>
+    ///     <para>
+    ///         Deliberately <em>not</em> sold ('booked') holds, though it used
+    ///         to include them. Nothing ever deletes a booked row, so one
+    ///         completed stay left a permanent 'booked' hold and this returned
+    ///         true for the rest of that unit's life - making it, and any
+    ///         property containing it, impossible to archive years after the
+    ///         guest went home. Whether a booking still blocks archival is a
+    ///         question about the booking's dates, which is
+    ///         IUnitArchivalGuard's to answer (BookingStatus != Cancelled and
+    ///         CheckOut >= today) and it already does, for future and current
+    ///         stays alike. Availability has no business re-deciding it from
+    ///         a row with no date on it.
+    ///     </para>
+    ///     <para>
+    ///         Expired-but-unswept 'held' rows no longer count either. Such a
+    ///         hold cannot become a booking - ConfirmHoldAsync requires
+    ///         hold_expires_at > now - so blocking archival on one only meant
+    ///         waiting for the sweep.
+    ///     </para>
     /// </summary>
-    Task<bool> HasActiveHoldForUnitAsync(Guid unitId, CancellationToken cancellationToken);
+    Task<bool> HasActiveHoldForUnitAsync(Guid unitId, DateTimeOffset now, CancellationToken cancellationToken);
 }
 
 public record ActiveHoldRange
