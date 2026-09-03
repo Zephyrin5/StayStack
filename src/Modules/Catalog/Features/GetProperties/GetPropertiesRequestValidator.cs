@@ -7,20 +7,29 @@ namespace Catalog.Features.GetProperties;
 
 public sealed class GetPropertiesRequestValidator : Validator<GetPropertiesRequest>
 {
-    // Pure request-shape rule (doesn't need "today") - same split as the
-    // hold path's: this bounds stay length, GetPropertiesHandler's lead-time
-    // guard bounds how far out CheckIn can be (that one needs "today", so it
-    // can't live here). Without either, an anonymous caller could search a
-    // decades-wide window - which GetPropertiesHandler answers by asking
-    // Availability for every unit blocked anywhere on the platform across
-    // that whole window.
+    // Both halves of the stay-window rule live here, rather than stay length
+    // here and lead time in the handler. They bound one request between them
+    // and a reader should find them together; splitting them also meant the
+    // lead-time 400 surfaced from the handler as a thrown exception while its
+    // sibling came back from request validation.
     //
+    // The hold path still splits them, and has to: its lead-time check
+    // resolves "today" in the property's own time zone (docs/adr/0018), which
+    // needs the Unit loaded, so HoldAvailabilityHandler owns it. Search
+    // resolves against UTC because it spans every property's zone at once, and
+    // a clock is injectable where a loaded entity isn't.
+    //
+    // Without either bound an anonymous caller could search a decades-wide
+    // window - which GetPropertiesHandler answers by asking Availability for
+    // every unit blocked anywhere on the platform across that whole window.
     // Both numbers come from StaySearchPolicyOptions, the same instance the
-    // hold path reads, so search cannot offer a stay that HoldAvailability
-    // would then refuse.
-    public GetPropertiesRequestValidator(IOptions<StaySearchPolicyOptions> staySearchPolicy)
+    // hold path reads, so search cannot offer a stay HoldAvailability would
+    // then refuse.
+    public GetPropertiesRequestValidator(
+        IOptions<StaySearchPolicyOptions> staySearchPolicy, TimeProvider timeProvider)
     {
         int maxStayNights = staySearchPolicy.Value.MaxStayNights;
+        int maxLeadTimeDays = staySearchPolicy.Value.MaxLeadTimeDays;
 
         RuleFor(x => x.Page).GreaterThanOrEqualTo(1);
         RuleFor(x => x.PageSize).InclusiveBetween(1, PaginationDefaults.MaxPageSize);
@@ -47,5 +56,17 @@ public sealed class GetPropertiesRequestValidator : Validator<GetPropertiesReque
             .WithName(nameof(GetPropertiesRequest.CheckOut))
             .WithMessage($"Stay length cannot exceed {maxStayNights} nights.")
             .When(x => x.CheckIn is not null && x.CheckOut is not null);
+
+        // GetUtcNow() inside the rule, not hoisted into the constructor
+        // alongside the two ints above. FastEndpoints resolves validators
+        // once and reuses them, so a "today" captured here would be the day
+        // the process started - drifting a day further out of date every day
+        // the app stays up, and silently rejecting valid searches.
+        RuleFor(x => x.CheckIn)
+            .Must(checkIn => checkIn!.Value.DayNumber
+                             - DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime).DayNumber
+                             <= maxLeadTimeDays)
+            .WithMessage($"Check-in date cannot be more than {maxLeadTimeDays} days in the future.")
+            .When(x => x.CheckIn is not null);
     }
 }

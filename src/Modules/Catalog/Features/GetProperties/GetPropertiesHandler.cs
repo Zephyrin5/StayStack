@@ -1,11 +1,9 @@
-using BuildingBlocks.Exceptions;
 using BuildingBlocks.Pagination;
 using Catalog.Contracts;
 using Catalog.Entities;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
-using Microsoft.Extensions.Options;
 using Persistence;
 namespace Catalog.Features.GetProperties;
 
@@ -13,39 +11,17 @@ public class GetPropertiesHandler(
     AppCatalogDbContext dbContext,
     IUnitAvailabilityLookup availabilityLookup,
     TimeProvider timeProvider,
-    IOptions<StaySearchPolicyOptions> staySearchPolicy,
     HybridCache cache) : IRequestHandler<GetPropertiesRequest, PagedSliceResponse<PropertySummary>>
 {
-    // Enforced here rather than in the validator because it needs "today",
-    // the same split the hold path makes (GetPropertiesRequestValidator
-    // covers the half that doesn't need it).
-    //
-    // The value is HoldAvailabilityHandler's too - one number, so search
-    // cannot offer a check-in date the hold path would refuse. What differs,
-    // and has to, is the anchor: this is UTC "today", while the hold path
-    // uses the property's own time zone (docs/adr/0018). A search spans every
-    // property's zone at once and has no single one to resolve against, so
-    // at the exact boundary the two can differ by a day. See
-    // StaySearchPolicyOptions.
-    private readonly int _maxLeadTimeDays = staySearchPolicy.Value.MaxLeadTimeDays;
-
     public async ValueTask<PagedSliceResponse<PropertySummary>> Handle(GetPropertiesRequest request, CancellationToken cancellationToken)
     {
-        // Ahead of the cache lookup, not inside LoadFromDatabaseAsync - a
-        // request this far out shouldn't even earn a cache entry, and
-        // rejecting it before touching Postgres or Availability is the
-        // whole point of the bound below.
-        if (request.CheckIn is not null)
-        {
-            DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
-            if (request.CheckIn.Value.DayNumber - today.DayNumber > _maxLeadTimeDays)
-            {
-                throw new ValidationException(
-                    nameof(request.CheckIn),
-                    $"Check-in date cannot be more than {_maxLeadTimeDays} days in the future.");
-            }
-        }
-
+        // No stay-window guard here - GetPropertiesRequestValidator owns both
+        // halves of that rule, so an out-of-range window is refused before
+        // this handler runs at all, and before a cache key is ever computed
+        // for it. The hold path keeps its own lead-time check in the handler
+        // because that one needs the property's time zone; this one only
+        // needs a clock. See StaySearchPolicyOptions.
+        //
         // Every filter/pagination field that changes the result has to be
         // part of the key - an incomplete key would serve one search's
         // results back for another. A 30s staleness window only means a
@@ -112,8 +88,8 @@ public class GetPropertiesHandler(
             // hold/booking for the dates - bounded by how many units are
             // actually booked in this window, not by total inventory,
             // since GetBlockedUnitIdsAsync no longer needs a candidate id
-            // list narrowed down first. StaySearchPolicyOptions' two bounds
-            // (stay length in the validator, lead time above) are what keep
+            // list narrowed down first. StaySearchPolicyOptions' two bounds,
+            // both enforced in GetPropertiesRequestValidator, are what keep
             // that window - and therefore this set - from growing without
             // limit.
             IReadOnlySet<Guid> blockedUnitIds = await availabilityLookup.GetBlockedUnitIdsAsync(

@@ -564,10 +564,12 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task GetProperties_ShouldReturn400_WhenCheckInExceedsMaxLeadTime()
     {
-        // Guards StaySearchPolicyOptions.MaxLeadTimeDays on the search path -
-        // enforced in the handler rather than the validator since it needs
-        // "today", the same split the hold path makes. Stay length has to
-        // stay within the stay-length bound too, or this would 400 for the wrong
+        // Guards StaySearchPolicyOptions.MaxLeadTimeDays on the search path.
+        // The rule itself is unit-tested against a fixed clock in
+        // GetPropertiesRequestValidatorTests; what this adds is that the
+        // validator is actually wired with a real TimeProvider through DI,
+        // which a directly-constructed validator can't show. Stay length has
+        // to stay within its own bound too, or this would 400 for the wrong
         // reason.
         DateOnly checkIn = CatalogSeeding.Today().AddDays(StaySearchPolicy.MaxLeadTimeDays + 1);
         DateOnly checkOut = checkIn.AddDays(1);
