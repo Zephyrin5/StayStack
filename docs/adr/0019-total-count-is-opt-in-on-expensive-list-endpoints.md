@@ -26,6 +26,17 @@ So the question is not whether a total count is worth its cost. It is whether ev
 
 `GetProperties` is the only endpoint moved today. `GetMyProperties`, `GetHostProperties` and every other paged endpoint keep the counted envelope.
 
+### Which envelope a new endpoint gets
+
+**Slice where the count is both expensive and unused. Count everywhere else.** Both halves are required, and the conjunction is what stops this becoming a coin flip on the twelve-and-counting paged endpoints:
+
+- *Expensive and unused* - `GetProperties`. Moved.
+- *Expensive and displayed* - keep the count and pay for it; the number is a product requirement, and the alternative is lying about it. Consider a cheaper filter, or keyset, before considering a saturating total.
+- *Cheap and unused* - **keep the count.** This is the case the rule exists to settle, and the answer is not the intuitive one. A `CountAsync` over an ordinary indexed predicate is close to free, while a second envelope shape is a permanent cost paid by every client, generated schema and consumer of that endpoint. Splitting the API to save a rounding error trades a cost that shows up in a profiler for one that shows up in every reader's head. It is also the case that describes most of the eleven endpoints that did not move.
+- *Cheap and displayed* - keep the count. The overwhelming default.
+
+The trigger is a filter expensive enough that executing it twice is a real cost - an unbounded `ILIKE`, a cross-module array, a correlated `EXISTS` - not merely a count with no current reader.
+
 ### The boolean is more accurate than the arithmetic it replaces
 
 Not merely cheaper. `loaded < totalCount` compares a running client-side tally against a total measured by a different query, and goes wrong the moment a row is inserted or removed between two page fetches - which is why the sitemap walk carried a second `items.length === 0` check beside it. `HasNextPage` is observed by the query that returned the page, so it cannot disagree with that page.
@@ -44,7 +55,8 @@ Skipping the count does not skip the `OFFSET`. `PaginationDefaults.MaxOffset` an
 ## Consequences
 
 - **A breaking change to a public, anonymous endpoint.** `GET /api/catalog/properties` no longer returns `totalCount`. The generated client schema was regenerated and the two callers moved to `hasNextPage`.
-- New paged endpoints should ask whether anything renders the total. If nothing does, `PagedSliceResponse<T>` is the default; ADR-0008's "use `PagedResponse<T>`" now means "use it when the total has a reader".
+- New paged endpoints follow the two-part rule above. `PagedResponse<T>` remains the default that ADR-0008 made it; `PagedSliceResponse<T>` is the exception, taken when a genuinely expensive filter would otherwise run twice for a number nothing reads. An earlier draft of this bullet made slicing the default whenever nothing rendered the total, which was a looser rule than the one actually applied - it would have moved most of the eleven untouched endpoints, and none of them were moved.
+- **The API is inconsistent across list endpoints, deliberately, and clients see it.** `GET /api/catalog/properties` returns `hasNextPage` while every other paged endpoint returns `totalCount`, so a client cannot assume one paging shape. That is the cost of the rule above, accepted rather than overlooked: the alternative is either paying for a duplicated expensive filter on browse, or churning eleven endpoints and their consumers to a shape none of them needed. The split is kept legible by being decidable from the endpoint itself - one field's difference, one rule, and a reason recorded here - rather than by being uniform.
 - `InfiniteList` is typed against `ItemsPage<T>` (`{ items }`) rather than `PagedResult<T>`, since it never read anything else. It works over both envelopes.
 - Two envelope shapes now exist where there was one, which is a real cost in a codebase that deliberately shares one. It is bounded: the difference is a single field and the choice is decided by one question with an observable answer.
 - **This does not bound the offset scan**, only the duplicate filter execution. `MaxOffset` remains the thing standing between an anonymous query string and a deep scan.
