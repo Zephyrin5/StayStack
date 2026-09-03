@@ -71,9 +71,18 @@ public class StaySearchPolicyOptions
     /// <summary>
     ///     How far in the future a check-in date may be. Without it an
     ///     anonymous caller could hold a unit for [today, today+3650) and the
-    ///     exclusion constraint would enforce that decade-long block, or ask
-    ///     search for a window wide enough that the blocked-unit set it
-    ///     materializes stops being bounded by anything useful.
+    ///     exclusion constraint would enforce that decade-long block - the
+    ///     damage bound in docs/adr/0016, and a product rule about how far
+    ///     ahead this platform sells.
+    ///     <para>
+    ///         Purely those two things. It is *not* what bounds the
+    ///         blocked-unit set <c>GetPropertiesHandler</c> materializes,
+    ///         though it is easy to assume from where the two are enforced:
+    ///         this bounds where a window starts, and a window's distance
+    ///         from today says nothing about how many bookings fall inside
+    ///         it. See <see cref="MaxStayNights"/>, which is the one that
+    ///         does.
+    ///     </para>
     /// </summary>
     [Range(1, 3650)]
     public int MaxLeadTimeDays { get; set; } = 730;
@@ -83,11 +92,14 @@ public class StaySearchPolicyOptions
     ///     <para>
     ///         The upper end of the Range is deliberately far tighter than
     ///         MaxLeadTimeDays'. <c>GetPropertiesHandler</c> depends on this
-    ///         for more than product policy: together with the lead-time
-    ///         bound it is what keeps the blocked-unit set Availability
-    ///         returns proportional to real occupancy in a bounded window
-    ///         rather than to every unit ever booked. A deployment able to
-    ///         set this to a decade could silently undo that.
+    ///         for more than product policy: on its own, it is what keeps the
+    ///         blocked-unit set Availability returns proportional to real
+    ///         occupancy in a bounded window rather than to every unit ever
+    ///         booked. That set is the units booked across the requested
+    ///         window, so it scales with the window's width - which is this
+    ///         value and nothing else. A deployment able to set this to a
+    ///         decade could silently undo that, which is why the Range here
+    ///         is tight even though a long stay is otherwise harmless.
     ///     </para>
     /// </summary>
     [Range(1, 365)]

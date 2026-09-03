@@ -19,9 +19,14 @@ public sealed class GetPropertiesRequestValidator : Validator<GetPropertiesReque
     // resolves against UTC because it spans every property's zone at once, and
     // a clock is injectable where a loaded entity isn't.
     //
-    // Without either bound an anonymous caller could search a decades-wide
-    // window - which GetPropertiesHandler answers by asking Availability for
-    // every unit blocked anywhere on the platform across that whole window.
+    // The two are not doing the same job, despite sitting together. Stay
+    // length is the one GetPropertiesHandler leans on: without it an
+    // anonymous caller could search a decades-wide window, which that handler
+    // answers by asking Availability for every unit blocked anywhere on the
+    // platform across the whole of it. Lead time is a product rule about how
+    // far ahead this platform sells, and bounds nothing about that set - it
+    // moves where the window sits, not how wide it is.
+    //
     // Both numbers come from StaySearchPolicyOptions, the same instance the
     // hold path reads, so search cannot offer a stay HoldAvailability would
     // then refuse.

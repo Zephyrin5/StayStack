@@ -88,10 +88,17 @@ public class GetPropertiesHandler(
             // hold/booking for the dates - bounded by how many units are
             // actually booked in this window, not by total inventory,
             // since GetBlockedUnitIdsAsync no longer needs a candidate id
-            // list narrowed down first. StaySearchPolicyOptions' two bounds,
-            // both enforced in GetPropertiesRequestValidator, are what keep
-            // that window - and therefore this set - from growing without
-            // limit.
+            // list narrowed down first. What keeps this set from growing
+            // without limit is StaySearchPolicyOptions.MaxStayNights alone,
+            // enforced in GetPropertiesRequestValidator: the set is the units
+            // booked across the requested window, so it scales with that
+            // window's width and nothing else. MaxLeadTimeDays is not doing
+            // work here despite sitting beside it - it bounds where the
+            // window starts, and a window's distance from today says nothing
+            // about how many bookings fall inside it. If anything it excludes
+            // the sparsest queries, since the far future is the least booked.
+            // It is a product rule, and a hold-path damage bound
+            // (docs/adr/0016); it is not load-bearing for this.
             IReadOnlySet<Guid> blockedUnitIds = await availabilityLookup.GetBlockedUnitIdsAsync(
                 request.CheckIn.Value, request.CheckOut.Value, timeProvider.GetUtcNow(), cancellationToken);
 
