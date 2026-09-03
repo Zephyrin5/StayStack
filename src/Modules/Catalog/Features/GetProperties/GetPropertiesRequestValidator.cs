@@ -57,6 +57,18 @@ public sealed class GetPropertiesRequestValidator : Validator<GetPropertiesReque
             .WithMessage($"Stay length cannot exceed {maxStayNights} nights.")
             .When(x => x.CheckIn is not null && x.CheckOut is not null);
 
+        // A UTC business date, deliberately - not an oversight, and the only
+        // one in src/ that decides anything. Everything else that compares a
+        // date to "today" resolves it in the property's own time zone via
+        // PropertyTimeZone (docs/adr/0018), because it has a property in hand
+        // and the answer would otherwise be wrong by a day near midnight.
+        // A search has no property in scope yet - it spans every zone at once,
+        // so there is no zone to resolve against - and a day of fuzz on a
+        // 730-day bound decides nothing. The one other UTC date, in
+        // ListMyReviewableBookingsHandler, is a different case again: a query
+        // bound widened a day either side on purpose, with the exact
+        // per-zone test applied to the results afterwards.
+        //
         // GetUtcNow() inside the rule, not hoisted into the constructor
         // alongside the two ints above. FastEndpoints resolves validators
         // once and reuses them, so a "today" captured here would be the day
