@@ -4,7 +4,7 @@ using FastEndpoints;
 using Mediator;
 namespace Api.Endpoints.Catalog;
 
-public class GetPropertiesEndpoint(IMediator mediator) : Endpoint<GetPropertiesRequest, PagedResponse<PropertySummary>>
+public class GetPropertiesEndpoint(IMediator mediator) : Endpoint<GetPropertiesRequest, PagedSliceResponse<PropertySummary>>
 {
     public override void Configure()
     {
@@ -20,13 +20,13 @@ public class GetPropertiesEndpoint(IMediator mediator) : Endpoint<GetPropertiesR
                             "CheckIn/CheckOut must be provided together; a property matches only if it has " +
                             "at least one unit that satisfies both the guest count and the date range. " +
                             "Paginated - defaults to page 1, 20 per page.";
-            s.Response<PagedResponse<PropertySummary>>(200, "Properties returned.");
+            s.Response<PagedSliceResponse<PropertySummary>>(200, "Properties returned.");
         });
     }
 
     public override async Task HandleAsync(GetPropertiesRequest req, CancellationToken ct)
     {
-        PagedResponse<PropertySummary> result = await mediator.Send(req, ct);
+        PagedSliceResponse<PropertySummary> result = await mediator.Send(req, ct);
         await Send.OkAsync(result, ct);
     }
 }

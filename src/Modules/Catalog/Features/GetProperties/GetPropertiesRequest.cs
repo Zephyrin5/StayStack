@@ -11,7 +11,7 @@ namespace Catalog.Features.GetProperties;
 // the way GetMyPropertiesRequest's handler resolves it instead. See
 // docs/adr/0007 for why these stay two separate requests rather than one
 // shared shape.
-public record GetPropertiesRequest : IRequest<PagedResponse<PropertySummary>>
+public record GetPropertiesRequest : IRequest<PagedSliceResponse<PropertySummary>>
 {
     public string? City { get; init; }
     public PropertyType? PropertyType { get; init; }

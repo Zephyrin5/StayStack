@@ -32,10 +32,87 @@ public static class PaginationExtensions
         int pageSize,
         CancellationToken cancellationToken)
     {
-        // Before the count, deliberately: a rejected page must cost no database
-        // work at all, and CountAsync runs the full filter. It used to run
-        // first, so a caller asking for page 20,000,000 paid for the count
-        // before anything looked at the offset.
+        int offset = GuardOffsetAndCompute(page, pageSize);
+
+        // Two queries, and the count is the expensive one: it re-runs the whole
+        // WHERE clause without the LIMIT that bounds the page query. That is the
+        // price of an exact TotalCount and it is worth paying wherever a caller
+        // actually shows the number - the admin lists render "Page 3 of 12 - 240
+        // total" and cannot do that from a boolean.
+        //
+        // Where the total is only feeding a "load more" decision, this is the
+        // wrong overload: ToPagedSliceAsync answers that in one query.
+        int totalCount = await query.CountAsync(cancellationToken);
+
+        List<T> items = await query
+            .Skip(offset)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return (items, totalCount);
+    }
+
+    /// <summary>
+    ///     The same paging, one query instead of two, for callers that need to
+    ///     know whether a next page exists but not how many rows there are in
+    ///     total.
+    /// </summary>
+    /// <remarks>
+    ///     Asks for pageSize + 1 rows and returns pageSize of them. If the
+    ///     extra row came back there is more to fetch; the row itself is
+    ///     discarded. That makes the "is there more" answer a property of the
+    ///     page query rather than a second full execution of the filter.
+    ///     <para>
+    ///         The saving is the entire count. On a cheap filter that is a
+    ///         rounding error and <see cref="ToPagedListAsync{T}"/> is worth
+    ///         its extra information; on GetProperties, whose WHERE clause
+    ///         includes an EXISTS over a candidate-unit id array, it halves the
+    ///         work of every cache miss.
+    ///     </para>
+    ///     <para>
+    ///         One row over is deliberate rather than one page over: the extra
+    ///         row rides along in the same index scan Postgres was already
+    ///         doing for the page, so the marginal cost is a row, not a query.
+    ///     </para>
+    /// </remarks>
+    public static async Task<(List<T> Items, bool HasNextPage)> ToPagedSliceAsync<T>(
+        this IQueryable<T> query,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        int offset = GuardOffsetAndCompute(page, pageSize);
+
+        // pageSize is at least 1 past the guard, but nothing bounds it from
+        // above here - MaxPageSize is enforced by the request validators, not
+        // by this method - so pageSize + 1 could overflow to negative and make
+        // Take throw. Clamping instead reports no next page at a page size of
+        // int.MaxValue, which is correct for any result set that can exist.
+        int probeSize = pageSize < int.MaxValue ? pageSize + 1 : pageSize;
+
+        List<T> items = await query
+            .Skip(offset)
+            .Take(probeSize)
+            .ToListAsync(cancellationToken);
+
+        bool hasNextPage = items.Count > pageSize;
+        if (hasNextPage)
+        {
+            items.RemoveAt(items.Count - 1);
+        }
+
+        return (items, hasNextPage);
+    }
+
+    // Shared so the two overloads cannot drift on the bound that matters. A
+    // slice query skips the count but still issues an OFFSET, so it needs this
+    // guard for exactly the same reason.
+    private static int GuardOffsetAndCompute(int page, int pageSize)
+    {
+        // Before any query, deliberately: a rejected page must cost no database
+        // work at all. It used to run after the count, so a caller asking for
+        // page 20,000,000 paid for the count before anything looked at the
+        // offset.
         //
         // The offset is what needed bounding, not the page. page and pageSize
         // are both int and C# arithmetic is unchecked, so (page - 1) * pageSize
@@ -56,17 +133,8 @@ public static class PaginationExtensions
                 "Narrow the search rather than paging deeper.");
         }
 
-        int totalCount = await query.CountAsync(cancellationToken);
-
         // Safe to narrow: IsOffsetWithinLimit has already bounded this well
         // inside int range.
-        int offset = (int)(((long)page - 1) * pageSize);
-
-        List<T> items = await query
-            .Skip(offset)
-            .Take(pageSize)
-            .ToListAsync(cancellationToken);
-
-        return (items, totalCount);
+        return (int)(((long)page - 1) * pageSize);
     }
 }

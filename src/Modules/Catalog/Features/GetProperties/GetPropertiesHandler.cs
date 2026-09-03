@@ -11,9 +11,9 @@ public class GetPropertiesHandler(
     AppCatalogDbContext dbContext,
     IUnitAvailabilityLookup availabilityLookup,
     TimeProvider timeProvider,
-    HybridCache cache) : IRequestHandler<GetPropertiesRequest, PagedResponse<PropertySummary>>
+    HybridCache cache) : IRequestHandler<GetPropertiesRequest, PagedSliceResponse<PropertySummary>>
 {
-    public async ValueTask<PagedResponse<PropertySummary>> Handle(GetPropertiesRequest request, CancellationToken cancellationToken)
+    public async ValueTask<PagedSliceResponse<PropertySummary>> Handle(GetPropertiesRequest request, CancellationToken cancellationToken)
     {
         // Every filter/pagination field that changes the result has to be
         // part of the key - an incomplete key would serve one search's
@@ -43,7 +43,7 @@ public class GetPropertiesHandler(
             cancellationToken: cancellationToken);
     }
 
-    private async Task<PagedResponse<PropertySummary>> LoadFromDatabaseAsync(
+    private async Task<PagedSliceResponse<PropertySummary>> LoadFromDatabaseAsync(
         GetPropertiesRequest request, string? normalizedCity, CancellationToken cancellationToken)
     {
         var query = dbContext.Properties.AsNoTracking();
@@ -120,16 +120,22 @@ public class GetPropertiesHandler(
         // If a real sort ever gets added here (price, rating, relevance),
         // it needs to be `.OrderBy(p => p.SomeField).ThenBy(p => p.Id)`,
         // not a bare `.OrderBy(p => p.SomeField)`.
-        (List<Property> properties, int totalCount) = await query
+        // Slice, not ToPagedListAsync: an exact total here meant a second
+        // execution of everything above - the ILIKE, and the EXISTS over
+        // candidateUnitIds - with no LIMIT to bound it. Nothing consumes the
+        // number. The browse UI feeds it straight into a "load more" decision
+        // and the sitemap walk stops on an empty page, so both want a boolean,
+        // and a boolean costs one extra row on a query already running.
+        (List<Property> properties, bool hasNextPage) = await query
             .OrderBy(p => p.Id)
-            .ToPagedListAsync(request.Page, request.PageSize, cancellationToken);
+            .ToPagedSliceAsync(request.Page, request.PageSize, cancellationToken);
 
-        return new PagedResponse<PropertySummary>
+        return new PagedSliceResponse<PropertySummary>
         {
             Items = PropertySummaryMapper.Map(properties),
             Page = request.Page,
             PageSize = request.PageSize,
-            TotalCount = totalCount
+            HasNextPage = hasNextPage
         };
     }
 

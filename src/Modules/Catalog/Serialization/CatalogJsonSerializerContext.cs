@@ -29,6 +29,9 @@ namespace Catalog.Serialization;
 [JsonSerializable(typeof(GetPriceCalendarResponse))]
 [JsonSerializable(typeof(GetPropertiesRequest))]
 [JsonSerializable(typeof(PagedResponse<PropertySummary>))]
+// GetProperties returns the slice shape; GetMyProperties and
+// GetHostProperties still return the counted one, so both are reachable.
+[JsonSerializable(typeof(PagedSliceResponse<PropertySummary>))]
 [JsonSerializable(typeof(GetMyPropertiesRequest))]
 [JsonSerializable(typeof(GetHostPropertiesRequest))]
 [JsonSerializable(typeof(GetPropertyByIdRequest))]

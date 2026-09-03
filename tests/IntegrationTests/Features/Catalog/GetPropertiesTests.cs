@@ -164,7 +164,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedSliceResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedSliceResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         PropertySummary property = Assert.Single(result.Items, p => p.Id == propertyId);
         Assert.Equal(hostId, property.HostId);
@@ -185,14 +185,14 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedSliceResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedSliceResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.All(result.Items, p => Assert.Equal(uniqueCity, p.City));
         Assert.Contains(result.Items, p => p.Id == matchingPropertyId);
     }
 
     [Fact]
-    public async Task GetProperties_ShouldSliceByPageAndReportTotalCount()
+    public async Task GetProperties_ShouldSliceByPageAndReportWhetherMoreRemain()
     {
         // Arrange - 3 properties sharing one unique city (isolates this
         // test from other seed data in the shared test database, same
@@ -210,19 +210,21 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
             $"/api/catalog/properties?City={Uri.EscapeDataString(uniqueCity)}&Page=2&PageSize=2", TestContext.Current.CancellationToken);
 
         // Assert
-        PagedResponse<PropertySummary>? page1 =
-            await page1Response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
-        PagedResponse<PropertySummary>? page2 =
-            await page2Response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedSliceResponse<PropertySummary>? page1 =
+            await page1Response.Content.ReadFromJsonAsync<PagedSliceResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedSliceResponse<PropertySummary>? page2 =
+            await page2Response.Content.ReadFromJsonAsync<PagedSliceResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(page1);
         Assert.NotNull(page2);
 
+        // HasNextPage rather than a TotalCount of 3: this endpoint no longer
+        // pays for a count nothing displays. See PagedSliceTests for why.
         Assert.Equal(2, page1.Items.Count);
-        Assert.Equal(3, page1.TotalCount);
+        Assert.True(page1.HasNextPage);
         Assert.Equal(1, page1.Page);
 
         Assert.Single(page2.Items);
-        Assert.Equal(3, page2.TotalCount);
+        Assert.False(page2.HasNextPage);
         Assert.Equal(2, page2.Page);
 
         // No overlap/gap between pages - together they cover exactly the 3
@@ -295,7 +297,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedSliceResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedSliceResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.Contains(result.Items, p => p.Id == firstHostPropertyId);
         Assert.Contains(result.Items, p => p.Id == secondHostPropertyId);
@@ -369,7 +371,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedSliceResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedSliceResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.DoesNotContain(result.Items, p => p.Id == propertyId);
     }
@@ -399,7 +401,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedSliceResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedSliceResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.Contains(result.Items, p => p.Id == propertyId);
     }
@@ -419,7 +421,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedSliceResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedSliceResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.DoesNotContain(result.Items, p => p.Id == propertyId);
     }
@@ -439,7 +441,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedSliceResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedSliceResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.Contains(result.Items, p => p.Id == propertyId);
     }
@@ -470,7 +472,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedSliceResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedSliceResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.DoesNotContain(result.Items, p => p.Id == propertyId);
     }
@@ -490,7 +492,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedSliceResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedSliceResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.Contains(result.Items, p => p.Id == propertyId);
     }
@@ -515,7 +517,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        PagedResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        PagedSliceResponse<PropertySummary>? result = await response.Content.ReadFromJsonAsync<PagedSliceResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.Contains(result.Items, p => p.Id == matchingPropertyId);
         Assert.DoesNotContain(result.Items, p => p.Id == otherPropertyId);
