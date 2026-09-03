@@ -3,6 +3,7 @@ using Availability.Entities;
 using Bogus;
 using BuildingBlocks.Pagination;
 using Catalog;
+using Catalog.Contracts;
 using Catalog.Entities;
 using Catalog.Enums;
 using Catalog.Features.CreateProperty;
@@ -14,6 +15,7 @@ using Identity.Features.BecomeHost;
 using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using NpgsqlTypes;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
@@ -532,13 +534,25 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    // Resolved from the running host rather than read off a constant, since
+    // the bounds are configuration now and shared with the hold path - this
+    // asserts against whatever the deployment actually configured.
+    private StaySearchPolicyOptions StaySearchPolicy
+    {
+        get
+        {
+            using IServiceScope scope = factory.Services.CreateScope();
+            return scope.ServiceProvider.GetRequiredService<IOptions<StaySearchPolicyOptions>>().Value;
+        }
+    }
+
     [Fact]
     public async Task GetProperties_ShouldReturn400_WhenStayExceedsMaxNights()
     {
-        // Guards GetPropertiesRequestValidator.MaxStayNights - without it,
-        // an anonymous caller could search a decades-wide window.
+        // Guards StaySearchPolicyOptions.MaxStayNights on the search path -
+        // without it, an anonymous caller could search a decades-wide window.
         DateOnly checkIn = CatalogSeeding.Today();
-        DateOnly checkOut = checkIn.AddDays(GetPropertiesRequestValidator.MaxStayNights + 1);
+        DateOnly checkOut = checkIn.AddDays(StaySearchPolicy.MaxStayNights + 1);
 
         HttpResponseMessage response = await _client.GetAsync(
             $"/api/catalog/properties?CheckIn={checkIn:yyyy-MM-dd}&CheckOut={checkOut:yyyy-MM-dd}",
@@ -550,12 +564,12 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task GetProperties_ShouldReturn400_WhenCheckInExceedsMaxLeadTime()
     {
-        // Guards GetPropertiesHandler.MaxLeadTimeDays - lives in the
-        // handler rather than the validator since it needs "today" (same
-        // split as HoldAvailabilityRequestValidator/HoldAvailabilityHandler).
-        // Stay length has to stay within MaxStayNights too, or this would
-        // 400 for the wrong reason.
-        DateOnly checkIn = CatalogSeeding.Today().AddDays(731);
+        // Guards StaySearchPolicyOptions.MaxLeadTimeDays on the search path -
+        // enforced in the handler rather than the validator since it needs
+        // "today", the same split the hold path makes. Stay length has to
+        // stay within the stay-length bound too, or this would 400 for the wrong
+        // reason.
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(StaySearchPolicy.MaxLeadTimeDays + 1);
         DateOnly checkOut = checkIn.AddDays(1);
 
         HttpResponseMessage response = await _client.GetAsync(

@@ -27,7 +27,7 @@ Fifteen endpoints call `AllowAnonymous()`. Some are obviously safe (public prope
 Three separate mechanisms apply to `HoldAvailabilityEndpoint`, and they are not
 equally load-bearing:
 
-1. **`HoldAvailabilityRequestValidator.MaxStayNights` (90) and `HoldAvailabilityHandler.MaxLeadTimeDays` (730).** These bound how much damage *one* hold can do - a single request can no longer lock a decade of a unit's calendar, only a bounded window.
+1. **`StaySearchPolicyOptions.MaxStayNights` (90) and `.MaxLeadTimeDays` (730),** enforced on the hold path by `HoldAvailabilityRequestValidator` and `HoldAvailabilityHandler` respectively. These bound how much damage *one* hold can do - a single request can no longer lock a decade of a unit's calendar, only a bounded window. Both started as constants private to the hold path and were later duplicated by the search path, which has to apply the same bounds or offer stays that cannot then be held; they are now one configured value each, in `Catalog.Contracts` so both modules can read them without inverting the module order.
 2. **The `"holds"` rate-limit policy**, partitioned by caller IP (correct once `ForwardedHeaders` is processing a real proxy's headers). This bounds how *many requests* one caller can fire in a window. It is **not** what bounds held inventory - see the correction below. Its accepted cost is that an IP is the unit of "one caller", so a NAT'd office shares one 20/min allowance and a burst of honest concurrent traffic from one location can trip it.
 3. **`HoldAvailabilityHandler`'s concurrent-hold cap (`MaxActiveHoldsPerClient`, 25).** Counts a client network's *live* holds, across every unit, and rejects with 429 past the limit. This is what actually bounds the "hold out the whole inventory" attack.
 

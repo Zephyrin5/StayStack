@@ -7,6 +7,7 @@ using Bookings.Contracts;
 using Bookings;
 using BuildingBlocks.Configuration;
 using Catalog;
+using Catalog.Contracts;
 using FastEndpoints;
 using FastEndpoints.OpenApi;
 using Hosts;
@@ -56,6 +57,15 @@ builder.Services.ConfigureJobsServices(builder.Configuration, builder.Environmen
 // BookingLifecyclePolicyOptions, and the consistency check after Build().
 builder.Services.AddOptions<BookingLifecyclePolicyOptions>()
     .Bind(builder.Configuration.AppSection(BookingLifecyclePolicyOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+// How far ahead a stay can start and how long it can run - read by the search
+// path (Catalog) and the hold path (Availability) alike, so the two cannot
+// disagree about what is bookable. No consistency check after Build() to pair
+// with this one: there is a single value per bound rather than two that have
+// to be kept in step. See StaySearchPolicyOptions.
+builder.Services.AddOptions<StaySearchPolicyOptions>()
+    .Bind(builder.Configuration.AppSection(StaySearchPolicyOptions.SectionName))
     .ValidateDataAnnotations()
     .ValidateOnStart();
 

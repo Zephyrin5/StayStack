@@ -64,7 +64,7 @@ internal static class BookingAccessChecker
 
         // A leaked management link shouldn't stay valid forever. Anchored to
         // checkout rather than issuance: lead time is capped at 730 days
-        // (HoldAvailabilityHandler.MaxLeadTimeDays), so an issuance-anchored
+        // (StaySearchPolicyOptions.MaxLeadTimeDays), so an issuance-anchored
         // TTL of a few months would kill the token of anyone booking a
         // holiday well in advance, before they ever arrived.
         //

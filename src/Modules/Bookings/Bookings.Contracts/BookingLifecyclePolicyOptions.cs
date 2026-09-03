@@ -58,7 +58,7 @@ public class BookingLifecyclePolicyOptions
     ///     How long a guest-checkout management link stays usable after
     ///     checkout. Anchored to checkout rather than to issuance
     ///     deliberately: lead time is capped at
-    ///     <c>HoldAvailabilityHandler.MaxLeadTimeDays</c> (730), so an
+    ///     <c>StaySearchPolicyOptions.MaxLeadTimeDays</c> (730), so an
     ///     issuance-anchored TTL of a few months would kill the token of
     ///     anyone booking a holiday well in advance - before they ever
     ///     arrived.

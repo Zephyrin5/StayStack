@@ -1,12 +1,19 @@
 using Availability.Features.HoldAvailability;
+using Catalog.Contracts;
 using FluentValidation.TestHelper;
+using Microsoft.Extensions.Options;
 namespace UnitTests.Features.Availability.HoldAvailability;
 
 public class HoldAvailabilityRequestValidatorTests
 {
 
     private static readonly DateOnly Today = DateOnly.FromDateTime(DateTime.UtcNow);
-    private readonly HoldAvailabilityRequestValidator _sut = new HoldAvailabilityRequestValidator();
+
+    // Shared with the search path rather than defined here - see
+    // StaySearchPolicyOptions. The defaults are what appsettings ships.
+    private static readonly StaySearchPolicyOptions Policy = new StaySearchPolicyOptions();
+    private readonly HoldAvailabilityRequestValidator _sut =
+        new HoldAvailabilityRequestValidator(Options.Create(Policy));
 
     private static HoldAvailabilityRequest CreateValidRequest()
     {
@@ -66,7 +73,7 @@ public class HoldAvailabilityRequestValidatorTests
     {
         HoldAvailabilityRequest request = CreateValidRequest() with
         {
-            CheckOut = Today.AddDays(HoldAvailabilityRequestValidator.MaxStayNights)
+            CheckOut = Today.AddDays(Policy.MaxStayNights)
         };
 
         var result = _sut.TestValidate(request);
@@ -78,11 +85,11 @@ public class HoldAvailabilityRequestValidatorTests
     public void Validate_ShouldHaveError_ForCheckOut_WhenStayExceedsMaxNights()
     {
         // Without this, an anonymous caller could hold a unit for a decade
-        // in one request - see HoldAvailabilityHandler's own MaxLeadTimeDays
+        // in one request - see HoldAvailabilityHandler's lead-time
         // guard for the other half of that same bound.
         HoldAvailabilityRequest request = CreateValidRequest() with
         {
-            CheckOut = Today.AddDays(HoldAvailabilityRequestValidator.MaxStayNights + 1)
+            CheckOut = Today.AddDays(Policy.MaxStayNights + 1)
         };
 
         var result = _sut.TestValidate(request);

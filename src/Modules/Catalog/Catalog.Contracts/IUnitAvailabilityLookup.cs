@@ -32,9 +32,8 @@ public interface IUnitAvailabilityLookup
     ///     Availability's table directly and without first materializing a
     ///     candidate unit id list on Catalog's side to narrow it - the
     ///     result is exactly as large as this window's actual bookings/holds,
-    ///     not the whole unit table, and GetPropertiesRequestValidator's
-    ///     MaxStayNights plus GetPropertiesHandler's own MaxLeadTimeDays
-    ///     bound that window so this can't grow past "every unit ever
+    ///     not the whole unit table, and <see cref="StaySearchPolicyOptions"/>
+    ///     bounds that window so this can't grow past "every unit ever
     ///     booked" on a wide-open search.
     /// </summary>
     Task<IReadOnlySet<Guid>> GetBlockedUnitIdsAsync(

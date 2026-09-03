@@ -17,16 +17,21 @@ public class HoldAvailabilityHandler(
     AppAvailabilityDbContext dbContext,
     IUnitLookup unitLookup,
     TimeProvider timeProvider,
-    IOptions<HoldCapOptions> holdCapOptions)
+    IOptions<HoldCapOptions> holdCapOptions,
+    IOptions<StaySearchPolicyOptions> staySearchPolicy)
     : IRequestHandler<HoldAvailabilityRequest, HoldAvailabilityResponse>
 {
     private static readonly TimeSpan HoldDuration = TimeSpan.FromMinutes(15);
 
-    // Lives here, not the validator, since it needs "today" - same
+    // Enforced here, not in the validator, since it needs "today" - same
     // reasoning as the CheckIn-in-the-past guard below. Without it an
     // anonymous caller could hold a unit for [today, today+3650), and the
     // exclusion constraint would enforce that block for a decade.
-    private const int MaxLeadTimeDays = 730;
+    //
+    // Shared with GetPropertiesHandler rather than defined here: a search
+    // that offers dates this handler then refuses is a dead end the guest
+    // only reaches after picking them. See StaySearchPolicyOptions.
+    private readonly int _maxLeadTimeDays = staySearchPolicy.Value.MaxLeadTimeDays;
 
     // Live holds one client network may have at once, counted by
     // ClientKey. This used to be 5 per hold-session cookie, which was no
@@ -38,9 +43,9 @@ public class HoldAvailabilityHandler(
     // that matters. A fixed-window limiter caps request *rate*; holds
     // expire on their own 15-minute clock, so at 20/60s a single caller
     // accumulates ~300 concurrent live holds without ever tripping it -
-    // each blocking up to MaxStayNights of a unit via the exclusion
-    // constraint. Rate says how fast you reach saturation, not how much
-    // you can hold. See docs/adr/0016.
+    // each blocking up to StaySearchPolicyOptions.MaxStayNights of a unit
+    // via the exclusion constraint. Rate says how fast you reach
+    // saturation, not how much you can hold. See docs/adr/0016.
     private readonly int _maxActiveHoldsPerClient = holdCapOptions.Value.MaxActiveHoldsPerClient;
 
     public async ValueTask<HoldAvailabilityResponse> Handle(
@@ -87,11 +92,11 @@ public class HoldAvailabilityHandler(
             throw new ValidationException(nameof(request.CheckIn), "Check-in date cannot be in the past.");
         }
 
-        if (request.CheckIn.DayNumber - today.DayNumber > MaxLeadTimeDays)
+        if (request.CheckIn.DayNumber - today.DayNumber > _maxLeadTimeDays)
         {
             throw new ValidationException(
                 nameof(request.CheckIn),
-                $"Check-in date cannot be more than {MaxLeadTimeDays} days in the future.");
+                $"Check-in date cannot be more than {_maxLeadTimeDays} days in the future.");
         }
 
         // Wrapped in the execution strategy, not called bare - a manually

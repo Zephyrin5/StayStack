@@ -1,12 +1,19 @@
+using Catalog.Contracts;
 using Catalog.Features.GetProperties;
 using FluentValidation.TestHelper;
+using Microsoft.Extensions.Options;
 namespace UnitTests.Features.Catalog.GetProperties;
 
 public class GetPropertiesRequestValidatorTests
 {
 
     private static readonly DateOnly Today = DateOnly.FromDateTime(DateTime.UtcNow);
-    private readonly GetPropertiesRequestValidator _sut = new GetPropertiesRequestValidator();
+
+    // The bounds are shared with the hold path now rather than being this
+    // validator's own constants - the defaults are what appsettings ships.
+    private static readonly StaySearchPolicyOptions Policy = new StaySearchPolicyOptions();
+    private readonly GetPropertiesRequestValidator _sut =
+        new GetPropertiesRequestValidator(Options.Create(Policy));
 
     private static GetPropertiesRequest CreateValidRequest()
     {
@@ -42,7 +49,7 @@ public class GetPropertiesRequestValidatorTests
     {
         GetPropertiesRequest request = CreateValidRequest() with
         {
-            CheckOut = Today.AddDays(GetPropertiesRequestValidator.MaxStayNights)
+            CheckOut = Today.AddDays(Policy.MaxStayNights)
         };
 
         var result = _sut.TestValidate(request);
@@ -54,11 +61,11 @@ public class GetPropertiesRequestValidatorTests
     public void Validate_ShouldHaveError_ForCheckOut_WhenStayExceedsMaxNights()
     {
         // Without this, an anonymous caller could search a decades-wide
-        // window - see GetPropertiesHandler's own MaxLeadTimeDays guard for
+        // window - see GetPropertiesHandler's lead-time guard for
         // the other half of that same bound.
         GetPropertiesRequest request = CreateValidRequest() with
         {
-            CheckOut = Today.AddDays(GetPropertiesRequestValidator.MaxStayNights + 1)
+            CheckOut = Today.AddDays(Policy.MaxStayNights + 1)
         };
 
         var result = _sut.TestValidate(request);

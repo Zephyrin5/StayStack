@@ -72,9 +72,14 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         AppAvailabilityDbContext context, TimeProvider timeProvider, IServiceScope scope, int maxActiveHoldsPerClient = 5)
     {
         IUnitLookup unitLookup = scope.ServiceProvider.GetRequiredService<IUnitLookup>();
+        // Resolved rather than constructed, so these tests exercise the same
+        // lead-time bound the search path reads - see StaySearchPolicyOptions.
+        IOptions<StaySearchPolicyOptions> staySearchPolicy =
+            scope.ServiceProvider.GetRequiredService<IOptions<StaySearchPolicyOptions>>();
         return new HoldAvailabilityHandler(
             context, unitLookup, timeProvider,
-            Options.Create(new HoldCapOptions { MaxActiveHoldsPerClient = maxActiveHoldsPerClient }));
+            Options.Create(new HoldCapOptions { MaxActiveHoldsPerClient = maxActiveHoldsPerClient }),
+            staySearchPolicy);
     }
 
     [Fact]
@@ -416,7 +421,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         // Without this, an anonymous caller could hold a unit for [today,
         // today+3650) and the exclusion constraint would faithfully enforce
         // that decade-long block - see HoldAvailabilityHandler's own
-        // MaxLeadTimeDays constant.
+        // lead-time bound, now StaySearchPolicyOptions.MaxLeadTimeDays.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
 

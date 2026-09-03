@@ -5,6 +5,7 @@ using Catalog.Entities;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
+using Microsoft.Extensions.Options;
 using Persistence;
 namespace Catalog.Features.GetProperties;
 
@@ -12,17 +13,21 @@ public class GetPropertiesHandler(
     AppCatalogDbContext dbContext,
     IUnitAvailabilityLookup availabilityLookup,
     TimeProvider timeProvider,
+    IOptions<StaySearchPolicyOptions> staySearchPolicy,
     HybridCache cache) : IRequestHandler<GetPropertiesRequest, PagedSliceResponse<PropertySummary>>
 {
-    // Same bound and same reasoning as HoldAvailabilityHandler's own
-    // MaxLeadTimeDays: it needs "today", so - like that one - it can't live
-    // in the validator (GetPropertiesRequestValidator.MaxStayNights covers
-    // the half that doesn't). Anchored to UTC "today" rather than a single
-    // property's own time zone - unlike a hold against one unit, this
-    // search spans every property's zone at once, so there's no one zone to
-    // anchor precisely to, and a cap only needs to be approximately right
-    // to bound the worst case.
-    private const int MaxLeadTimeDays = 730;
+    // Enforced here rather than in the validator because it needs "today",
+    // the same split the hold path makes (GetPropertiesRequestValidator
+    // covers the half that doesn't need it).
+    //
+    // The value is HoldAvailabilityHandler's too - one number, so search
+    // cannot offer a check-in date the hold path would refuse. What differs,
+    // and has to, is the anchor: this is UTC "today", while the hold path
+    // uses the property's own time zone (docs/adr/0018). A search spans every
+    // property's zone at once and has no single one to resolve against, so
+    // at the exact boundary the two can differ by a day. See
+    // StaySearchPolicyOptions.
+    private readonly int _maxLeadTimeDays = staySearchPolicy.Value.MaxLeadTimeDays;
 
     public async ValueTask<PagedSliceResponse<PropertySummary>> Handle(GetPropertiesRequest request, CancellationToken cancellationToken)
     {
@@ -33,11 +38,11 @@ public class GetPropertiesHandler(
         if (request.CheckIn is not null)
         {
             DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
-            if (request.CheckIn.Value.DayNumber - today.DayNumber > MaxLeadTimeDays)
+            if (request.CheckIn.Value.DayNumber - today.DayNumber > _maxLeadTimeDays)
             {
                 throw new ValidationException(
                     nameof(request.CheckIn),
-                    $"Check-in date cannot be more than {MaxLeadTimeDays} days in the future.");
+                    $"Check-in date cannot be more than {_maxLeadTimeDays} days in the future.");
             }
         }
 
@@ -107,9 +112,10 @@ public class GetPropertiesHandler(
             // hold/booking for the dates - bounded by how many units are
             // actually booked in this window, not by total inventory,
             // since GetBlockedUnitIdsAsync no longer needs a candidate id
-            // list narrowed down first. GetPropertiesRequestValidator's
-            // MaxStayNights and this handler's own MaxLeadTimeDays bound
-            // how large that window - and therefore this set - can get.
+            // list narrowed down first. StaySearchPolicyOptions' two bounds
+            // (stay length in the validator, lead time above) are what keep
+            // that window - and therefore this set - from growing without
+            // limit.
             IReadOnlySet<Guid> blockedUnitIds = await availabilityLookup.GetBlockedUnitIdsAsync(
                 request.CheckIn.Value, request.CheckOut.Value, timeProvider.GetUtcNow(), cancellationToken);
 

@@ -1,5 +1,7 @@
+using Catalog.Contracts;
 using FastEndpoints;
 using FluentValidation;
+using Microsoft.Extensions.Options;
 namespace Availability.Features.HoldAvailability;
 
 public sealed class HoldAvailabilityRequestValidator : Validator<HoldAvailabilityRequest>
@@ -9,16 +11,20 @@ public sealed class HoldAvailabilityRequestValidator : Validator<HoldAvailabilit
     // guard clauses instead. Without a bound here, an anonymous caller
     // could hold a single unit for up to a decade - this alone doesn't
     // stop that, but it bounds how much damage one hold can do.
-    public const int MaxStayNights = 90;
-
-    public HoldAvailabilityRequestValidator()
+    //
+    // The number itself is no longer this file's to choose: GetProperties
+    // has to apply the same one, or search and hold disagree about what is
+    // bookable. See StaySearchPolicyOptions.
+    public HoldAvailabilityRequestValidator(IOptions<StaySearchPolicyOptions> staySearchPolicy)
     {
+        int maxStayNights = staySearchPolicy.Value.MaxStayNights;
+
         RuleFor(x => x.UnitId).NotEmpty();
         RuleFor(x => x.CheckOut).GreaterThan(x => x.CheckIn);
         RuleFor(x => x)
-            .Must(x => x.CheckOut.DayNumber - x.CheckIn.DayNumber <= MaxStayNights)
+            .Must(x => x.CheckOut.DayNumber - x.CheckIn.DayNumber <= maxStayNights)
             .WithName(nameof(HoldAvailabilityRequest.CheckOut))
-            .WithMessage($"Stay length cannot exceed {MaxStayNights} nights.");
+            .WithMessage($"Stay length cannot exceed {maxStayNights} nights.");
         RuleFor(x => x.GuestCount).GreaterThan(0);
 
         // Deliberately NOT checking CheckIn against "today" or GuestCount
