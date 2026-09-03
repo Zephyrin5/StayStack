@@ -16,6 +16,19 @@ public static class ModelBuilderExtensions
     ///     to remember "AND status != archived" on every query by hand, and
     ///     a new entity type gets this filter for free just by inheriting
     ///     from Entity, no per-type configuration required.
+    ///     <para>
+    ///         <b>This predicate is restated by hand in raw SQL.</b> A query
+    ///         filter is an EF construct, so Dapper never sees it - the Tier 3
+    ///         statement in <c>GetPriceCalendarHandler</c> carries its own
+    ///         <c>u.status &lt;&gt; @ArchivedStatus</c> because of that, and
+    ///         once returned an archived unit's priced calendar when it
+    ///         didn't. If this filter ever gains a condition, that copy is
+    ///         wrong from the moment yours is right, and nothing about the
+    ///         change will point at it - the two agree today only because
+    ///         both are a single status comparison.
+    ///         <c>SoftDeleteFilterShapeTests</c> fails if that stops being
+    ///         true, so the divergence is caught rather than discovered.
+    ///     </para>
     /// </summary>
     [UnconditionalSuppressMessage(
         "Trimming",

@@ -29,12 +29,37 @@ internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider
 
     public async Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken)
     {
+        // Closed in the finally below, and only if opened here. EF
+        // reference-counts explicit opens, so without the close the
+        // connection stays checked out until the DbContext is disposed
+        // rather than going back to the pool after this statement - fine
+        // inside a request scope, and a held pooled connection anywhere a
+        // scope is longer-lived, such as a job. When something upstream
+        // already has the connection open (an ambient transaction) it owns
+        // the lifetime, so this leaves it alone.
         DbConnection connection = dbContext.Database.GetDbConnection();
-        if (connection.State != ConnectionState.Open)
+        bool openedHere = connection.State != ConnectionState.Open;
+        if (openedHere)
         {
             await dbContext.Database.OpenConnectionAsync(cancellationToken);
         }
 
+        try
+        {
+            return await ExecuteConfirmAsync(connection, holdId, cancellationToken);
+        }
+        finally
+        {
+            if (openedHere)
+            {
+                await dbContext.Database.CloseConnectionAsync();
+            }
+        }
+    }
+
+    private async Task<ConfirmedHold> ExecuteConfirmAsync(
+        DbConnection connection, Guid holdId, CancellationToken cancellationToken)
+    {
         // A single atomic UPDATE...RETURNING, not a transaction spanning
         // this and the Booking insert that follows in Bookings - see
         // docs/adr/0003 for why this is a cross-module compensating write,
@@ -88,8 +113,14 @@ internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider
 
     public async Task ReleaseHoldAsync(Guid holdId, CancellationToken cancellationToken)
     {
+        // Same open/close symmetry as ConfirmHoldAsync above, and this is the
+        // one of the two most likely to be called from outside a request:
+        // ReconcileOrphanedBookedHoldsJob releases orphans from a background
+        // scope, where an unreturned connection would be held for the length
+        // of the run rather than of a request.
         DbConnection connection = dbContext.Database.GetDbConnection();
-        if (connection.State != ConnectionState.Open)
+        bool openedHere = connection.State != ConnectionState.Open;
+        if (openedHere)
         {
             await dbContext.Database.OpenConnectionAsync(cancellationToken);
         }
@@ -107,7 +138,17 @@ internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider
                            WHERE id = @HoldId AND status = 'booked';
                            """;
 
-        await connection.ExecuteAsync(new CommandDefinition(
-            sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() }, cancellationToken: cancellationToken));
+        try
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() }, cancellationToken: cancellationToken));
+        }
+        finally
+        {
+            if (openedHere)
+            {
+                await dbContext.Database.CloseConnectionAsync();
+            }
+        }
     }
 }

@@ -46,12 +46,46 @@ public class GetPriceCalendarHandler(
         GetPriceCalendarRequest request,
         CancellationToken cancellationToken)
     {
+        // EF reference-counts explicit opens: a connection opened this way
+        // stays checked out of the pool until a matching close, or until the
+        // DbContext is disposed. In a request scope that is the end of the
+        // request and the cost is invisible, which is exactly why it is worth
+        // closing here rather than relying on it - the same few lines in a
+        // background job, whose scope can outlive many queries, would pin a
+        // pooled connection for the job's lifetime.
+        //
+        // Closed only if opened here. When something upstream already has the
+        // connection open - an ambient transaction, most likely - it owns the
+        // lifetime and EF's count, and closing on its behalf would end it
+        // early.
         DbConnection connection = dbContext.Database.GetDbConnection();
-        if (connection.State != ConnectionState.Open)
+        bool openedHere = connection.State != ConnectionState.Open;
+        if (openedHere)
         {
             await dbContext.Database.OpenConnectionAsync(cancellationToken);
         }
 
+        try
+        {
+            return await QueryCalendarAsync(request, connection, cancellationToken);
+        }
+        finally
+        {
+            if (openedHere)
+            {
+                await dbContext.Database.CloseConnectionAsync();
+            }
+        }
+    }
+
+    // Kept whole rather than closing straight after the Dapper call: the EF
+    // read below runs on this same connection, so releasing it early would
+    // only make EF reopen one.
+    private async Task<List<PriceCalendarDay>> QueryCalendarAsync(
+        GetPriceCalendarRequest request,
+        DbConnection connection,
+        CancellationToken cancellationToken)
+    {
         // No longer joins unit_availability_holds directly - that table
         // moved to the Availability module (docs/adr/0004), so a raw SQL
         // join by table name would be the exact boundary violation
