@@ -5,7 +5,9 @@ namespace BuildingBlocks.Pagination;
 ///     <para>
 ///         These are contract limits, not query mechanics: request DTOs
 ///         default to <see cref="DefaultPageSize"/> and validators reject
-///         anything past <see cref="MaxPageSize"/>. They used to sit on
+///         anything past <see cref="MaxPageSize"/> - as does the query helper
+///         itself, so a paged caller that arrives without a validator is
+///         bounded too. They used to sit on
 ///         PaginationExtensions, which has since moved to Persistence because
 ///         it needs EF Core - taking them along would have meant every paged
 ///         request shape depending on the data-access assembly to know how big

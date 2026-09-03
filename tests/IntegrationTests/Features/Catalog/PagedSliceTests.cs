@@ -1,4 +1,5 @@
 using System.Data.Common;
+using BuildingBlocks.Pagination;
 using Catalog;
 using Catalog.Entities;
 using Catalog.Enums;
@@ -172,6 +173,39 @@ public class PagedSliceTests(IntegrationTestWebApplicationFactory factory)
         // Rejected before anything was asked of the database, which is the
         // reason the guard runs first.
         Assert.Equal(0, interceptor.Count);
+    }
+
+    [Fact]
+    public async Task ToPagedSliceAsync_RejectsAPageSizePastTheMaximum()
+    {
+        // The offset guard alone never catches this: at page 1 the offset is
+        // 0 whatever the page size, int.MaxValue included. Until this bound
+        // existed here, the ceiling was the twelve request validators' alone -
+        // so ToPagedSliceAsync carried a clamp for a page size its own callers
+        // could not currently send it, and a paged caller arriving without a
+        // validator would have had no ceiling at all.
+        CommandCountingInterceptor interceptor = new();
+        await using CountedContext counted = ContextWith(interceptor);
+
+        await Assert.ThrowsAsync<BuildingBlocks.Exceptions.ValidationException>(
+            async () => await counted.Context.Properties.AsNoTracking().OrderBy(p => p.Id)
+                .ToPagedSliceAsync(1, PaginationDefaults.MaxPageSize + 1, TestContext.Current.CancellationToken));
+
+        Assert.Equal(0, interceptor.Count);
+    }
+
+    [Fact]
+    public async Task ToPagedSliceAsync_AcceptsTheMaximumPageSize()
+    {
+        // The bound is inclusive - GetProperties' own tests page at exactly
+        // MaxPageSize, so an off-by-one here would reject a legitimate request.
+        CommandCountingInterceptor interceptor = new();
+        await using CountedContext counted = ContextWith(interceptor);
+
+        (List<Property> page, _) = await counted.Context.Properties.AsNoTracking().OrderBy(p => p.Id)
+            .ToPagedSliceAsync(1, PaginationDefaults.MaxPageSize, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(page);
     }
 
     private async Task SeedPropertiesAsync(string city, int count)

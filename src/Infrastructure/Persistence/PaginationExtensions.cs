@@ -83,16 +83,15 @@ public static class PaginationExtensions
     {
         int offset = GuardOffsetAndCompute(page, pageSize);
 
-        // pageSize is at least 1 past the guard, but nothing bounds it from
-        // above here - MaxPageSize is enforced by the request validators, not
-        // by this method - so pageSize + 1 could overflow to negative and make
-        // Take throw. Clamping instead reports no next page at a page size of
-        // int.MaxValue, which is correct for any result set that can exist.
-        int probeSize = pageSize < int.MaxValue ? pageSize + 1 : pageSize;
-
+        // pageSize + 1 cannot overflow: the guard above bounds it at
+        // MaxPageSize. This used to clamp with a `pageSize < int.MaxValue`
+        // ternary, back when the only upper bound lived in the request
+        // validators - which made this read as though an unbounded page size
+        // could arrive here, and left it genuinely possible for a caller that
+        // reached these extensions without one.
         List<T> items = await query
             .Skip(offset)
-            .Take(probeSize)
+            .Take(pageSize + 1)
             .ToListAsync(cancellationToken);
 
         bool hasNextPage = items.Count > pageSize;
@@ -104,9 +103,9 @@ public static class PaginationExtensions
         return (items, hasNextPage);
     }
 
-    // Shared so the two overloads cannot drift on the bound that matters. A
-    // slice query skips the count but still issues an OFFSET, so it needs this
-    // guard for exactly the same reason.
+    // Shared so the two overloads cannot drift on the bounds that matter. A
+    // slice query skips the count but still issues an OFFSET, so it needs
+    // these guards for exactly the same reason.
     private static int GuardOffsetAndCompute(int page, int pageSize)
     {
         // Before any query, deliberately: a rejected page must cost no database
@@ -131,6 +130,19 @@ public static class PaginationExtensions
                 nameof(page),
                 $"Page and PageSize together may not skip past {PaginationDefaults.MaxOffset} results. " +
                 "Narrow the search rather than paging deeper.");
+        }
+
+        // The offset check above does not bound pageSize on its own: at
+        // page 1 the offset is 0 for any size, int.MaxValue included. So the
+        // ceiling is checked here for the same reason the offset is, rather
+        // than being left to the twelve validators - and it is what lets
+        // ToPagedSliceAsync add its probe row without arithmetic that can
+        // overflow.
+        if (pageSize > PaginationDefaults.MaxPageSize)
+        {
+            throw new ValidationException(
+                nameof(pageSize),
+                $"PageSize may not exceed {PaginationDefaults.MaxPageSize}.");
         }
 
         // Safe to narrow: IsOffsetWithinLimit has already bounded this well
