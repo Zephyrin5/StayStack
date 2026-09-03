@@ -101,14 +101,39 @@ public class GetPropertiesRequestValidatorTests
     }
 
     [Fact]
-    public void Validate_ShouldHaveError_ForCheckIn_WhenLeadTimeExceedsTheMaximum()
+    public void Validate_ShouldNotHaveError_ForCheckIn_OneDayPastTheMaximum()
     {
-        // CheckOut is one day after CheckIn, so the stay-length rule stays
-        // satisfied and only the lead-time rule can be what fails here.
+        // The deliberate day of slack. Search anchors "today" to UTC while
+        // HoldAvailabilityHandler anchors it to the property's own zone, so
+        // east of UTC the hold check is the more permissive of the two. Were
+        // search strict here, a property still bookable by unit id would be
+        // missing from results with nothing to say why - the failure you
+        // cannot observe. See the rule's own comment.
         GetPropertiesRequest request = CreateValidRequest() with
         {
             CheckIn = Today.AddDays(Policy.MaxLeadTimeDays + 1),
             CheckOut = Today.AddDays(Policy.MaxLeadTimeDays + 2)
+        };
+
+        var result = _sut.TestValidate(request);
+
+        result.ShouldNotHaveValidationErrorFor(x => x.CheckIn);
+    }
+
+    [Fact]
+    public void Validate_ShouldHaveError_ForCheckIn_WhenLeadTimeExceedsTheMaximum()
+    {
+        // Two days past, which no time zone can excuse: a local date is within
+        // one day of the UTC date everywhere, so this is at least
+        // MaxLeadTimeDays + 1 against any property's own clock and the hold
+        // path would refuse it too. The slack is one day, not open-ended.
+        //
+        // CheckOut is one day after CheckIn, so the stay-length rule stays
+        // satisfied and only the lead-time rule can be what fails here.
+        GetPropertiesRequest request = CreateValidRequest() with
+        {
+            CheckIn = Today.AddDays(Policy.MaxLeadTimeDays + 2),
+            CheckOut = Today.AddDays(Policy.MaxLeadTimeDays + 3)
         };
 
         var result = _sut.TestValidate(request);

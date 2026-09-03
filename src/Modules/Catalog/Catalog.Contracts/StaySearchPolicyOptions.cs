@@ -45,12 +45,23 @@ namespace Catalog.Contracts;
 ///     <para>
 ///         One residual asymmetry worth knowing, which a shared value does
 ///         not remove: the two paths anchor "today" differently, and must.
-///         <c>HoldAvailabilityHandler</c> uses the property's own time zone
-///         (docs/adr/0018), while <c>GetPropertiesHandler</c> uses UTC,
-///         because a search spans every property's zone at once and has no
-///         single one to resolve against. At the exact boundary that can
-///         differ by a day in either direction. That is a property of the
-///         anchor, not of these values.
+///         The hold path uses the property's own time zone (docs/adr/0018);
+///         search uses UTC, because it spans every property's zone at once
+///         and has no single one to resolve against. So near the boundary the
+///         two disagree by a day, in a direction that depends on the
+///         property's offset.
+///     </para>
+///     <para>
+///         Search cannot remove that disagreement, so it picks its direction:
+///         <c>GetPropertiesRequestValidator</c> allows one day past
+///         <see cref="MaxLeadTimeDays"/>, which makes search never stricter
+///         than the hold path. The two failure modes are not equally bad -
+///         search stricter means a bookable property silently absent from
+///         results, search looser means a clear 400 from the hold - and only
+///         one of them is observable. The extra day cannot escape the bound
+///         either: a local date is within one day of the UTC date in every
+///         zone, so anything search now admits, some property's own clock
+///         still rejects at most a day later.
 ///     </para>
 /// </summary>
 public class StaySearchPolicyOptions

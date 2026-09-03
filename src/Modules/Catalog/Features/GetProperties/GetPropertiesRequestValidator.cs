@@ -63,11 +63,34 @@ public sealed class GetPropertiesRequestValidator : Validator<GetPropertiesReque
         // PropertyTimeZone (docs/adr/0018), because it has a property in hand
         // and the answer would otherwise be wrong by a day near midnight.
         // A search has no property in scope yet - it spans every zone at once,
-        // so there is no zone to resolve against - and a day of fuzz on a
-        // 730-day bound decides nothing. The one other UTC date, in
+        // so there is no zone to resolve against. The one other UTC date, in
         // ListMyReviewableBookingsHandler, is a different case again: a query
         // bound widened a day either side on purpose, with the exact
         // per-zone test applied to the results afterwards.
+        //
+        // + 1, and that is the whole point of this rule's shape. The bound is
+        // shared with HoldAvailabilityHandler but the anchor cannot be, so
+        // near the boundary the two disagree by a day - and which way depends
+        // on the property's offset, which search cannot know. East of UTC
+        // (Kuwait) local "today" runs ahead, so the hold check sees the
+        // smaller lead and is the more permissive of the two: at exactly
+        // maxLeadTimeDays + 1 a strict search would hide a property that is
+        // still bookable by anyone holding its unit id. Inventory missing
+        // from results with nothing to indicate why. West of UTC (Toronto) it
+        // inverts, and the guest gets a 400 from the hold after choosing
+        // dates.
+        //
+        // Search cannot make the two agree, but it can choose which way they
+        // disagree. One day of slack makes search never stricter than hold,
+        // which removes the silent case entirely and leaves only the loud one,
+        // where the hold path already answers with a clear message. One day is
+        // also exactly enough: a local date is within one day of the UTC date
+        // in every zone, so a lead of maxLeadTimeDays + 2 here is at least
+        // maxLeadTimeDays + 1 there, and the hold would refuse it too.
+        //
+        // The message still quotes maxLeadTimeDays. 730 is the product rule;
+        // the extra day is tolerance for an anchor the caller cannot see, and
+        // it matches what the hold path tells them.
         //
         // GetUtcNow() inside the rule, not hoisted into the constructor
         // alongside the two ints above. FastEndpoints resolves validators
@@ -77,7 +100,7 @@ public sealed class GetPropertiesRequestValidator : Validator<GetPropertiesReque
         RuleFor(x => x.CheckIn)
             .Must(checkIn => checkIn!.Value.DayNumber
                              - DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime).DayNumber
-                             <= maxLeadTimeDays)
+                             <= maxLeadTimeDays + 1)
             .WithMessage($"Check-in date cannot be more than {maxLeadTimeDays} days in the future.")
             .When(x => x.CheckIn is not null);
     }

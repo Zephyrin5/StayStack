@@ -571,7 +571,12 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         // which a directly-constructed validator can't show. Stay length has
         // to stay within its own bound too, or this would 400 for the wrong
         // reason.
-        DateOnly checkIn = CatalogSeeding.Today().AddDays(StaySearchPolicy.MaxLeadTimeDays + 1);
+        // + 2, not + 1: the validator allows one day past the bound on
+        // purpose, so that search is never stricter than the hold path it
+        // shares the bound with (their anchors for "today" differ and cannot
+        // be made to agree). + 1 is a passing search, asserted in
+        // GetPropertiesRequestValidatorTests.
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(StaySearchPolicy.MaxLeadTimeDays + 2);
         DateOnly checkOut = checkIn.AddDays(1);
 
         HttpResponseMessage response = await _client.GetAsync(
