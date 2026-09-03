@@ -130,7 +130,7 @@ public class GuestReviewTests(IntegrationTestWebApplicationFactory factory)
         Booking booking = Booking.Create(
             Guid.CreateVersion7(), unitId, Guid.NewGuid(), null,
             _faker.Name.FullName(), _faker.Internet.Email(), null, checkIn, checkOut, 2, Money.Of(300m, Currency.KWD), Money.Of(300m, Currency.KWD),
-            CancellationPolicy.CreateDefault(), "Asia/Kuwait");
+            CancellationPolicy.CreateDefault(), "Asia/Kuwait", DateTimeOffset.UtcNow.AddMinutes(30));
         booking.Confirm();
 
         using IServiceScope scope = factory.Services.CreateScope();

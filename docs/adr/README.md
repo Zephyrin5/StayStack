@@ -45,3 +45,4 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 | [0017](0017-durable-intent-records-for-cross-module-writes.md) | Durable intent records for the forward half of cross-module writes | Accepted |
 | [0018](0018-property-local-business-dates.md) | Business dates resolve in the property's time zone, never UTC | Accepted |
 | [0019](0019-total-count-is-opt-in-on-expensive-list-endpoints.md) | A total count is opt-in, not part of every paging envelope | Accepted |
+| [0020](0020-a-checkout-is-a-claim-with-a-deadline-not-a-sale.md) | A checkout is a claim with a deadline, not a sale | Accepted |

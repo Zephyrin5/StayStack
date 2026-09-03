@@ -200,26 +200,33 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
     }
 
     [Fact]
-    public async Task Handle_NonActiveHoldStatuses_DoesNotBlockAvailability()
+    public async Task Handle_PendingPaymentHold_BlocksAvailability()
     {
-        // Statuses other than 'held' or 'booked' (e.g. 'released', 'expired') should be ignored by SQL
+        // This test used to seed Status = "released" and assert that an
+        // unrecognised status was ignored. That value was never written by
+        // anything, and the CHECK constraint added with 'pending_payment' now
+        // rejects it outright - so the case it described cannot occur. What
+        // replaced it is the question that actually matters: a hold claimed
+        // by a checkout in progress is real inventory and must read as
+        // unavailable. Miss it and search offers a unit whose hold will be
+        // refused by the exclusion constraint at the last step.
         // Arrange
         Unit unit = CreateTestUnit();
         DateOnly from = new DateOnly(2026, 9, 1);
         DateOnly to = new DateOnly(2026, 9, 3);
 
-        UnitAvailabilityHold releasedHold = new UnitAvailabilityHold
+        UnitAvailabilityHold pendingPaymentHold = new UnitAvailabilityHold
         {
             Id = Guid.NewGuid(),
             UnitId = unit.Id,
-            Status = "released",
+            Status = "pending_payment",
             StayRange = new NpgsqlRange<DateOnly>(from, true, to, false),
             TotalPrice = Money.Of(100m, Currency.KWD),
             Subtotal = 100m
         };
 
         await SeedDatabaseAsync(unit);
-        await SeedHoldAsync(releasedHold);
+        await SeedHoldAsync(pendingPaymentHold);
 
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
@@ -233,7 +240,7 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         GetPriceCalendarResponse response = await handler.Handle(request, CancellationToken.None);
 
         // Assert
-        Assert.All(response.Days, day => Assert.True(day.IsAvailable));
+        Assert.All(response.Days, day => Assert.False(day.IsAvailable));
     }
 
     [Fact]

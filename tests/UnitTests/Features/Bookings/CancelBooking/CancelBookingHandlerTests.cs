@@ -56,7 +56,7 @@ public class CancelBookingHandlerTests : IDisposable
             Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), _customerId,
             "Jane Guest", "jane@example.com", null,
             DateOnly.FromDateTime(DateTime.UtcNow), DateOnly.FromDateTime(DateTime.UtcNow).AddDays(2),
-            2, Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait");
+            2, Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait", DateTimeOffset.UtcNow.AddMinutes(30));
 
         _dbContext.Bookings.Add(booking);
         await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -222,7 +222,7 @@ public class CancelBookingHandlerTests : IDisposable
             Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), _customerId,
             "Jane Guest", "jane@example.com", null,
             checkIn, checkIn.AddDays(2),
-            2, Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait");
+            2, Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait", DateTimeOffset.UtcNow.AddMinutes(30));
 
         dbContext.Bookings.Add(booking);
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -298,7 +298,7 @@ public class CancelBookingHandlerTests : IDisposable
             Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), _customerId,
             "Jane Guest", "jane@example.com", null,
             new DateOnly(2026, 8, 25), new DateOnly(2026, 8, 27),
-            2, Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait");
+            2, Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait", DateTimeOffset.UtcNow.AddMinutes(30));
         dbContext.Bookings.Add(booking);
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
@@ -368,7 +368,7 @@ public class CancelBookingHandlerTests : IDisposable
             Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), _customerId,
             "Jane Guest", "jane@example.com", null,
             checkIn, checkIn.AddDays(2),
-            2, Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait");
+            2, Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait", DateTimeOffset.UtcNow.AddMinutes(30));
         _dbContext.Bookings.Add(booking);
         await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 

@@ -38,6 +38,9 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
         public Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Availability is unreachable.");
 
+        public Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Availability is unreachable.");
+
         public Task ReleaseHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Availability is unreachable.");
     }
@@ -373,7 +376,7 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
                 intent.Id, unit.Id, holdId, null,
                 "Committed By Retry", "jane@example.com", null,
                 checkIn, checkIn.AddDays(3), 1,
-                Money.Of(999m, Currency.KWD), Money.Of(999m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait"));
+                Money.Of(999m, Currency.KWD), Money.Of(999m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait", DateTimeOffset.UtcNow.AddMinutes(30)));
             await db.SaveChangesAsync();
         });
 
@@ -389,8 +392,9 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
         // booking's - this is what proves the verify query drove the outcome.
         Assert.Equal(999m, result.TotalPrice);
 
-        // The hold stays 'booked' - compensation must not have run.
-        Assert.Equal("booked", await GetHoldStatusAsync(holdId));
+        // The hold stays claimed - compensation must not have run. (A
+        // released hold would read 'held' with its timer reset.)
+        Assert.Equal("pending_payment", await GetHoldStatusAsync(holdId));
 
         using IServiceScope assertScope = factory.Services.CreateScope();
         AppBookingsDbContext bookingsDb = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();

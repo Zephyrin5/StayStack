@@ -412,7 +412,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
                 Guid.CreateVersion7(), unitId, Guid.NewGuid(), null,
                 "Jane Guest", "jane@example.com", null,
                 CatalogSeeding.Today().AddDays(5), CatalogSeeding.Today().AddDays(7),
-                2, Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait");
+                2, Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait", DateTimeOffset.UtcNow.AddMinutes(30));
             bookingsDb.Bookings.Add(booking);
             await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
         }

@@ -1,5 +1,6 @@
 using Availability.Contracts;
 using Bookings;
+using Bookings.Contracts;
 using Bookings.Features.ConfirmBooking;
 using Bookings.Outbox;
 using BuildingBlocks.Exceptions;
@@ -8,6 +9,7 @@ using Catalog.Contracts;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Outbox;
 using Promotions.Contracts;
@@ -111,7 +113,8 @@ public class ConfirmBookingHandlerTests : IDisposable
 
         ConfirmBookingHandler handler = new ConfirmBookingHandler(
             _dbContext, dispatcher, holdConfirmationMock.Object, promotionRedemptionMock.Object,
-            CreateUnitLookupMock(hold).Object, currentUserProviderMock.Object, TimeProvider.System);
+            CreateUnitLookupMock(hold).Object, currentUserProviderMock.Object,
+            Options.Create(new BookingLifecyclePolicyOptions()), TimeProvider.System);
 
         ConfirmBookingRequest request = new ConfirmBookingRequest
         {
@@ -161,7 +164,8 @@ public class ConfirmBookingHandlerTests : IDisposable
 
         ConfirmBookingHandler handler = new ConfirmBookingHandler(
             _dbContext, dispatcher, holdConfirmationMock.Object, promotionRedemptionMock.Object,
-            CreateUnitLookupMock(hold).Object, currentUserProviderMock.Object, TimeProvider.System);
+            CreateUnitLookupMock(hold).Object, currentUserProviderMock.Object,
+            Options.Create(new BookingLifecyclePolicyOptions()), TimeProvider.System);
 
         ConfirmBookingRequest request = new ConfirmBookingRequest
         {
@@ -279,7 +283,8 @@ public class ConfirmBookingHandlerPromoPricingTests : IDisposable
 
         ConfirmBookingHandler handler = new ConfirmBookingHandler(
             _dbContext, dispatcher, holdConfirmationMock.Object, promotionRedemptionMock.Object,
-            unitLookupMock.Object, currentUserProviderMock.Object, TimeProvider.System);
+            unitLookupMock.Object, currentUserProviderMock.Object,
+            Options.Create(new BookingLifecyclePolicyOptions()), TimeProvider.System);
 
         ConfirmBookingRequest request = new ConfirmBookingRequest
         {

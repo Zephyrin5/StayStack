@@ -10,21 +10,41 @@ namespace Availability.Contracts;
 public interface IHoldConfirmation
 {
     /// <summary>
-    ///     Marks the hold as booked (status 'held' -> 'booked'). Throws
-    ///     NotFoundException if the hold doesn't exist, has already been
-    ///     consumed, or has expired - Bookings never sees a stale/expired
-    ///     hold succeed silently.
+    ///     Claims the hold for a checkout in progress ('held' ->
+    ///     'pending_payment'). Throws NotFoundException if the hold doesn't
+    ///     exist, has already been consumed, or has expired - Bookings never
+    ///     sees a stale/expired hold succeed silently.
+    ///     <para>
+    ///         Not 'booked': submitting a checkout form is not paying for
+    ///         anything. This used to write 'booked' directly, which made
+    ///         every submitted form permanent inventory - nothing reclaimed
+    ///         such a row, and it blocked its range through the exclusion
+    ///         constraint indefinitely. The caller owns the deadline (see
+    ///         Booking.PaymentDueAt) and releases the hold when it passes.
+    ///     </para>
     /// </summary>
     Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken);
 
     /// <summary>
-    ///     Reverts 'booked' back to 'held' with hold_expires_at reset to
-    ///     now - used both as ConfirmBookingHandler's compensating action
-    ///     when its Booking write fails, and by CancelBookingHandler to
-    ///     free the range back up immediately rather than leaving it
-    ///     blocked for whatever was left on the hold's original 15-minute
-    ///     window. Best-effort/idempotent: a no-op if the hold is no longer
-    ///     'booked' (already released, or never existed).
+    ///     Completes the lifecycle on payment ('pending_payment' ->
+    ///     'booked'), the one transition that turns a reservation into sold
+    ///     inventory nothing reclaims on a timer. Returns false when no row
+    ///     moved, which means the hold was already released or expired out
+    ///     from under a late-arriving payment - the caller has taken money
+    ///     for a range it no longer holds and must compensate rather than
+    ///     treat this as success.
+    /// </summary>
+    Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     Returns a claimed or sold hold ('pending_payment' or 'booked')
+    ///     back to 'held' with hold_expires_at reset to now, so the ordinary
+    ///     expiry sweep reclaims it immediately rather than after whatever
+    ///     was left on its original 15-minute window. Used by
+    ///     ConfirmBookingHandler's compensating paths, CancelBookingHandler,
+    ///     ReconcileOrphanedBookingIntentsJob, and the unpaid-booking expiry
+    ///     job. Best-effort/idempotent: a no-op if the hold is in neither
+    ///     state (already released, or never existed).
     /// </summary>
     Task ReleaseHoldAsync(Guid holdId, CancellationToken cancellationToken);
 }

@@ -39,7 +39,8 @@ public sealed class Booking : Entity, IAggregateRoot
         Money subtotal,
         BookingStatus bookingStatus,
         CancellationPolicy cancellationPolicy,
-        string timeZoneId)
+        string timeZoneId,
+        DateTimeOffset? paymentDueAt)
     {
         Id = id;
         UnitId = unitId;
@@ -56,6 +57,7 @@ public sealed class Booking : Entity, IAggregateRoot
         BookingStatus = bookingStatus;
         CancellationPolicy = cancellationPolicy;
         TimeZoneId = timeZoneId;
+        PaymentDueAt = paymentDueAt;
     }
 
     // Cross-module references, plain Guid rather than a real FK - same
@@ -109,6 +111,33 @@ public sealed class Booking : Entity, IAggregateRoot
     // different axis entirely from this business lifecycle state.
     public BookingStatus BookingStatus { get; private set; }
 
+    /// <summary>
+    ///     When this booking's claim on its unit lapses if nobody pays.
+    ///     <para>
+    ///         Exists because confirming a checkout takes real inventory:
+    ///         the hold moves to 'pending_payment' and keeps blocking its
+    ///         range through the exclusion constraint. Without a deadline
+    ///         that claim was permanent - an anonymous caller could submit
+    ///         checkout forms and block a unit's calendar indefinitely
+    ///         without ever paying, and nothing in the system could tell
+    ///         those rows apart from sold ones or reclaim them.
+    ///     </para>
+    ///     <para>
+    ///         The deadline lives here rather than on the hold because it is
+    ///         a Bookings rule about a payment, and Availability has no way
+    ///         to interpret it. It is also why the expiry job lives in this
+    ///         module: releasing the hold without cancelling the booking
+    ///         would leave a guest holding a confirmation with no inventory
+    ///         behind it, and Availability cannot cancel a booking.
+    ///     </para>
+    ///     <para>
+    ///         Null once a booking is no longer awaiting payment, and null
+    ///         for bookings that predate this field - the sweep only ever
+    ///         looks at Pending rows, so neither is a candidate.
+    ///     </para>
+    /// </summary>
+    public DateTimeOffset? PaymentDueAt { get; private set; }
+
     // Snapshotted from the unit's *current* policy at confirm time, same
     // "the terms they saw are the terms they get" reasoning as
     // TotalPrice/Currency - a host tightening their policy afterward can't
@@ -151,7 +180,8 @@ public sealed class Booking : Entity, IAggregateRoot
         Money totalPrice,
         Money subtotal,
         CancellationPolicy cancellationPolicy,
-        string timeZoneId)
+        string timeZoneId,
+        DateTimeOffset paymentDueAt)
     {
         Guard.Against.Default(id);
         Guard.Against.Default(unitId);
@@ -181,9 +211,15 @@ public sealed class Booking : Entity, IAggregateRoot
         Guard.Against.Null(cancellationPolicy);
         Guard.Against.NullOrWhiteSpace(timeZoneId);
 
+        // Required, not optional: a booking created without a deadline is
+        // an unbounded claim on a unit's calendar, which is the state this
+        // field exists to make unrepresentable.
+        Guard.Against.Default(paymentDueAt);
+
         return new Booking(
             id, unitId, holdId, customerId, guestName, guestEmail, guestPhone,
-            checkIn, checkOut, guestCount, totalPrice, subtotal, BookingStatus.Pending, cancellationPolicy, timeZoneId);
+            checkIn, checkOut, guestCount, totalPrice, subtotal, BookingStatus.Pending, cancellationPolicy, timeZoneId,
+            paymentDueAt);
     }
 
     // Idempotent - a repeated cancel (retried request, double-click) is a
@@ -201,6 +237,7 @@ public sealed class Booking : Entity, IAggregateRoot
         }
 
         BookingStatus = BookingStatus.Cancelled;
+        PaymentDueAt = null;
     }
 
     // Called by IBookingPaymentConfirmation once a Transaction succeeds -
@@ -222,5 +259,10 @@ public sealed class Booking : Entity, IAggregateRoot
         }
 
         BookingStatus = BookingStatus.Confirmed;
+
+        // Cleared on payment: the deadline described a claim awaiting one,
+        // and leaving it set would misreport a paid booking as overdue to
+        // anything reading the field rather than the status.
+        PaymentDueAt = null;
     }
 }

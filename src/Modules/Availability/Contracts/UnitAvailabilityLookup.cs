@@ -1,3 +1,4 @@
+using Availability.Entities;
 using Catalog.Contracts;
 using Microsoft.EntityFrameworkCore;
 using NpgsqlTypes;
@@ -25,7 +26,8 @@ internal class UnitAvailabilityLookup(AppAvailabilityDbContext dbContext) : IUni
         List<NpgsqlRange<DateOnly>> ranges = await dbContext.UnitAvailabilityHolds.AsNoTracking()
             .Where(h => h.UnitId == unitId &&
                         h.StayRange.Overlaps(window) &&
-                        (h.Status == "booked" || (h.Status == "held" && (h.HoldExpiresAt == null || h.HoldExpiresAt > now))))
+                        (h.Status == HoldStatuses.Booked || h.Status == HoldStatuses.PendingPayment ||
+                         (h.Status == HoldStatuses.Held && (h.HoldExpiresAt == null || h.HoldExpiresAt > now))))
             .Select(h => h.StayRange)
             .ToListAsync(cancellationToken);
 
@@ -41,7 +43,8 @@ internal class UnitAvailabilityLookup(AppAvailabilityDbContext dbContext) : IUni
 
         List<Guid> blockedUnitIds = await dbContext.UnitAvailabilityHolds.AsNoTracking()
             .Where(h => h.StayRange.Overlaps(requestedRange) &&
-                        (h.Status == "booked" || (h.Status == "held" && (h.HoldExpiresAt == null || h.HoldExpiresAt > now))))
+                        (h.Status == HoldStatuses.Booked || h.Status == HoldStatuses.PendingPayment ||
+                         (h.Status == HoldStatuses.Held && (h.HoldExpiresAt == null || h.HoldExpiresAt > now))))
             .Select(h => h.UnitId)
             .Distinct()
             .ToListAsync(cancellationToken);
@@ -56,6 +59,8 @@ internal class UnitAvailabilityLookup(AppAvailabilityDbContext dbContext) : IUni
         // ExpiredHoldsSweepJob reaps it. Not tightened here; that's a
         // separate concern from this lookup's job.
         return dbContext.UnitAvailabilityHolds.AsNoTracking()
-            .AnyAsync(h => h.UnitId == unitId && (h.Status == "held" || h.Status == "booked"), cancellationToken);
+            .AnyAsync(h => h.UnitId == unitId &&
+                           (h.Status == HoldStatuses.Held || h.Status == HoldStatuses.PendingPayment ||
+                            h.Status == HoldStatuses.Booked), cancellationToken);
     }
 }

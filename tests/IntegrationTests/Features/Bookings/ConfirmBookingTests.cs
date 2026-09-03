@@ -97,7 +97,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
     }
 
     [Fact]
-    public async Task ConfirmBooking_ShouldReturn200_AndPersistPendingBooking_AndFlipHoldToBooked()
+    public async Task ConfirmBooking_ShouldReturn200_AndPersistPendingBooking_AndClaimHoldForPayment()
     {
         // Arrange
         Unit unit = CreateTestUnit();
@@ -129,7 +129,16 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
         UnitAvailabilityHold persistedHold = await availabilityDb.UnitAvailabilityHolds
             .AsNoTracking()
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
-        Assert.Equal("booked", persistedHold.Status);
+        // 'pending_payment', not 'booked'. Submitting a checkout form does
+        // not pay for anything, and writing 'booked' here made every
+        // submission permanent inventory: nothing reclaimed such a row and it
+        // held its range through the exclusion constraint forever. 'booked'
+        // is now written only once a payment succeeds.
+        Assert.Equal("pending_payment", persistedHold.Status);
+
+        // The other half of that: the claim is finite. The unit comes back if
+        // nobody pays, which is what ExpireUnpaidBookingsJob acts on.
+        Assert.NotNull(booking.PaymentDueAt);
     }
 
     [Fact]

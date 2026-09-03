@@ -74,4 +74,30 @@ public class BookingLifecyclePolicyOptions
     /// </summary>
     [Range(1, 3650)]
     public int ManagementTokenLifetimeDaysAfterCheckOut { get; set; } = 90;
+
+    /// <summary>
+    ///     How long a guest has to pay before their booking is expired and
+    ///     the unit returned to inventory.
+    ///     <para>
+    ///         Confirming a checkout takes the unit off the market - the hold
+    ///         moves to 'pending_payment' and keeps blocking its range - so
+    ///         without a deadline an unpaid booking held that range forever,
+    ///         and an anonymous caller could take a calendar apart by
+    ///         submitting checkout forms. This is what bounds that: with a
+    ///         hold rate limit of R, no caller can hold more than R × this
+    ///         window at a time, and the excess expires on its own.
+    ///     </para>
+    ///     <para>
+    ///         30 minutes: long enough for a card form plus a retry or two,
+    ///         and for a redirect through a bank's own 3-D Secure flow, while
+    ///         short enough that a mistyped card doesn't cost an evening's
+    ///         inventory. The Range's upper bound is deliberately far tighter
+    ///         than the other two settings here - this one is an availability
+    ///         control, not just a policy, and a deployment able to set it to
+    ///         a week could quietly restore the unbounded-claim behaviour it
+    ///         exists to prevent.
+    ///     </para>
+    /// </summary>
+    [Range(1, 1440)]
+    public int PaymentWindowMinutes { get; set; } = 30;
 }

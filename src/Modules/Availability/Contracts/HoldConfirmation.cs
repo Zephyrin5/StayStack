@@ -1,3 +1,4 @@
+using Availability.Entities;
 using BuildingBlocks.Exceptions;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
@@ -73,20 +74,31 @@ internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider
         // (the app's TimeProvider), not Postgres' own now() - otherwise
         // the app server and DB server are two different clocks comparing
         // the same expiry.
-        // client_key is cleared here, not merely left to stop counting.
-        // HoldAvailabilityHandler's cap only ever reads live 'held' rows, so
-        // a booked hold's copy is dead weight - and it's a caller's network
-        // address on a row that outlives the hold by years. Nulling it keeps
-        // that retention bounded to the 15 minutes the cap actually needs it
-        // for. ReleaseHoldAsync doesn't restore it, and doesn't need to: it
-        // resets hold_expires_at to now, so the row is already past expiry
-        // and outside the cap's WHERE clause either way.
-        const string sql = """
-                           UPDATE unit_availability_holds
-                           SET status = 'booked', booked_at = @Now, client_key = NULL
-                           WHERE id = @HoldId AND status = 'held' AND hold_expires_at > @Now
-                           RETURNING unit_id AS "UnitId", lower(stay_range) AS "CheckIn", upper(stay_range) AS "CheckOut", guest_count AS "GuestCount", total_price AS "TotalPrice", subtotal AS "Subtotal", currency AS "Currency", length_of_stay_discount_amount AS "LengthOfStayDiscountAmount";
-                           """;
+        // 'pending_payment', not 'booked': submitting a checkout form is not
+        // paying, and this used to mint permanent inventory on that basis -
+        // a row nothing reclaimed, holding its range through the exclusion
+        // constraint forever, reachable anonymously. 'booked' is now written
+        // only by MarkHoldPaidAsync, from the payment-confirmation path.
+        //
+        // booked_at stays null for the same reason - it records when the
+        // range was actually sold.
+        //
+        // client_key is NOT cleared here, unlike the booked transition,
+        // which does clear it. It is a caller's network address and the
+        // retention argument for nulling it still stands; what changed is
+        // when. Holding it through the payment window keeps it available to
+        // any per-client reasoning during exactly the window it describes,
+        // and the row loses it on payment or is released outright by
+        // Bookings' expiry job. Note the cap does not read it here: the cap
+        // counts 'held' only, deliberately, since capping bookings in
+        // progress by an IP-derived key would deny checkout to everyone
+        // behind one NAT.
+        const string sql = $"""
+                            UPDATE unit_availability_holds
+                            SET status = '{HoldStatuses.PendingPayment}'
+                            WHERE id = @HoldId AND status = '{HoldStatuses.Held}' AND hold_expires_at > @Now
+                            RETURNING unit_id AS "UnitId", lower(stay_range) AS "CheckIn", upper(stay_range) AS "CheckOut", guest_count AS "GuestCount", total_price AS "TotalPrice", subtotal AS "Subtotal", currency AS "Currency", length_of_stay_discount_amount AS "LengthOfStayDiscountAmount";
+                            """;
 
         ConfirmedHoldRow? row = await connection.QuerySingleOrDefaultAsync<ConfirmedHoldRow>(
             new CommandDefinition(sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() }, cancellationToken: cancellationToken));
@@ -115,6 +127,58 @@ internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider
         };
     }
 
+    public async Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken)
+    {
+        DbConnection connection = dbContext.Database.GetDbConnection();
+        bool openedHere = connection.State != ConnectionState.Open;
+        if (openedHere)
+        {
+            await dbContext.Database.OpenConnectionAsync(cancellationToken);
+        }
+
+        // The only writer of 'booked', and the reason that state is reachable
+        // at all rather than dead: it is driven from the payment-confirmation
+        // path (Transactions' ConfirmBookingPaymentOutboxMessage ->
+        // IBookingPaymentConfirmation), which is admin-reachable today via
+        // MarkTransactionSucceeded, so the transition is exercised now
+        // instead of waiting on a payment provider.
+        //
+        // booked_at is set here rather than at checkout - it records when the
+        // range was sold, which is this moment and not the earlier one.
+        //
+        // client_key is cleared here, the retention argument that used to
+        // apply at checkout: it is a caller's network address, nothing reads
+        // it once the row is past the payment window, and this row now
+        // outlives the hold by years. Nothing restores it - ReleaseHoldAsync
+        // resets hold_expires_at to now, putting the row outside the cap's
+        // WHERE clause regardless.
+        //
+        // Only from 'pending_payment'. A hold that was released (back to
+        // 'held') or never confirmed must not become 'booked' behind a late
+        // payment message; the caller distinguishes that from success by the
+        // rows affected rather than being told the payment landed.
+        const string sql = $"""
+                            UPDATE unit_availability_holds
+                            SET status = '{HoldStatuses.Booked}', booked_at = @Now, client_key = NULL
+                            WHERE id = @HoldId AND status = '{HoldStatuses.PendingPayment}';
+                            """;
+
+        try
+        {
+            int rowsAffected = await connection.ExecuteAsync(new CommandDefinition(
+                sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() }, cancellationToken: cancellationToken));
+
+            return rowsAffected > 0;
+        }
+        finally
+        {
+            if (openedHere)
+            {
+                await dbContext.Database.CloseConnectionAsync();
+            }
+        }
+    }
+
     public async Task ReleaseHoldAsync(Guid holdId, CancellationToken cancellationToken)
     {
         // Same open/close symmetry as ConfirmHoldAsync above, and this is the
@@ -136,11 +200,22 @@ internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider
         // on the original timer, even though the caller just gave it
         // back. Resetting it makes the row immediately eligible for
         // cleanup instead of waiting it out.
-        const string sql = """
-                           UPDATE unit_availability_holds
-                           SET status = 'held', hold_expires_at = @Now, booked_at = NULL
-                           WHERE id = @HoldId AND status = 'booked';
-                           """;
+        //
+        // Matches both post-checkout states, not just 'booked'. Every caller
+        // of this is a compensation - ConfirmBookingHandler's two catch
+        // blocks and its promo-rejection branch, ReconcileOrphanedBooking-
+        // IntentsJob, CancelBookingHandler's outbox message, and the unpaid-
+        // booking expiry job - and almost all of them now act on a hold that
+        // is 'pending_payment', because that is what confirming produces.
+        // Left matching 'booked' alone, every one of those would have become
+        // a silent zero-row no-op and stranded the hold: the exact bug the
+        // reconcile job exists to prevent, reintroduced in a WHERE clause
+        // with no test failing to say so.
+        const string sql = $"""
+                            UPDATE unit_availability_holds
+                            SET status = '{HoldStatuses.Held}', hold_expires_at = @Now, booked_at = NULL
+                            WHERE id = @HoldId AND status IN ('{HoldStatuses.PendingPayment}', '{HoldStatuses.Booked}');
+                            """;
 
         try
         {

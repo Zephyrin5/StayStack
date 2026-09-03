@@ -34,5 +34,18 @@ public class BookingConfiguration : IEntityTypeConfiguration<Booking>
         builder.HasIndex(b => b.UnitId);
         builder.HasIndex(b => b.HoldId).IsUnique();
         builder.HasIndex(b => b.CustomerId);
+
+        // Backs ExpireUnpaidBookingsJob's scan - Pending rows ordered by due
+        // date, run every minute. Partial on the status because Pending is
+        // the small and shrinking part of this table: a booking leaves the
+        // set permanently once paid or cancelled, so the index stays
+        // proportional to checkouts in flight rather than to booking history.
+        //
+        // The filter is written against the stored text ('Pending'), not the
+        // enum's ordinal, because BookingStatus is persisted via
+        // HasConversion<string>() above - a partial-index predicate is raw
+        // SQL and doesn't go through the value converter.
+        builder.HasIndex(b => b.PaymentDueAt, "ix_bookings_payment_due_at_pending")
+            .HasFilter("booking_status = 'Pending' AND payment_due_at IS NOT NULL");
     }
 }

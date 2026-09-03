@@ -11,6 +11,8 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Outbox;
 using Promotions.Contracts;
+using Bookings.Contracts;
+using Microsoft.Extensions.Options;
 using SeedWork.ValueObjects;
 namespace Bookings.Features.ConfirmBooking;
 
@@ -21,6 +23,7 @@ public class ConfirmBookingHandler(
     IPromotionRedemption promotionRedemption,
     IUnitLookup unitLookup,
     ICurrentUserProvider currentUserProvider,
+    IOptions<BookingLifecyclePolicyOptions> bookingLifecycle,
     TimeProvider timeProvider) : IRequestHandler<ConfirmBookingRequest, ConfirmBookingResponse>
 {
     public async ValueTask<ConfirmBookingResponse> Handle(ConfirmBookingRequest request, CancellationToken cancellationToken)
@@ -257,7 +260,12 @@ public class ConfirmBookingHandler(
                 totalPrice,
                 hold.Subtotal,
                 unit.CancellationPolicy,
-                unit.TimeZoneId);
+                unit.TimeZoneId,
+                // The hold is already 'pending_payment' by this point, which
+                // means this unit is off the market. This is the deadline
+                // that gives it back: ExpireUnpaidBookingsJob cancels the
+                // booking and releases the hold once it passes.
+                timeProvider.GetUtcNow().AddMinutes(bookingLifecycle.Value.PaymentWindowMinutes));
 
             dbContext.Bookings.Add(booking);
 
