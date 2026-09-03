@@ -159,4 +159,35 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
         await AddRuleAsync(PricingRule.CreateDayOfWeekMultiplier(unitId, [5, 6], 1.5m));
         await AddRuleAsync(PricingRule.CreateDayOfWeekMultiplier(unitId, [6, 0], 1.25m));
     }
+
+    [Fact]
+    public async Task DateRangeOverride_InAThreeDecimalCurrency_KeepsItsThirdDecimalThroughStorage()
+    {
+        // 10.125 KWD is a valid amount, not a rounding artefact: KWD has
+        // three minor-unit digits (CurrencyMinorUnits), and Money.Of rounds
+        // to exactly that, so the domain produces this value and every other
+        // monetary column stores it in numeric(12,3).
+        //
+        // override_price was numeric(10,2). Postgres narrows scale by
+        // rounding rather than erroring, so this came back as 10.13 with
+        // nothing raised anywhere - and the same unit's base price, mapped
+        // through ConfigureMoney, kept all three digits. A host setting a
+        // seasonal rate lost a fils per night and the only evidence was the
+        // number itself.
+        //
+        // Through SaveChanges rather than the handler, like everything else
+        // in this file: what is being tested is the column.
+        Guid unitId = await SeedUnitAsync();
+
+        PricingRule rule = PricingRule.CreateDateRangeOverride(unitId, Anchor, Anchor.AddDays(3), 10.125m);
+        await AddRuleAsync(rule);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        PricingRule persisted = await context.PricingRules.AsNoTracking()
+            .SingleAsync(r => r.Id == rule.Id, TestContext.Current.CancellationToken);
+
+        Assert.Equal(10.125m, persisted.OverridePrice);
+    }
+
 }
