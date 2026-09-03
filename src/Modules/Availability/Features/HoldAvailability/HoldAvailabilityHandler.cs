@@ -198,7 +198,10 @@ public class HoldAvailabilityHandler(
                         request.GuestCount,
                         TotalPrice = pricing.TotalPrice.Amount,
                         Subtotal = pricing.Subtotal.Amount,
-                        Currency = pricing.TotalPrice.Currency.ToString(),
+                        // The enum, not .ToString() - CurrencyTypeHandler
+                        // writes the character(3) code, the same handler that
+                        // reads it back in HoldConfirmation.
+                        pricing.TotalPrice.Currency,
                         LengthOfStayDiscountAmount = pricing.LengthOfStayDiscountAmount?.Amount,
                         request.HolderToken,
                         request.ClientKey

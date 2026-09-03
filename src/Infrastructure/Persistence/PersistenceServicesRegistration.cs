@@ -14,6 +14,7 @@ public static class PersistenceServicesRegistration
     {
         SqlMapper.AddTypeHandler(new NpgsqlRangeTypeHandler<DateOnly>());
         SqlMapper.AddTypeHandler(new DateOnlyTypeHandler());
+        SqlMapper.AddTypeHandler(new CurrencyTypeHandler());
         return services;
     }
 }

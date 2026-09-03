@@ -145,7 +145,7 @@ public class GetPriceCalendarHandler(
         return rows
             .Select(row =>
             {
-                Money basePrice = Money.Of(row.BasePrice, Enum.Parse<Currency>(row.Currency.Trim()));
+                Money basePrice = Money.Of(row.BasePrice, row.Currency);
                 return new PriceCalendarDay
                 {
                     Date = row.Date,
@@ -160,6 +160,9 @@ public class GetPriceCalendarHandler(
     {
         public DateOnly Date { get; init; }
         public decimal BasePrice { get; init; }
-        public string Currency { get; init; } = string.Empty;
+        // Currency, not string: CurrencyTypeHandler converts the
+        // character(3) column, so this no longer needs parsing at the use
+        // site. Same as Date above relying on DateOnlyTypeHandler.
+        public Currency Currency { get; init; }
     }
 }

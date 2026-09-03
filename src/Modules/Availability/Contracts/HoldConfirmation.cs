@@ -11,10 +11,14 @@ namespace Availability.Contracts;
 // should only ever reach this through IHoldConfirmation, resolved via DI.
 internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider timeProvider) : IHoldConfirmation
 {
-    // Raw shape of the RETURNING row - Currency comes back as its column
-    // text, materialized first and turned into a real Money afterward
-    // rather than asking Dapper to convert it. Same materialize-first-map-
-    // after shape as docs/adr/0006, applied here to Dapper rather than EF.
+    // Raw shape of the RETURNING row, materialized first and assembled into
+    // Money afterward - the same materialize-first-map-after shape as
+    // docs/adr/0006, applied to Dapper rather than EF. The three amounts
+    // share one currency column, which is why they cannot be mapped straight
+    // onto Money here.
+    //
+    // Currency is the enum rather than its column text: CurrencyTypeHandler
+    // converts it, so the parse that used to sit at the use site is gone.
     private sealed record ConfirmedHoldRow
     {
         public Guid UnitId { get; init; }
@@ -23,7 +27,7 @@ internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider
         public int GuestCount { get; init; }
         public decimal TotalPrice { get; init; }
         public decimal Subtotal { get; init; }
-        public string Currency { get; init; } = string.Empty;
+        public Currency Currency { get; init; }
         public decimal? LengthOfStayDiscountAmount { get; init; }
     }
 
@@ -92,7 +96,7 @@ internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider
             throw new NotFoundException("Hold", holdId);
         }
 
-        Currency currency = Enum.Parse<Currency>(row.Currency.Trim());
+        Currency currency = row.Currency;
 
         return new ConfirmedHold
         {

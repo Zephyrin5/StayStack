@@ -151,7 +151,9 @@ internal class PromotionRedemption(
                         BookingId = bookingId,
                         GuestEmail = normalizedEmail,
                         DiscountAmount = discountAmount.Amount,
-                        Currency = discountAmount.Currency.ToString(),
+                        // The enum, not .ToString() - CurrencyTypeHandler
+                        // writes the character(3) code.
+                        discountAmount.Currency,
                         RedeemedAt = timeProvider.GetUtcNow()
                     },
                     transaction.GetDbTransaction(),
