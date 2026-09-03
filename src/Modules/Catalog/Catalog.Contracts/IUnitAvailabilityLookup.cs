@@ -24,15 +24,21 @@ public interface IUnitAvailabilityLookup
         Guid unitId, DateOnly from, DateOnly to, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>
-    ///     Bulk counterpart to GetActiveHoldRangesAsync - which of these
-    ///     candidate unit ids have any active hold/booking overlapping
+    ///     Bulk counterpart to GetActiveHoldRangesAsync - every unit id,
+    ///     platform-wide, with an active hold/booking overlapping
     ///     [<paramref name="checkIn"/>, <paramref name="checkOut"/>). Lets
     ///     GetPropertiesHandler filter search results down to units
     ///     genuinely free for the requested stay, without joining against
-    ///     Availability's table directly.
+    ///     Availability's table directly and without first materializing a
+    ///     candidate unit id list on Catalog's side to narrow it - the
+    ///     result is exactly as large as this window's actual bookings/holds,
+    ///     not the whole unit table, and GetPropertiesRequestValidator's
+    ///     MaxStayNights plus GetPropertiesHandler's own MaxLeadTimeDays
+    ///     bound that window so this can't grow past "every unit ever
+    ///     booked" on a wide-open search.
     /// </summary>
-    Task<IReadOnlySet<Guid>> GetUnitIdsWithOverlappingHoldAsync(
-        IReadOnlyCollection<Guid> unitIds, DateOnly checkIn, DateOnly checkOut, DateTimeOffset now, CancellationToken cancellationToken);
+    Task<IReadOnlySet<Guid>> GetBlockedUnitIdsAsync(
+        DateOnly checkIn, DateOnly checkOut, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>
     ///     Does this unit have any hold at all right now, active or merely

@@ -5,6 +5,17 @@ namespace Catalog.Features.GetProperties;
 
 public sealed class GetPropertiesRequestValidator : Validator<GetPropertiesRequest>
 {
+    // Pure request-shape rule (doesn't need "today") - same split as
+    // HoldAvailabilityRequestValidator.MaxStayNights /
+    // HoldAvailabilityHandler.MaxLeadTimeDays: this bounds stay length,
+    // GetPropertiesHandler's own MaxLeadTimeDays bounds how far out CheckIn
+    // can be (that one needs "today", so it can't live here). Without
+    // either, an anonymous caller could search a decades-wide window -
+    // which GetPropertiesHandler used to answer by asking Availability for
+    // every unit blocked anywhere on the platform across that whole
+    // window.
+    public const int MaxStayNights = 90;
+
     public GetPropertiesRequestValidator()
     {
         RuleFor(x => x.Page).GreaterThanOrEqualTo(1);
@@ -25,6 +36,12 @@ public sealed class GetPropertiesRequestValidator : Validator<GetPropertiesReque
 
         RuleFor(x => x.CheckOut)
             .GreaterThan(x => x.CheckIn!.Value)
+            .When(x => x.CheckIn is not null && x.CheckOut is not null);
+
+        RuleFor(x => x)
+            .Must(x => x.CheckOut!.Value.DayNumber - x.CheckIn!.Value.DayNumber <= MaxStayNights)
+            .WithName(nameof(GetPropertiesRequest.CheckOut))
+            .WithMessage($"Stay length cannot exceed {MaxStayNights} nights.")
             .When(x => x.CheckIn is not null && x.CheckOut is not null);
     }
 }

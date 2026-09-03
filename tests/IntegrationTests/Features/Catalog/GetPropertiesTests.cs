@@ -531,4 +531,37 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    [Fact]
+    public async Task GetProperties_ShouldReturn400_WhenStayExceedsMaxNights()
+    {
+        // Guards GetPropertiesRequestValidator.MaxStayNights - without it,
+        // an anonymous caller could search a decades-wide window.
+        DateOnly checkIn = CatalogSeeding.Today();
+        DateOnly checkOut = checkIn.AddDays(GetPropertiesRequestValidator.MaxStayNights + 1);
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/catalog/properties?CheckIn={checkIn:yyyy-MM-dd}&CheckOut={checkOut:yyyy-MM-dd}",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetProperties_ShouldReturn400_WhenCheckInExceedsMaxLeadTime()
+    {
+        // Guards GetPropertiesHandler.MaxLeadTimeDays - lives in the
+        // handler rather than the validator since it needs "today" (same
+        // split as HoldAvailabilityRequestValidator/HoldAvailabilityHandler).
+        // Stay length has to stay within MaxStayNights too, or this would
+        // 400 for the wrong reason.
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(731);
+        DateOnly checkOut = checkIn.AddDays(1);
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/catalog/properties?CheckIn={checkIn:yyyy-MM-dd}&CheckOut={checkOut:yyyy-MM-dd}",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }

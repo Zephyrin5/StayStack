@@ -34,14 +34,13 @@ internal class UnitAvailabilityLookup(AppAvailabilityDbContext dbContext) : IUni
             .ToList();
     }
 
-    public async Task<IReadOnlySet<Guid>> GetUnitIdsWithOverlappingHoldAsync(
-        IReadOnlyCollection<Guid> unitIds, DateOnly checkIn, DateOnly checkOut, DateTimeOffset now, CancellationToken cancellationToken)
+    public async Task<IReadOnlySet<Guid>> GetBlockedUnitIdsAsync(
+        DateOnly checkIn, DateOnly checkOut, DateTimeOffset now, CancellationToken cancellationToken)
     {
         NpgsqlRange<DateOnly> requestedRange = new NpgsqlRange<DateOnly>(checkIn, true, checkOut, false);
 
         List<Guid> blockedUnitIds = await dbContext.UnitAvailabilityHolds.AsNoTracking()
-            .Where(h => unitIds.Contains(h.UnitId) &&
-                        h.StayRange.Overlaps(requestedRange) &&
+            .Where(h => h.StayRange.Overlaps(requestedRange) &&
                         (h.Status == "booked" || (h.Status == "held" && (h.HoldExpiresAt == null || h.HoldExpiresAt > now))))
             .Select(h => h.UnitId)
             .Distinct()

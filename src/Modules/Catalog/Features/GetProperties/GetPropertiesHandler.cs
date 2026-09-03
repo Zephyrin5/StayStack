@@ -1,3 +1,4 @@
+using BuildingBlocks.Exceptions;
 using BuildingBlocks.Pagination;
 using Catalog.Contracts;
 using Catalog.Entities;
@@ -13,8 +14,33 @@ public class GetPropertiesHandler(
     TimeProvider timeProvider,
     HybridCache cache) : IRequestHandler<GetPropertiesRequest, PagedSliceResponse<PropertySummary>>
 {
+    // Same bound and same reasoning as HoldAvailabilityHandler's own
+    // MaxLeadTimeDays: it needs "today", so - like that one - it can't live
+    // in the validator (GetPropertiesRequestValidator.MaxStayNights covers
+    // the half that doesn't). Anchored to UTC "today" rather than a single
+    // property's own time zone - unlike a hold against one unit, this
+    // search spans every property's zone at once, so there's no one zone to
+    // anchor precisely to, and a cap only needs to be approximately right
+    // to bound the worst case.
+    private const int MaxLeadTimeDays = 730;
+
     public async ValueTask<PagedSliceResponse<PropertySummary>> Handle(GetPropertiesRequest request, CancellationToken cancellationToken)
     {
+        // Ahead of the cache lookup, not inside LoadFromDatabaseAsync - a
+        // request this far out shouldn't even earn a cache entry, and
+        // rejecting it before touching Postgres or Availability is the
+        // whole point of the bound below.
+        if (request.CheckIn is not null)
+        {
+            DateOnly today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+            if (request.CheckIn.Value.DayNumber - today.DayNumber > MaxLeadTimeDays)
+            {
+                throw new ValidationException(
+                    nameof(request.CheckIn),
+                    $"Check-in date cannot be more than {MaxLeadTimeDays} days in the future.");
+            }
+        }
+
         // Every filter/pagination field that changes the result has to be
         // part of the key - an incomplete key would serve one search's
         // results back for another. A 30s staleness window only means a
@@ -72,48 +98,39 @@ public class GetPropertiesHandler(
             query = query.Where(p => p.PropertyType == request.PropertyType);
         }
 
-        if (request.Guests is not null || (request.CheckIn is not null && request.CheckOut is not null))
+        if (request.CheckIn is not null && request.CheckOut is not null)
         {
-            // One composable query over Units, not two separate
+            // unit_availability_holds moved to the Availability module
+            // (docs/adr/0004), so this can no longer be a local correlated
+            // Any() against that table directly. One round trip: ask
+            // Availability which units, platform-wide, have a blocking
+            // hold/booking for the dates - bounded by how many units are
+            // actually booked in this window, not by total inventory,
+            // since GetBlockedUnitIdsAsync no longer needs a candidate id
+            // list narrowed down first. GetPropertiesRequestValidator's
+            // MaxStayNights and this handler's own MaxLeadTimeDays bound
+            // how large that window - and therefore this set - can get.
+            IReadOnlySet<Guid> blockedUnitIds = await availabilityLookup.GetBlockedUnitIdsAsync(
+                request.CheckIn.Value, request.CheckOut.Value, timeProvider.GetUtcNow(), cancellationToken);
+
+            // One composable Any() over Units, not two separate
             // property-level Where clauses - capacity and availability must
             // both hold for the SAME unit. Two independent Any() checks
             // would match a property via one unit that fits the guest
             // count and a different unit free for the dates, even if no
             // single unit satisfies both.
-            var matchingUnitsQuery = dbContext.Units.AsNoTracking();
-
-            if (request.Guests is not null)
-            {
-                matchingUnitsQuery = matchingUnitsQuery.Where(u => u.MaxOccupancy >= request.Guests.Value);
-            }
-
-            // Materialized here, not left as a composed subquery -
-            // unit_availability_holds moved to the Availability module
-            // (docs/adr/0004), so the per-date check can no longer be a
-            // local correlated Any(). One extra round trip: resolve
-            // capacity-matching candidate unit ids, then ask Availability
-            // which have a blocking hold/booking for the dates.
-            //
-            // Unbounded by anything other than how many units match Guests -
-            // fine at current scale (docs/adr/0004's Consequences already
-            // weighs this round-trip cost), but unlike
-            // ReconcileOrphanedBookingIntentsJob's own candidate query, there's
-            // no cap here. A Guests-only search against tens of thousands
-            // of units would send an equally large id array to Availability -
-            // not urgent today, worth a cap if unit count grows.
-            List<Guid> candidateUnitIds = await matchingUnitsQuery
-                .Select(u => u.Id)
-                .ToListAsync(cancellationToken);
-
-            if (request.CheckIn is not null && request.CheckOut is not null && candidateUnitIds.Count > 0)
-            {
-                IReadOnlySet<Guid> blockedUnitIds = await availabilityLookup.GetUnitIdsWithOverlappingHoldAsync(
-                    candidateUnitIds, request.CheckIn.Value, request.CheckOut.Value, timeProvider.GetUtcNow(), cancellationToken);
-
-                candidateUnitIds = [.. candidateUnitIds.Where(id => !blockedUnitIds.Contains(id))];
-            }
-
-            query = query.Where(p => dbContext.Units.Any(u => candidateUnitIds.Contains(u.Id) && u.PropertyId == p.Id));
+            query = query.Where(p => dbContext.Units.Any(u =>
+                u.PropertyId == p.Id &&
+                (request.Guests == null || u.MaxOccupancy >= request.Guests.Value) &&
+                !blockedUnitIds.Contains(u.Id)));
+        }
+        else if (request.Guests is not null)
+        {
+            // No dates, so no Availability round trip needed at all - this
+            // is a plain SQL predicate the planner can index, not a
+            // client-side id list round-tripped back as a Contains.
+            query = query.Where(p => dbContext.Units.Any(u =>
+                u.PropertyId == p.Id && u.MaxOccupancy >= request.Guests.Value));
         }
 
         // Id as a tiebreaker, not a deliberate sort - see docs/adr/0008.
@@ -121,9 +138,9 @@ public class GetPropertiesHandler(
         // it needs to be `.OrderBy(p => p.SomeField).ThenBy(p => p.Id)`,
         // not a bare `.OrderBy(p => p.SomeField)`.
         // Slice, not ToPagedListAsync: an exact total here meant a second
-        // execution of everything above - the ILIKE, and the EXISTS over
-        // candidateUnitIds - with no LIMIT to bound it. Nothing consumes the
-        // number. The browse UI feeds it straight into a "load more" decision
+        // execution of everything above - the ILIKE, and the correlated
+        // EXISTS over Units - with no LIMIT to bound it. Nothing consumes
+        // the number. The browse UI feeds it straight into a "load more" decision
         // and the sitemap walk stops on an empty page, so both want a boolean,
         // and a boolean costs one extra row on a query already running.
         (List<Property> properties, bool hasNextPage) = await query
