@@ -1,6 +1,8 @@
 using BuildingBlocks.Pagination;
 using Catalog.Features.GetProperties;
+using Api;
 using FastEndpoints;
+using Microsoft.AspNetCore.RateLimiting;
 using Mediator;
 namespace Api.Endpoints.Catalog;
 
@@ -11,6 +13,13 @@ public class GetPropertiesEndpoint(IMediator mediator) : Endpoint<GetPropertiesR
         Get("properties");
         AllowAnonymous();
         Group<CatalogGroup>();
+
+        // Anonymous and unauthenticated, so the only thing standing between
+        // this and an unbounded request rate is the limiter. The per-request
+        // cost is already bounded elsewhere; this bounds how often. See
+        // ReadRateLimitOptions for why the limit is set far looser than the
+        // auth and hold policies.
+        Options(x => x.RequireRateLimiting(ApiServicesRegistration.ReadRateLimitPolicy));
         Description(b => b.WithTags("Properties"));
 
         Summary(s =>

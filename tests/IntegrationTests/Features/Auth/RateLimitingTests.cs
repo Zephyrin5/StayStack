@@ -86,4 +86,76 @@ public class RateLimitingTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(lastResponse);
         Assert.Equal(HttpStatusCode.TooManyRequests, lastResponse.StatusCode);
     }
+
+    [Fact]
+    public async Task AnonymousReads_ShouldReturn429_AfterExceedingConfiguredLimit()
+    {
+        // GetProperties, GetPropertyById, GetPriceCalendar and
+        // GetPropertyReviews were unauthenticated with no limiter at all.
+        // Their per-request cost is bounded - the stay-window caps, the price
+        // calendar's date bounds, MaxOffset, the HybridCache limits - but
+        // nothing bounded how many a caller could issue, and each cache miss
+        // still costs a cross-module availability call and a pricing load.
+        //
+        // Same shape as the auth test above: the shared factory runs with a
+        // very high ReadPermitLimit so ordinary test traffic never trips it,
+        // and this client overrides it back down to prove the policy is
+        // actually attached rather than merely defined.
+        const int limit = 3;
+
+        HttpClient client = factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.Configure<ReadRateLimitOptions>(o =>
+                {
+                    o.ReadPermitLimit = limit;
+                    o.ReadWindowSeconds = 60;
+                });
+            });
+        }).CreateClient();
+
+        HttpResponseMessage? lastResponse = null;
+        for (int i = 0; i < limit + 1; i++)
+        {
+            lastResponse = await client.GetAsync("/api/catalog/properties", TestContext.Current.CancellationToken);
+        }
+
+        Assert.NotNull(lastResponse);
+        Assert.Equal(HttpStatusCode.TooManyRequests, lastResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task TheReadLimit_IsSharedAcrossTheAnonymousReadEndpoints_NotPerEndpoint()
+    {
+        // One policy, one partition per caller IP, so the budget covers the
+        // read surface as a whole. A per-endpoint budget would let a caller
+        // multiply their allowance by rotating between four endpoints that
+        // cost the same to serve.
+        const int limit = 3;
+
+        HttpClient client = factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.Configure<ReadRateLimitOptions>(o =>
+                {
+                    o.ReadPermitLimit = limit;
+                    o.ReadWindowSeconds = 60;
+                });
+            });
+        }).CreateClient();
+
+        // Spread across two different read endpoints, exceeding the shared
+        // limit only in aggregate.
+        await client.GetAsync("/api/catalog/properties", TestContext.Current.CancellationToken);
+        await client.GetAsync($"/api/catalog/properties/{Guid.NewGuid()}", TestContext.Current.CancellationToken);
+        await client.GetAsync("/api/catalog/properties", TestContext.Current.CancellationToken);
+
+        HttpResponseMessage response = await client.GetAsync(
+            $"/api/catalog/properties/{Guid.NewGuid()}", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+    }
+
 }

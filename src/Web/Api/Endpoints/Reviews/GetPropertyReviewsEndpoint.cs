@@ -1,4 +1,6 @@
+using Api;
 using FastEndpoints;
+using Microsoft.AspNetCore.RateLimiting;
 using Mediator;
 using Reviews.Features.GetPropertyReviews;
 
@@ -11,6 +13,13 @@ public class GetPropertyReviewsEndpoint(IMediator mediator) : Endpoint<GetProper
         Get("stays/property/{PropertyId}");
         AllowAnonymous();
         Group<ReviewsGroup>();
+
+        // Anonymous and unauthenticated, so the only thing standing between
+        // this and an unbounded request rate is the limiter. The per-request
+        // cost is already bounded elsewhere; this bounds how often. See
+        // ReadRateLimitOptions for why the limit is set far looser than the
+        // auth and hold policies.
+        Options(x => x.RequireRateLimiting(ApiServicesRegistration.ReadRateLimitPolicy));
 
         Summary(s =>
         {

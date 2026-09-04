@@ -24,6 +24,13 @@ public static class ApiServicesRegistration
     public const string AuthRateLimitPolicy = "auth";
     public const string HoldRateLimitPolicy = "holds";
 
+    // The anonymous read endpoints. Separate from the two above because it is
+    // answering a different question - those bound how often a caller may
+    // change something, this bounds how often they may ask - and because its
+    // limit has to be orders of magnitude looser to stay invisible to real
+    // browsing. See ReadRateLimitOptions.
+    public const string ReadRateLimitPolicy = "reads";
+
     public static IServiceCollection ConfigureApiServices(
         this IServiceCollection services,
         IConfiguration configuration)

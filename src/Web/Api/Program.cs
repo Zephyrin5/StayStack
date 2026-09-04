@@ -98,6 +98,10 @@ builder.Services.AddOptions<HoldRateLimitOptions>()
     .Bind(builder.Configuration.AppSection(HoldRateLimitOptions.SectionName))
     .ValidateDataAnnotations()
     .ValidateOnStart();
+builder.Services.AddOptions<ReadRateLimitOptions>()
+    .Bind(builder.Configuration.AppSection(ReadRateLimitOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -134,6 +138,31 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = limits.HoldPermitLimit,
                 Window = TimeSpan.FromSeconds(limits.HoldWindowSeconds),
+                QueueLimit = 0
+            });
+    });
+
+    // The anonymous read endpoints - GetProperties, GetPropertyById,
+    // GetPriceCalendar, GetPropertyReviews - which had no limiter at all.
+    // Their per-request cost is bounded (the stay-window caps, the price
+    // calendar's date bounds, MaxOffset, the HybridCache limits); nothing
+    // bounded how many of them a caller could issue.
+    //
+    // Same IP partition as the other two, and the same caveat that makes
+    // this limit deliberately loose: with ForwardedHeaders.KnownProxies
+    // unset every caller shares the proxy's address, so a tight limit here
+    // would stop real guests browsing rather than stop abuse. See
+    // ReadRateLimitOptions.
+    options.AddPolicy(ApiServicesRegistration.ReadRateLimitPolicy, httpContext =>
+    {
+        ReadRateLimitOptions limits = httpContext.RequestServices.GetRequiredService<IOptions<ReadRateLimitOptions>>().Value;
+
+        return RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = limits.ReadPermitLimit,
+                Window = TimeSpan.FromSeconds(limits.ReadWindowSeconds),
                 QueueLimit = 0
             });
     });
