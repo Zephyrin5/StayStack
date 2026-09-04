@@ -43,8 +43,8 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
     {
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/auth/sign-in", new SignInRequest
         {
-            Email = "admin@staystack.com",
-            Password = "1234"
+            Email = IntegrationTestAdmin.Email,
+            Password = IntegrationTestAdmin.Password
         }, TestContext.Current.CancellationToken);
 
         SignInResponse? result = await response.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);

@@ -31,6 +31,13 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
     {
         await _dbContainer.StartAsync();
         await MigrateAllModulesAsync();
+
+        // The administrator these tests sign in as. It used to come from the
+        // schema - UserConfiguration seeded one with a known password, which
+        // meant every deployment had it too. Created here instead, so the
+        // credential lives for one run in one throwaway database. See
+        // IntegrationTestAdmin.
+        await IntegrationTestAdmin.EnsureCreatedAsync(Services);
     }
 
     public override async ValueTask DisposeAsync()

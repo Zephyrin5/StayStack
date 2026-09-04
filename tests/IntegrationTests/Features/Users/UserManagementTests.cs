@@ -31,8 +31,8 @@ public class UserManagementTests(IntegrationTestWebApplicationFactory factory)
     {
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/auth/sign-in", new SignInRequest
         {
-            Email = "admin@staystack.com",
-            Password = "1234"
+            Email = IntegrationTestAdmin.Email,
+            Password = IntegrationTestAdmin.Password
         }, TestContext.Current.CancellationToken);
 
         SignInResponse? result = await response.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
@@ -181,14 +181,14 @@ public class UserManagementTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task RemoveRole_ShouldReturn400_WhenRemovingTheLastAdministrator()
     {
-        // The seeded admin@staystack.com is the only Administrator in a
+        // The run's own IntegrationTestAdmin is the only Administrator in a
         // fresh test database - removing it would leave zero, which is
         // exactly the invariant this endpoint has to protect.
         string adminToken = await SignInAsSeededAdminAsync();
 
         using IServiceScope scope = factory.Services.CreateScope();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-        ApplicationUser admin = (await userManager.FindByEmailAsync("admin@staystack.com"))!;
+        ApplicationUser admin = (await userManager.FindByEmailAsync(IntegrationTestAdmin.Email))!;
 
         HttpResponseMessage response = await _client.SendAsync(
             Authorized(HttpMethod.Delete, $"/api/users/{admin.Id}/roles/Administrator", adminToken),
@@ -200,7 +200,7 @@ public class UserManagementTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task RemoveRole_ShouldSucceed_WhenAnotherAdministratorRemains()
     {
-        // Deliberately never touches the seeded admin@staystack.com's own
+        // Deliberately never touches the IntegrationTestAdmin account's own
         // Administrator role - other tests in this collection depend on
         // it staying intact. Grants the role to two fresh users instead,
         // so removing it from one of them still leaves 2+ Administrators
@@ -224,7 +224,7 @@ public class UserManagementTests(IntegrationTestWebApplicationFactory factory)
 
         // Full cleanup, not just the one call under test - secondExtraAdminId
         // is still an Administrator at this point. Leaving it would make
-        // admin@staystack.com no longer "the last remaining Administrator"
+        // the test administrator no longer "the last remaining Administrator"
         // for the rest of this shared-database collection, silently
         // breaking RemoveRole_ShouldReturn400_WhenRemovingTheLastAdministrator
         // (and any test expecting the seeded admin to have Administrator
