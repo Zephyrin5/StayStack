@@ -489,7 +489,9 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         string customerToken = await SeedSignedInCustomerAsync();
 
         DateOnly today = CatalogSeeding.Today();
-        Guid firstHoldId = await HoldUnitAsync(unitId, today, today.AddDays(2));
+        Guid firstHoldId = await HoldUnitAsync(unitId, today.AddDays(7), today.AddDays(9));
+        // A week out: cancellation is only legal before check-in now, and
+        // this test is about the redemption coming back, not the dates.
         ConfirmBookingResponse firstBooking = await ConfirmBookingAsync(firstHoldId, "guest@example.com", code, customerToken);
 
         using HttpRequestMessage cancelRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/bookings/{firstBooking.BookingId}/cancel")

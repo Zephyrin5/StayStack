@@ -33,7 +33,12 @@ public class GetBookingForManagementHandler(
             CheckOut = booking.CheckOut,
             TotalPrice = booking.TotalPrice.Amount,
             Currency = booking.TotalPrice.Currency,
-            CanCancel = booking.BookingStatus != BookingStatus.Cancelled,
+            // The same rule CancelBookingHandler enforces, from the same
+            // method on the aggregate. This used to ignore dates entirely and
+            // advertise CanCancel for a stay that had already happened -
+            // offering an action the API would reject, which is precisely the
+            // failure the CanReview flag below was written to avoid.
+            CanCancel = booking.CanBeCancelledOn(today),
             // Both bounds, matching the Reviews handlers exactly - offering a
             // review the API would then reject is the failure this flag
             // exists to avoid, and an upper bound on only one side would

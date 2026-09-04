@@ -261,7 +261,10 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         string customerToken = await SeedSignedInCustomerAsync();
         string adminToken = await SignInAsAdministratorAsync();
         DateOnly today = CatalogSeeding.Today();
-        Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
+        Guid holdId = await HoldUnitAsync(unit.Id, today.AddDays(7), today.AddDays(10));
+        // A week out, not starting today: cancellation is only legal
+        // before check-in now, and a stay beginning today is already too
+        // late. What these tests are about is unaffected by the dates.
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
         Guid transactionId = await InitiateTransactionAsync(bookingId, customerToken);
         await MarkTransactionSucceededAsync(transactionId, adminToken);
@@ -284,7 +287,12 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
     [InlineData(5, 100)] // exactly the 5-day boundary - still the 100% tier
     [InlineData(4, 50)] // just inside the 5-day boundary - the 50% tier
     [InlineData(1, 50)] // exactly the 1-day boundary - still the 50% tier
-    [InlineData(0, 0)] // check-in day itself - the 0% floor tier
+    // No check-in-day case any more: cancellation is refused once the stay
+    // has started, so the 0% floor tier is unreachable through this
+    // endpoint. The tier itself is still real and still exercised, by
+    // CancellationPolicyTests against ResolveRefundPercent directly, and
+    // by CancelBooking_ShouldReturn409_OnTheCheckInDayItself for the
+    // endpoint's half of it.
     public async Task CancelBooking_ShouldRefundAccordingToTheModeratePolicyTier_BasedOnDaysBeforeCheckIn(
         int daysUntilCheckIn, int expectedRefundPercent)
     {
@@ -350,7 +358,10 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         await SeedCatalogAsync(unit);
         string customerToken = await SeedSignedInCustomerAsync();
         DateOnly today = CatalogSeeding.Today();
-        Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
+        Guid holdId = await HoldUnitAsync(unit.Id, today.AddDays(7), today.AddDays(10));
+        // A week out, not starting today: cancellation is only legal
+        // before check-in now, and a stay beginning today is already too
+        // late. What these tests are about is unaffected by the dates.
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
         Guid transactionId = await InitiateTransactionAsync(bookingId, customerToken);
 
@@ -375,7 +386,10 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         string customerToken = await SeedSignedInCustomerAsync();
         string adminToken = await SignInAsAdministratorAsync();
         DateOnly today = CatalogSeeding.Today();
-        Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
+        Guid holdId = await HoldUnitAsync(unit.Id, today.AddDays(7), today.AddDays(10));
+        // A week out, not starting today: cancellation is only legal
+        // before check-in now, and a stay beginning today is already too
+        // late. What these tests are about is unaffected by the dates.
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
         Guid transactionId = await InitiateTransactionAsync(bookingId, customerToken);
 
@@ -402,7 +416,10 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         await SeedCatalogAsync(unit);
         string customerToken = await SeedSignedInCustomerAsync();
         DateOnly today = CatalogSeeding.Today();
-        Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
+        Guid holdId = await HoldUnitAsync(unit.Id, today.AddDays(7), today.AddDays(10));
+        // A week out: cancelling a stay that starts today is refused now,
+        // and what this test is about - the hold coming back - is the same
+        // either way.
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
 
         // Act
@@ -431,7 +448,10 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         await SeedCatalogAsync(unit);
         string customerToken = await SeedSignedInCustomerAsync();
         DateOnly today = CatalogSeeding.Today();
-        Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
+        Guid holdId = await HoldUnitAsync(unit.Id, today.AddDays(7), today.AddDays(10));
+        // A week out, not starting today: cancellation is only legal
+        // before check-in now, and a stay beginning today is already too
+        // late. What these tests are about is unaffected by the dates.
         Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
         await CancelBookingAsync(bookingId, customerToken);
 
@@ -498,7 +518,10 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         DateOnly today = CatalogSeeding.Today();
-        Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
+        Guid holdId = await HoldUnitAsync(unit.Id, today.AddDays(7), today.AddDays(10));
+        // A week out, not starting today: cancellation is only legal
+        // before check-in now, and a stay beginning today is already too
+        // late. What these tests are about is unaffected by the dates.
         ConfirmBookingResponse booking = await ConfirmBookingAsGuestAsync(holdId);
         Assert.NotNull(booking.ManagementToken);
 
@@ -548,14 +571,88 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
     }
 
     [Fact]
-    public async Task CancelBooking_ShouldSucceed_ForGuestCheckoutWithManagementTokenJustInsideTheGraceWindow()
+    public async Task CancelBooking_ShouldReturn409_ForAStayThatHasAlreadyHappened_EvenWithAValidManagementToken()
     {
-        // Arrange - checked out exactly 90 days ago, still within
-        // BookingAccessChecker's grace window (today <= CheckOut + 90).
+        // Checked out exactly 90 days ago: inside BookingAccessChecker's
+        // grace window (today <= CheckOut + 90), so the link still
+        // authorizes - and long past any point where cancelling means
+        // anything.
+        //
+        // This test used to assert 200. That was the two questions conflated
+        // into one: a token's authorization lifetime deciding cancellation
+        // eligibility by default, because nothing else was asking. The
+        // guarantee it was really pinning - that the link still works this
+        // far out - is asserted below by the status being 409 rather than
+        // 404. Authorized, and refused on its merits.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unit.Id, today.AddDays(-93), today.AddDays(-90));
+        string managementToken = await SeedManagementTokenAsync(bookingId);
+
+        // Act
+        HttpResponseMessage response = await CancelBookingAsync(bookingId, accessToken: null, managementToken);
+
+        // Assert - 409, not 404: the caller was allowed to reach this
+        // booking. Telling them it did not exist would be a lie they can
+        // disprove by looking at it.
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppBookingsDbContext db = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        Booking booking = await db.Bookings.AsNoTracking()
+            .SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
+        Assert.NotEqual(BookingStatus.Cancelled, booking.BookingStatus);
+    }
+
+    [Fact]
+    public async Task CancelBooking_ShouldReturn409_ForAStayInProgress()
+    {
+        // The sharper case. Cancelling mid-stay released the nights the guest
+        // had not used yet back into inventory, so the unit could be sold out
+        // from under someone who was still in it.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        DateOnly today = CatalogSeeding.Today();
+        Guid bookingId = await SeedBookingAsync(unit.Id, today.AddDays(-1), today.AddDays(2));
+        string managementToken = await SeedManagementTokenAsync(bookingId);
+
+        // Act
+        HttpResponseMessage response = await CancelBookingAsync(bookingId, accessToken: null, managementToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CancelBooking_ShouldReturn409_OnTheCheckInDayItself()
+    {
+        // The boundary. Cancellation ends when the stay starts, so check-in
+        // day is already too late - there is nothing left to cancel, only to
+        // cut short, which is a different transaction with different money
+        // attached.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        DateOnly today = CatalogSeeding.Today();
+        Guid bookingId = await SeedBookingAsync(unit.Id, today, today.AddDays(3));
+        string managementToken = await SeedManagementTokenAsync(bookingId);
+
+        // Act
+        HttpResponseMessage response = await CancelBookingAsync(bookingId, accessToken: null, managementToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CancelBooking_ShouldSucceed_TheDayBeforeCheckIn()
+    {
+        // The other side of that boundary, so the rule cannot be satisfied by
+        // refusing everything.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        DateOnly today = CatalogSeeding.Today();
+        Guid bookingId = await SeedBookingAsync(unit.Id, today.AddDays(1), today.AddDays(4));
         string managementToken = await SeedManagementTokenAsync(bookingId);
 
         // Act

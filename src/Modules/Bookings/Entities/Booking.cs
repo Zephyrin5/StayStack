@@ -222,8 +222,51 @@ public sealed class Booking : Entity, IAggregateRoot
             paymentDueAt);
     }
 
+    /// <summary>
+    ///     Whether a guest may cancel this booking themselves, as of the
+    ///     given property-local date.
+    ///     <para>
+    ///         Being <em>allowed to reach</em> a booking and being allowed to
+    ///         <em>cancel</em> it are different questions, and conflating them
+    ///         is what left this open. BookingAccessChecker answers the first:
+    ///         a management link stays usable until CheckOut + 90 days so a
+    ///         guest can still view a finished stay, and an authenticated
+    ///         customer's own booking has no time limit at all. Nothing then
+    ///         asked the second question, so a guest could cancel a stay they
+    ///         were in the middle of - handing the remaining nights back to
+    ///         inventory - or turn a stay that ended months ago into a
+    ///         Cancelled one, taking its reviewability with it and pushing a
+    ///         long-settled payment into a refund workflow.
+    ///     </para>
+    ///     <para>
+    ///         The only trace of the date was ComputeRefund's
+    ///         Math.Max(daysBeforeCheckIn, 0), which clamped the refund tier
+    ///         for a date already past instead of refusing the request.
+    ///     </para>
+    ///     <para>
+    ///         Cancellation ends at check-in, not at checkout: once a stay has
+    ///         started there is nothing left to cancel, only to cut short.
+    ///         Leaving early is a different transaction with different money
+    ///         attached, and if it becomes a product requirement it wants its
+    ///         own operation rather than this one relaxed.
+    ///     </para>
+    /// </summary>
+    public bool CanBeCancelledOn(DateOnly today)
+    {
+        return BookingStatus != BookingStatus.Cancelled && today < CheckIn;
+    }
+
     // Idempotent - a repeated cancel (retried request, double-click) is a
-    // no-op, not an error. Deliberately no "already run its course" check:
+    // no-op, not an error.
+    //
+    // No date guard here, deliberately: this is the state transition, and
+    // CanBeCancelledOn above is the self-service policy over it. The two
+    // callers need different answers - ExpireUnpaidBookingsJob cancels an
+    // unpaid booking on the system's behalf and must not be subject to a
+    // rule written for guests, even though in practice its bookings are
+    // always still before check-in.
+    //
+    // Deliberately no "already run its course" check:
     // whether a booking is still reachable for cancellation is
     // BookingAccessChecker's call (the guest-checkout management token
     // stays valid through CheckOut + 90 days so a stay can still be

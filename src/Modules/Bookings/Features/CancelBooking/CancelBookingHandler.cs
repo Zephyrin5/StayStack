@@ -80,6 +80,24 @@ public class CancelBookingHandler(
         // of how many times this endpoint is called. See docs/adr/0003.
         if (booking.BookingStatus != BookingStatus.Cancelled)
         {
+            // Eligibility, checked after authorization and separately from
+            // it. BookingAccessChecker decided whether this caller may reach
+            // the booking at all - a management link stays usable until
+            // CheckOut + 90 days, and an authenticated customer's own booking
+            // has no time limit whatsoever - and nothing then asked whether
+            // cancelling was still a meaningful thing to do. A guest could
+            // cancel a stay they were currently in, releasing the remaining
+            // nights back to inventory, or cancel one that ended months ago.
+            //
+            // Not folded into the idempotent branch above: a re-cancel of an
+            // already-Cancelled booking stays a no-op success whatever the
+            // date, since it changes nothing and the caller is asking for a
+            // state that already holds.
+            if (!booking.CanBeCancelledOn(today))
+            {
+                throw new BookingNotCancellableException(booking.Id);
+            }
+
             // Read *before* enqueueing and dispatching, deliberately. Both
             // reads further down are invalidated by this request's own inline
             // dispatch: a ReverseTransactionAsync that lands moves the
