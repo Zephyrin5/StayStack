@@ -153,14 +153,29 @@ internal class HoldConfirmation(AppAvailabilityDbContext dbContext, TimeProvider
         // resets hold_expires_at to now, putting the row outside the cap's
         // WHERE clause regardless.
         //
-        // Only from 'pending_payment'. A hold that was released (back to
-        // 'held') or never confirmed must not become 'booked' behind a late
-        // payment message; the caller distinguishes that from success by the
-        // rows affected rather than being told the payment landed.
+        // Idempotent: 'booked' is accepted as well as 'pending_payment', and
+        // reports success. Cross-module commit ambiguity is unavoidable here
+        // - the caller marks the hold paid and then confirms the booking on
+        // a different DbContext, so a crash or a retried outbox message
+        // replays this call against a hold that is already sold. Rejecting
+        // that would make the retry that is supposed to finish the job the
+        // thing that permanently fails it.
+        //
+        // COALESCE keeps the original booked_at across those replays: it
+        // records when the range was sold, and a retry an hour later is not
+        // a second sale.
+        //
+        // 'held' is still refused, and that distinction is the whole value
+        // of the return: a hold released or expired out from under a
+        // late-landing payment is inventory this platform no longer owns,
+        // and the caller has to compensate rather than report success.
         const string sql = $"""
                             UPDATE unit_availability_holds
-                            SET status = '{HoldStatuses.Booked}', booked_at = @Now, client_key = NULL
-                            WHERE id = @HoldId AND status = '{HoldStatuses.PendingPayment}';
+                            SET status = '{HoldStatuses.Booked}',
+                                booked_at = COALESCE(booked_at, @Now),
+                                client_key = NULL
+                            WHERE id = @HoldId
+                              AND status IN ('{HoldStatuses.PendingPayment}', '{HoldStatuses.Booked}');
                             """;
 
         try

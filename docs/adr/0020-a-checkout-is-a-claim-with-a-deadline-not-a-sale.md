@@ -46,7 +46,23 @@ It also buys nothing. With a payment deadline of D and a hold rate limit of R, n
 
 `MarkTransactionSucceededHandler` already enqueues `ConfirmBookingPaymentOutboxMessage`, which reaches `IBookingPaymentConfirmation.ConfirmPaymentAsync`, and that endpoint is admin-reachable now. Hooking `pending_payment → booked` into it means the final transition is exercised by integration tests today rather than sitting dead until a payment provider is wired up.
 
-`ConfirmPaymentAsync` marks the booking Confirmed *before* marking the hold paid, deliberately. A crash between them leaves a Confirmed booking whose hold is still `pending_payment` - which the sweep skips, since it only takes `Pending` bookings, so a paying guest keeps their range. The reverse order would leave a sold hold against a booking still awaiting payment, which the sweep would then cancel and release out from under them. If the hold is gone entirely by the time payment lands, `BookingHoldNoLongerHeldException` sends the message to the dispatcher's retry/dead-letter path rather than closing it as success: money was taken for inventory the platform no longer holds, and no code path can fix that.
+`ConfirmPaymentAsync` marks the **hold paid first**, then confirms the booking under the booking's row lock.
+
+This ordering was originally the other way round, on the reasoning that a crash between the two commits would leave a Confirmed booking whose hold was still `pending_payment` - which the sweep skips, so a paying guest keeps their range - whereas the reverse would leave a sold hold against a still-`Pending` booking for the sweep to cancel. That compared the two crash remainders and missed the more important asymmetry: **only one of the two failures can be compensated.**
+
+Booking-first fails into a Confirmed booking whose inventory has been released to somebody else. Nothing can repair it - the range may already be resold - and because the hold transition threw, the outbox retried forever, each attempt re-reading an already-Confirmed booking and failing identically until it dead-lettered into an hourly sweep. Money taken, nothing sold, loud rather than fixed.
+
+Hold-first cannot produce that. If the hold transition fails, nothing has committed and the booking is untouched. If the booking confirm then fails, a retry finishes the job, because `MarkHoldPaidAsync` accepts an already-`booked` hold - idempotency that cross-module commit ambiguity makes mandatory, not optional. The only remainder is a sold hold against a still-`Pending` booking, and that is recoverable from both directions: the outbox retry completes it, or the payment window lapses and `ExpireUnpaidBookingsJob` cancels the booking and releases the hold, which drives `ConfirmPaymentAsync` to return `false` and the caller to refund. A compensated outcome instead of an uncompensatable one.
+
+A hold that is gone entirely by the time payment lands now returns `false` rather than throwing, for the same reason: the answer to "this payment cannot be turned into a stay" is a refund, which the caller already does for the cancelled-booking case. Throwing only retried an outcome that could never improve.
+
+### Payment and expiry arbitrate for the booking row the same way
+
+Ordering fixes the crash window but not concurrency, and the two are separate problems.
+
+`ExpireUnpaidBookingsJob` locks the booking with `FOR UPDATE SKIP LOCKED` and re-checks its status under that lock. Payment originally did an unlocked read, a status check against that stale read, and an unconditional EF update - and `Booking` carries no concurrency token, so the generated `UPDATE` keyed on `Id` alone and could not fail. One side of the transition participated in the protocol and the other did not, which is all a lost update needs: payment reads `Pending`; expiry locks the row, releases the hold, commits `Cancelled`; payment's `UPDATE`, which had been blocking on that lock, proceeds and overwrites `Cancelled` back to `Confirmed`. A Confirmed booking whose inventory was just handed back.
+
+`ConfirmPaymentAsync` now transitions under the row lock and re-reads inside it, so it only ever moves `Pending → Confirmed` against committed state. It takes `FOR UPDATE` rather than `SKIP LOCKED`: the needs are opposite - a sweep should step over a row someone else holds and revisit it next run, while a payment in hand must wait to observe the committed outcome, which is exactly how it learns a refund is owed.
 
 ## Consequences
 

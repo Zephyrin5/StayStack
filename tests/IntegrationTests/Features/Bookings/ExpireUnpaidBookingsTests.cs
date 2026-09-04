@@ -1,5 +1,6 @@
 using Availability;
 using Availability.Entities;
+using Dapper;
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;
@@ -7,7 +8,9 @@ using Bookings.Jobs;
 using Catalog;
 using Catalog.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
+using System.Data.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using NpgsqlTypes;
@@ -248,4 +251,152 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         // Assert
         Assert.Equal("held", await GetHoldStatusAsync(holdId));
     }
+
+    [Fact]
+    public async Task APaymentResolvingWhileExpiryHoldsTheRowLock_DoesNotOverwriteTheCancellation()
+    {
+        // The race the sequential payment/expiry tests cannot reach, because
+        // they let one finish before starting the other.
+        //
+        // Payment used to do an unlocked read, a status check against that
+        // stale read, and an unconditional EF update - and Booking carries no
+        // concurrency token, so the generated UPDATE keyed on Id alone and
+        // could not fail. Expiry, meanwhile, locks the row and re-checks
+        // under it. One side of the transition participated in the protocol
+        // and the other did not, which is the whole defect: payment reads
+        // Pending, expiry commits Cancelled and releases the hold, payment's
+        // UPDATE unblocks and puts Confirmed back. A Confirmed booking whose
+        // inventory had just been handed to somebody else.
+        //
+        // Driven from the test rather than by racing the real job, so the
+        // interleaving is deterministic: this transaction does exactly what
+        // ExpireUnpaidBookingsJob does - lock the row, release the hold,
+        // cancel the booking - and holds the lock open until payment is
+        // provably blocked on it.
+        // Arrange
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+
+        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(44));
+        Guid holdId = await SeedHoldAsync(unit.Id, checkIn, checkIn.AddDays(2), "pending_payment");
+        Guid bookingId = await SeedBookingAsync(unit.Id, holdId, DateTimeOffset.UtcNow.AddMinutes(-1));
+
+        using IServiceScope expiryScope = factory.Services.CreateScope();
+        AppBookingsDbContext expiryContext = expiryScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+
+        await using IDbContextTransaction expiryTransaction =
+            await expiryContext.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+
+        DbConnection expiryConnection = expiryContext.Database.GetDbConnection();
+        await expiryConnection.ExecuteAsync(new CommandDefinition(
+            """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE""",
+            new { BookingId = bookingId },
+            expiryTransaction.GetDbTransaction(),
+            cancellationToken: TestContext.Current.CancellationToken));
+
+        // Act - payment starts while the row is locked and the hold is still
+        // claimable, so it gets past MarkHoldPaidAsync and then blocks on the
+        // booking's row lock. That is the boundary under test: the ordering
+        // fix alone would not save this case, because the hold transition
+        // succeeds and the booking write is still to come.
+        Task<bool> payment = Task.Run(async () =>
+        {
+            using IServiceScope paymentScope = factory.Services.CreateScope();
+            return await paymentScope.ServiceProvider.GetRequiredService<IBookingPaymentConfirmation>()
+                .ConfirmPaymentAsync(bookingId, CancellationToken.None);
+        });
+
+        // Long enough to have reached the lock and be waiting there. Without
+        // the lock - the original behaviour - it would sail straight past,
+        // read the still-Pending row, and be poised to overwrite whatever
+        // this transaction commits.
+        await Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        Assert.False(payment.IsCompleted);
+
+        // Now expiry finishes its work while still holding the lock, exactly
+        // as the job does: hand the hold back, then cancel the booking.
+        await expiryScope.ServiceProvider.GetRequiredService<IHoldConfirmation>()
+            .ReleaseHoldAsync(holdId, TestContext.Current.CancellationToken);
+
+        // Raw SQL rather than EF for the cancellation: this transaction is
+        // started by hand, and EF refuses to run a query inside one it did
+        // not create while a retrying execution strategy is configured.
+        // Dapper on the same connection and transaction reproduces the job's
+        // write exactly, which is all this needs.
+        await expiryConnection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE "bookings" SET booking_status = 'Cancelled', payment_due_at = NULL
+            WHERE id = @BookingId
+            """,
+            new { BookingId = bookingId },
+            expiryTransaction.GetDbTransaction(),
+            cancellationToken: TestContext.Current.CancellationToken));
+
+        await expiryTransaction.CommitAsync(TestContext.Current.CancellationToken);
+
+        bool confirmed = await payment;
+
+        // Assert - payment observed the committed cancellation and reported
+        // it, which is what routes the caller to a refund.
+        Assert.False(confirmed);
+
+        // And it did not overwrite the outcome. This is the assertion that
+        // fails against the unlocked version.
+        Assert.Equal(BookingStatus.Cancelled, await GetBookingStatusAsync(bookingId));
+    }
+
+    [Fact]
+    public async Task MarkingAHoldPaidTwice_Succeeds_BecauseARetryMustBeAbleToFinishTheJob()
+    {
+        // Payment marks the hold paid and then confirms the booking, on two
+        // DbContexts against two schemas. A crash between them, or a retried
+        // outbox message, replays the first half against a hold that is
+        // already 'booked'. If that were rejected, the retry meant to finish
+        // the job would be the thing that permanently failed it - and the
+        // booking would never leave Pending.
+        // Arrange
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+
+        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(45));
+        Guid holdId = await SeedHoldAsync(unit.Id, checkIn, checkIn.AddDays(2), "pending_payment");
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        IHoldConfirmation holdConfirmation = scope.ServiceProvider.GetRequiredService<IHoldConfirmation>();
+
+        // Act
+        bool first = await holdConfirmation.MarkHoldPaidAsync(holdId, TestContext.Current.CancellationToken);
+        bool second = await holdConfirmation.MarkHoldPaidAsync(holdId, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.True(first);
+        Assert.True(second);
+        Assert.Equal("booked", await GetHoldStatusAsync(holdId));
+    }
+
+    [Fact]
+    public async Task MarkingAReleasedHoldPaid_Fails_SoTheCallerCompensatesInsteadOfSellingNothing()
+    {
+        // The distinction the idempotency above must not swallow: a hold
+        // released or expired out from under a late-landing payment is
+        // inventory this platform no longer owns, and reporting success would
+        // confirm a stay it cannot honour.
+        // Arrange
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+
+        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(46));
+        Guid holdId = await SeedHoldAsync(unit.Id, checkIn, checkIn.AddDays(2), "held");
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        IHoldConfirmation holdConfirmation = scope.ServiceProvider.GetRequiredService<IHoldConfirmation>();
+
+        // Act
+        bool marked = await holdConfirmation.MarkHoldPaidAsync(holdId, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.False(marked);
+        Assert.Equal("held", await GetHoldStatusAsync(holdId));
+    }
+
 }
