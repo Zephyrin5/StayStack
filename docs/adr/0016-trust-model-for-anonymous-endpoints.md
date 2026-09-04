@@ -19,7 +19,7 @@ Fifteen endpoints call `AllowAnonymous()`. Some are obviously safe (public prope
 | `POST /bookings` (confirm) | Creates a booking and (via a redeemed code) can mutate promotion state | Yes (`"auth"` policy) | Found as a gap during this same review (anonymous, a real DB write with financial consequences, previously uncapped) and closed the same way `CancelBookingEndpoint`/`GetBookingForManagementEndpoint`/`InitiateTransactionEndpoint` already were, rather than left as a known gap for later. |
 | `POST /transactions/initiate` | Initiates a payment transaction | Yes (`"auth"` policy) | Also gated by the same two-path ownership proof as booking cancellation (matching `CustomerId`, or a management token). See below - it previously took a bare booking id. |
 | `POST /reviews/stays` | Leaves a review for a completed stay | No | Same two-path ownership proof as booking cancellation; one review per booking is enforced at the database level (409 on a second attempt), which bounds repeated-write abuse independent of a rate limit. |
-| `GET /catalog/properties`, `/catalog/properties/{id}`, `/catalog/properties/{id}/price-calendar`, `/reviews/properties/{id}` | Public browse/read | No | Read-only, each wrapped in its own short-TTL cache (see `GetPropertiesHandler`/`GetPriceCalendarHandler`/`GetPropertyByIdHandler`'s own doc comments) - a cache absorbs repeated-request cost far more cheaply than a rate limiter would. |
+| `GET /catalog/properties`, `/catalog/properties/{id}`, `/catalog/properties/{id}/price-calendar`, `/reviews/properties/{id}` | Public browse/read | Yes (`"reads"` policy) | Each is wrapped in its own short-TTL cache, and this row used to read "No" on the reasoning that a cache absorbs repeated-request cost more cheaply than a limiter. That covers the cost of a *repeated* request, not of a stream of *distinct* ones: every miss still pays for a cross-module availability call, a pricing-rule load and, for the calendar, a `generate_series` cross join. The per-request cost is bounded elsewhere (the stay-window caps, the calendar's date bounds, `MaxOffset`, the cache's payload and size limits); the `"reads"` policy is what bounds the rate. Deliberately far looser than `"auth"` or `"holds"` - see `ReadRateLimitOptions` for why a tight limit here would stop guests browsing rather than stop abuse. |
 | `GET /localization/languages` | Static list | No | No user input, no per-request cost. |
 
 ### The hold endpoint's layered defense, and what actually bounds it
@@ -62,8 +62,19 @@ endpoint's 429 contract and in `TooManyActiveHoldsException`, while bounding
 nothing.
 
 It now counts by `Api.Security.ClientNetworkKey`, derived from the connection's
-peer address, which the caller cannot choose. The cookie keeps only the job it
-can do: an ownership handle for a future "release my hold" endpoint.
+peer address, which the caller cannot choose.
+
+**The cookie has since been removed entirely.** This ADR originally kept it for
+"the job it can do: an ownership handle for a future 'release my hold'
+endpoint" - a use that was never built. What remained was a `holder_token`
+written on every hold and read by nothing: no lookup, no cap, no authorization
+decision anywhere in production or in tests. That is not a dormant feature, it
+is an opaque per-browser identifier set on anonymous visitors' machines and
+retained for the life of every hold row, plus a column written on every insert,
+in exchange for nothing. Keeping state for a feature that may never arrive is
+the cost this ADR is otherwise careful about. If hold ownership is ever built it
+wants a token minted for that purpose, with a lifetime chosen for it, rather
+than one that has been sitting in the schema in the meantime.
 
 **Signing the cookie was considered and rejected as ineffective**, not merely
 expensive - a different conclusion from the "Alternatives considered" entry
@@ -166,7 +177,7 @@ A tempting improvement - telling a locked-out user why they're locked out instea
 
 - **Require authentication for holds.** Rejected outright: the endpoint's own purpose is pre-checkout availability-checking for guests who haven't signed in yet (and may never - guest checkout is a first-class path through this app). Forcing sign-in here would break the actual product requirement, not just harden it.
 - **A CAPTCHA or proof-of-work challenge on the hold endpoint.** Would meaningfully raise the cost of the "zero out inventory" attack. Not adopted in this pass - it's a larger UX and infrastructure commitment than the stay-length/lead-time/rate-limit combination above, which closes the same hole with tools this codebase already has.
-- **Make the hold-session cookie cryptographically bind to the request (e.g. a signed token tying the session to an IP)**, so it couldn't be trivially regenerated. Rejected - see "Why the cap counts by client network" above for the full reasoning. Signing addresses forging, not minting, so it would not have raised the cost of this attack at all. An earlier revision of this entry rejected it on the weaker ground that "the rate limiter already bounds" the attack, which was itself the mistake corrected above. Binding the *cap* to the network, rather than binding the *cookie* to it, gets the property that was wanted without signing or key rotation.
+- **Make the hold-session cookie cryptographically bind to the request (e.g. a signed token tying the session to an IP)**, so it couldn't be trivially regenerated. (Moot now that the cookie is gone, and kept here because the reasoning is what led to removing it.) Rejected - see "Why the cap counts by client network" above for the full reasoning. Signing addresses forging, not minting, so it would not have raised the cost of this attack at all. An earlier revision of this entry rejected it on the weaker ground that "the rate limiter already bounds" the attack, which was itself the mistake corrected above. Binding the *cap* to the network, rather than binding the *cookie* to it, gets the property that was wanted without signing or key rotation.
 
 ## Consequences
 

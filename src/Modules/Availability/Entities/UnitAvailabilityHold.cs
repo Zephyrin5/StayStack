@@ -61,11 +61,6 @@ public sealed class UnitAvailabilityHold
     // reader exists for it.
     public DateTimeOffset? BookedAt { get; set; }
 
-    // An opaque per-browser correlator, not an identity - see
-    // Api.Security.HoldSessionCookie and docs/adr/0016. Null for any hold
-    // predating this column. No longer caps anything: it's the ownership
-    // handle a future "release my hold" endpoint needs, and nothing else.
-    public string? HolderToken { get; set; }
 
     // The caller's network, normalised by Api.Security.ClientNetworkKey.
     // Counted by HoldAvailabilityHandler's concurrent-hold cap - the one

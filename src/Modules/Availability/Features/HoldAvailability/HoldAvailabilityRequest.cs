@@ -10,27 +10,20 @@ public record HoldAvailabilityRequest : IRequest<HoldAvailabilityResponse>
     public DateOnly CheckOut { get; init; }
     public int GuestCount { get; init; }
 
-    // Set by HoldAvailabilityEndpoint from the caller's hold-session
-    // cookie, never from any binding source - [JsonIgnore] blocks the JSON
-    // body (DontBind has no Body member, since body deserialization goes
-    // through System.Text.Json directly), [DontBind] blocks the rest
-    // (query string, route, form). HandleAsync overwriting this after
-    // binding is what makes the value trustworthy for THIS endpoint -
-    // these attributes keep it non-bindable for any OTHER caller sending
-    // this request type through Mediator directly. See docs/adr/0016 for
-    // why the token exists at all (a soft cap/ownership handle, not a
-    // security boundary).
-    [JsonIgnore]
-    [DontBind(Source.QueryParam | Source.RouteParam | Source.FormField)]
-    public string HolderToken { get; set; } = string.Empty;
-
     // Set by HoldAvailabilityEndpoint from the connection's peer address
-    // (Api.Security.ClientNetworkKey). Same non-bindable treatment as
-    // HolderToken above and for a far more important reason: this one IS a
-    // security control - it's what the concurrent-hold cap counts by - so a
-    // caller who could set it from the body would be back to choosing their
-    // own budget, which is exactly the defect that moved the cap off the
-    // cookie. HandleAsync assigns it unconditionally after binding.
+    // (Api.Security.ClientNetworkKey), never by the caller. [JsonIgnore]
+    // keeps it out of the body (DontBind has no Body member, since body
+    // deserialization goes through System.Text.Json directly) and [DontBind]
+    // blocks the rest; HandleAsync then assigns it unconditionally after
+    // binding, which is what makes the value trustworthy for this endpoint
+    // while keeping it non-bindable for any other caller sending this
+    // request type through Mediator directly.
+    //
+    // It matters more here than it did for the holder_token that used to sit
+    // beside it: this one IS a security control - it is what the
+    // concurrent-hold cap counts by - so a caller who could set it from the
+    // body would be back to choosing their own budget, which is exactly the
+    // defect that moved the cap off the cookie in the first place.
     [JsonIgnore]
     [DontBind(Source.QueryParam | Source.RouteParam | Source.FormField)]
     public string ClientKey { get; set; } = string.Empty;

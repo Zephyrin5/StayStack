@@ -55,7 +55,10 @@ public class CancelBookingHandlerTests : IDisposable
         Booking booking = Booking.Create(
             Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), _customerId,
             "Jane Guest", "jane@example.com", null,
-            DateOnly.FromDateTime(DateTime.UtcNow), DateOnly.FromDateTime(DateTime.UtcNow).AddDays(2),
+            // A week out. Cancellation is refused once the stay has started
+            // (Booking.CanBeCancelledOn), and every test here is about what
+            // the refund reporting does, not about the dates.
+            DateOnly.FromDateTime(DateTime.UtcNow).AddDays(7), DateOnly.FromDateTime(DateTime.UtcNow).AddDays(9),
             2, Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait", DateTimeOffset.UtcNow.AddMinutes(30));
 
         _dbContext.Bookings.Add(booking);

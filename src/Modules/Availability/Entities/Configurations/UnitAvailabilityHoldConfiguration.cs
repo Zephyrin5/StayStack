@@ -14,7 +14,6 @@ public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAv
         builder.ComplexProperty(h => h.TotalPrice, money => money.ConfigureMoney("total_price"));
         builder.Property(h => h.Subtotal).HasColumnType("numeric(12,3)").IsRequired();
         builder.Property(h => h.LengthOfStayDiscountAmount).HasColumnType("numeric(12,3)");
-        builder.Property(h => h.HolderToken).HasMaxLength(64);
         builder.Property(h => h.ClientKey).HasMaxLength(UnitAvailabilityHold.ClientKeyMaxLength);
 
         builder.HasIndex(h => h.UnitId);
@@ -28,9 +27,10 @@ public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAv
         // index narrows to the client's 'held' rows - a runtime comparison
         // can't be baked into a static partial-index predicate.
         //
-        // Keyed on client_key, not holder_token: the cap moved off the
-        // cookie (docs/adr/0016), and no query filters on holder_token any
-        // more, so an index on it would be pure write-side cost.
+        // Keyed on client_key. The cap used to be keyed on a hold-session
+        // cookie, which meant the caller chose their own budget by dropping
+        // it (docs/adr/0016); that cookie and its holder_token column have
+        // since been removed entirely, since nothing ever read them back.
         builder.HasIndex(h => h.ClientKey, "ix_unit_availability_holds_client_key_active")
             .HasFilter("status = 'held'")
             .HasDatabaseName("ix_unit_availability_holds_client_key_active");

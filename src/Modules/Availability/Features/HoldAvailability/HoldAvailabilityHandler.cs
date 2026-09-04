@@ -177,8 +177,8 @@ public class HoldAvailabilityHandler(
             DateTimeOffset holdExpiresAt = now.Add(HoldDuration);
 
             const string sql = """
-                               INSERT INTO unit_availability_holds (id, unit_id, stay_range, status, hold_expires_at, created_at, guest_count, total_price, subtotal, currency, length_of_stay_discount_amount, holder_token, client_key)
-                               VALUES (@Id, @UnitId, @StayRange, 'held', @HoldExpiresAt, @CreatedAt, @GuestCount, @TotalPrice, @Subtotal, @Currency, @LengthOfStayDiscountAmount, @HolderToken, @ClientKey);
+                               INSERT INTO unit_availability_holds (id, unit_id, stay_range, status, hold_expires_at, created_at, guest_count, total_price, subtotal, currency, length_of_stay_discount_amount, client_key)
+                               VALUES (@Id, @UnitId, @StayRange, 'held', @HoldExpiresAt, @CreatedAt, @GuestCount, @TotalPrice, @Subtotal, @Currency, @LengthOfStayDiscountAmount, @ClientKey);
                                """;
 
             try
@@ -203,7 +203,6 @@ public class HoldAvailabilityHandler(
                         // reads it back in HoldConfirmation.
                         pricing.TotalPrice.Currency,
                         LengthOfStayDiscountAmount = pricing.LengthOfStayDiscountAmount?.Amount,
-                        request.HolderToken,
                         request.ClientKey
                     },
                     transaction.GetDbTransaction(),

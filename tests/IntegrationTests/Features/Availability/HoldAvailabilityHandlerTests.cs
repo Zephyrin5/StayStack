@@ -104,7 +104,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(3),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString(),
             ClientKey = Guid.NewGuid().ToString()
         };
 
@@ -169,7 +168,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today.AddDays(2), // Aug 22 (Same day previous hold ends)
             CheckOut = today.AddDays(4), // Aug 24
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString(),
             ClientKey = Guid.NewGuid().ToString()
         };
 
@@ -220,7 +218,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(2),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString(),
             ClientKey = Guid.NewGuid().ToString()
         };
 
@@ -272,7 +269,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(2),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString(),
             ClientKey = Guid.NewGuid().ToString()
         };
 
@@ -306,7 +302,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(3),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString(),
             ClientKey = Guid.NewGuid().ToString()
         };
 
@@ -341,7 +336,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(2), // Thu, Fri
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString(),
             ClientKey = Guid.NewGuid().ToString()
         };
 
@@ -376,7 +370,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(7),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString(),
             ClientKey = Guid.NewGuid().ToString()
         };
 
@@ -406,7 +399,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(2),
             GuestCount = 1,
-            HolderToken = Guid.NewGuid().ToString(),
             ClientKey = Guid.NewGuid().ToString()
         };
 
@@ -440,7 +432,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today.AddDays(731),
             CheckOut = today.AddDays(733),
             GuestCount = 1,
-            HolderToken = Guid.NewGuid().ToString(),
             ClientKey = Guid.NewGuid().ToString()
         };
 
@@ -480,7 +471,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
                 CheckIn = today.AddDays(i * 3),
                 CheckOut = today.AddDays(i * 3 + 2),
                 GuestCount = 1,
-                HolderToken = holderToken,
                 ClientKey = clientKey
             };
             await handler.Handle(request, CancellationToken.None);
@@ -495,7 +485,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today.AddDays(100),
             CheckOut = today.AddDays(102),
             GuestCount = 1,
-            HolderToken = holderToken,
             ClientKey = clientKey
         };
 
@@ -537,7 +526,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
                 Status = "booked",
                 StayRange = new NpgsqlRange<DateOnly>(today.AddDays(i * 3), true, today.AddDays(i * 3 + 2), false),
                 BookedAt = fixedInstant,
-                HolderToken = holderToken,
                 ClientKey = clientKey,
                 TotalPrice = Money.Of(200m, Currency.KWD),
                 Subtotal = 200m
@@ -556,7 +544,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today.AddDays(100),
             CheckOut = today.AddDays(102),
             GuestCount = 1,
-            HolderToken = holderToken,
             ClientKey = clientKey
         };
 
@@ -594,7 +581,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
                 Status = "held",
                 StayRange = new NpgsqlRange<DateOnly>(today, true, today.AddDays(2), false),
                 HoldExpiresAt = fixedInstant.AddMinutes(-1), // already expired
-                HolderToken = holderToken,
                 ClientKey = clientKey,
                 TotalPrice = Money.Of(100m, Currency.KWD),
                 Subtotal = 100m
@@ -613,7 +599,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = today,
             CheckOut = today.AddDays(2),
             GuestCount = 1,
-            HolderToken = holderToken,
             ClientKey = clientKey
         };
 
@@ -651,7 +636,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = new DateOnly(2026, 8, 20),
             CheckOut = new DateOnly(2026, 8, 23),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString(),
             ClientKey = Guid.NewGuid().ToString()
         };
 
@@ -687,7 +671,6 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             CheckIn = new DateOnly(2026, 8, 21),
             CheckOut = new DateOnly(2026, 8, 24),
             GuestCount = 2,
-            HolderToken = Guid.NewGuid().ToString(),
             ClientKey = Guid.NewGuid().ToString()
         }, CancellationToken.None);
 
