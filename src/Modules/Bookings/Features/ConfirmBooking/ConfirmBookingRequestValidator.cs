@@ -11,5 +11,10 @@ public sealed class ConfirmBookingRequestValidator : Validator<ConfirmBookingReq
         RuleFor(x => x.GuestEmail).NotEmpty().EmailAddress().MaximumLength(200);
         RuleFor(x => x.GuestPhone).MaximumLength(50);
         RuleFor(x => x.PromoCode).MaximumLength(30);
+
+
+        // No rule for IdempotencyKey here, deliberately - see that property's
+        // own comment. It is assigned by the endpoint after binding, which is
+        // after this runs, so a rule here would never see a real value.
     }
 }

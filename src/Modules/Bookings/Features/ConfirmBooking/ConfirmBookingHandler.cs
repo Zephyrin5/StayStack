@@ -8,6 +8,8 @@ using BuildingBlocks.Security;
 using Catalog.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using System.Text;
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using Outbox;
@@ -34,6 +36,39 @@ public class ConfirmBookingHandler(
         // intent row below is keyed by it, and - because it's pre-generated -
         // any failed save can ask the database whether the Booking actually
         // committed rather than inferring it from an exception type.
+        // Before anything else, and deliberately outside every transaction
+        // below: a replay must not begin a confirmation at all.
+        // Checked here rather than in the validator, because the endpoint
+        // assigns this after validation has run - see the property's comment.
+        //
+        // The floor is the point. Replaying a key returns a live management
+        // token, so a caller sending a counter has misunderstood what they are
+        // holding, and two guests colliding on "1" would mean handing one of
+        // them the other's booking. The fingerprint check below is what makes
+        // a guessed key useless in practice; this makes the misunderstanding
+        // loud instead of latent. 16 admits a UUID and any sensible random
+        // token, and excludes a counter.
+        if (request.IdempotencyKey is { Length: < 16 or > 128 })
+        {
+            throw new ValidationException(
+                "IdempotencyKey",
+                "The Idempotency-Key header must be between 16 and 128 characters. A UUID is a good choice.");
+        }
+
+        string? keyHash = request.IdempotencyKey is null ? null : SecureToken.Hash(request.IdempotencyKey);
+        string requestFingerprint = ComputeRequestFingerprint(request);
+
+        if (keyHash is not null)
+        {
+            CheckoutIdempotencyRecord? replayed = await dbContext.CheckoutIdempotencyRecords.AsNoTracking()
+                .SingleOrDefaultAsync(r => r.KeyHash == keyHash, cancellationToken);
+
+            if (replayed is not null)
+            {
+                return await ReplayAsync(replayed, requestFingerprint, cancellationToken);
+            }
+        }
+
         Guid bookingId = Guid.CreateVersion7();
 
         // Transaction A. The hold transition and the marker saying "a
@@ -45,8 +80,21 @@ public class ConfirmBookingHandler(
         // had no row to find, and the range stayed blocked until someone
         // noticed. They were only ever separable because they lived in
         // different modules.
-        (PendingBookingIntent intent, ConfirmedHold hold) =
-            await BeginConfirmationAsync(request.HoldId, bookingId, cancellationToken);
+        ConfirmationStart start = await BeginConfirmationAsync(
+            request.HoldId, bookingId, keyHash, requestFingerprint, cancellationToken);
+
+        // The race the top-of-handler read cannot close: a concurrent request
+        // carrying the same key finished between that read and our insert.
+        if (start.Replay is not null)
+        {
+            return start.Replay;
+        }
+
+        // Non-null whenever Replay is null - the two are the result's two
+        // arms, and BeginConfirmationAsync returns one or the other.
+        PendingBookingIntent intent = start.Intent!;
+        ConfirmedHold hold = start.Hold!;
+        CheckoutIdempotencyRecord? idempotencyRecord = start.Record;
 
         // ExecuteDelete, not a tracked Remove: on a failure path a zero-row
         // delete just means the reconcile job got here first, which has to be
@@ -62,6 +110,24 @@ public class ConfirmBookingHandler(
                 .Where(i => i.Id == bookingId)
                 .ExecuteDeleteAsync(cancellationToken);
             dbContext.Entry(intent).State = EntityState.Detached;
+
+            // Frees the key so the client's retry can start a fresh
+            // confirmation, since this one left nothing to replay.
+            //
+            // Filtered on CompletedAt == null, which is not belt and braces.
+            // This same helper runs on the verify-before-compensate path where
+            // the booking *did* commit - and there the record is completed, in
+            // that very transaction. Deleting it there would destroy the reply
+            // for precisely the case the feature exists for: the guest whose
+            // connection dropped after the commit.
+            await dbContext.CheckoutIdempotencyRecords
+                .Where(r => r.BookingId == bookingId && r.CompletedAt == null)
+                .ExecuteDeleteAsync(cancellationToken);
+
+            if (idempotencyRecord is not null)
+            {
+                dbContext.Entry(idempotencyRecord).State = EntityState.Detached;
+            }
         }
 
         // The compensating procedure, written once. All three failure paths
@@ -301,6 +367,18 @@ public class ConfirmBookingHandler(
             // then commits anyway.
             dbContext.PendingBookingIntents.Remove(intent);
 
+            // Completed in the same SaveChangesAsync as the Booking insert, so
+            // the record says "there is a booking to replay" if and only if
+            // there is one. Writing it afterwards would reintroduce, one level
+            // up, exactly the lost-acknowledgement gap this feature exists to
+            // close: a committed booking whose replay record never landed is a
+            // guest stranded by the mechanism meant to rescue them.
+            if (idempotencyRecord is not null)
+            {
+                idempotencyRecord.CompletedAt = timeProvider.GetUtcNow();
+                idempotencyRecord.ManagementToken = managementToken;
+            }
+
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)
@@ -389,8 +467,22 @@ public class ConfirmBookingHandler(
     ///         happens afterwards on the outbox, exactly as before.
     ///     </para>
     /// </summary>
-    private async Task<(PendingBookingIntent Intent, ConfirmedHold Hold)> BeginConfirmationAsync(
-        Guid holdId, Guid bookingId, CancellationToken cancellationToken)
+    /// <summary>
+    ///     Either a confirmation that has begun - <see cref="Intent"/> and
+    ///     <see cref="Hold"/> set - or a finished response to return instead
+    ///     of beginning one. Exactly one arm is populated.
+    /// </summary>
+    private sealed record ConfirmationStart
+    {
+        public ConfirmBookingResponse? Replay { get; init; }
+        public PendingBookingIntent? Intent { get; init; }
+        public ConfirmedHold? Hold { get; init; }
+        public CheckoutIdempotencyRecord? Record { get; init; }
+    }
+
+    private async Task<ConfirmationStart> BeginConfirmationAsync(
+        Guid holdId, Guid bookingId, string? keyHash, string requestFingerprint,
+        CancellationToken cancellationToken)
     {
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
@@ -416,6 +508,37 @@ public class ConfirmBookingHandler(
 
             dbContext.PendingBookingIntents.Add(intent);
 
+            // Reserved here, in the same transaction as the intent and the
+            // hold transition, rather than written on the way out. Three
+            // things follow from that, and none of them do if the record is
+            // written at the end:
+            //
+            //  - Two concurrent requests carrying the same key are separated
+            //    by the unique index, before either transitions a hold. The
+            //    loser learns it lost from a unique violation, not from a 404
+            //    on a hold the winner has consumed.
+            //  - A rollback frees the key, because the reservation rolls back
+            //    with everything else. A key burned by a failed attempt would
+            //    be worse than no key at all - the client's retry, the whole
+            //    point of having one, would be refused.
+            //  - The record is present if and only if the confirmation began,
+            //    which is the same property the intent has, for the same
+            //    reason.
+            CheckoutIdempotencyRecord? record = keyHash is null
+                ? null
+                : new CheckoutIdempotencyRecord
+                {
+                    BookingId = bookingId,
+                    KeyHash = keyHash,
+                    RequestFingerprint = requestFingerprint,
+                    CreatedAt = timeProvider.GetUtcNow()
+                };
+
+            if (record is not null)
+            {
+                dbContext.CheckoutIdempotencyRecords.Add(record);
+            }
+
             try
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
@@ -428,6 +551,11 @@ public class ConfirmBookingHandler(
                 // the throwing branches don't leave a phantom Added row behind.
                 dbContext.Entry(intent).State = EntityState.Detached;
 
+                if (record is not null)
+                {
+                    dbContext.Entry(record).State = EntityState.Detached;
+                }
+
                 // The violation aborted this transaction - Postgres fails every
                 // further statement on it with 25P02 until it ends - so the
                 // recovery's reads cannot run inside it. Rolled back explicitly
@@ -435,7 +563,8 @@ public class ConfirmBookingHandler(
                 // are the next thing that happens.
                 await transaction.RollbackAsync(cancellationToken);
 
-                return await RecoverInterruptedConfirmationAsync(holdId, bookingId, cancellationToken);
+                return await RecoverInterruptedConfirmationAsync(
+                    holdId, bookingId, keyHash, requestFingerprint, cancellationToken);
             }
 
             // Joins the transaction above rather than autocommitting - see
@@ -445,7 +574,7 @@ public class ConfirmBookingHandler(
 
             await transaction.CommitAsync(cancellationToken);
 
-            return (intent, confirmed);
+            return new ConfirmationStart { Intent = intent, Hold = confirmed, Record = record };
         });
     }
 
@@ -455,9 +584,56 @@ public class ConfirmBookingHandler(
     ///     transaction committed and the acknowledgement was lost to an
     ///     execution-strategy retry (see EnableRetryOnFailure).
     /// </summary>
-    private async Task<(PendingBookingIntent Intent, ConfirmedHold Hold)> RecoverInterruptedConfirmationAsync(
-        Guid holdId, Guid bookingId, CancellationToken cancellationToken)
+    private async Task<ConfirmationStart> RecoverInterruptedConfirmationAsync(
+        Guid holdId, Guid bookingId, string? keyHash, string requestFingerprint,
+        CancellationToken cancellationToken)
     {
+        // Either unique index could have produced the violation, and the key's
+        // gives the better answer where it applies - a duplicate key names the
+        // specific checkout being repeated, where the hold lookup would report
+        // a stranger's confirmation as being in progress.
+        CheckoutIdempotencyRecord? ownRecord = null;
+
+        if (keyHash is not null)
+        {
+            CheckoutIdempotencyRecord? byKey = await dbContext.CheckoutIdempotencyRecords.AsNoTracking()
+                .SingleOrDefaultAsync(r => r.KeyHash == keyHash, cancellationToken);
+
+            // Whose reservation this is decides everything, and the
+            // distinction is the pre-generated booking id. A different id
+            // means a different attempt - a concurrent duplicate, or the
+            // client retrying after a lost response - and the replay path
+            // answers it.
+            if (byKey is not null && byKey.BookingId != bookingId)
+            {
+                // Replays or throws; someone else's reservation is never taken
+                // over. Taking it over would mean two live confirmations
+                // sharing one key, the second overwriting the first's answer.
+                return new ConfirmationStart
+                {
+                    Replay = await ReplayAsync(byKey, requestFingerprint, cancellationToken)
+                };
+            }
+
+            if (byKey is not null)
+            {
+                // Our own reservation, from an earlier attempt of *this*
+                // invocation whose commit was acknowledged too late - the
+                // execution strategy re-ran the delegate and both unique
+                // indexes fired. Exactly the case the intent recovery below
+                // was already written for, so this must fall through to it
+                // rather than report a conflict: replying "still in progress"
+                // to our own retry would strand a confirmation that is not
+                // stuck at all, until the reconcile job unwinds it minutes
+                // later.
+                //
+                // Tracked, because Transaction B has to complete this row and
+                // the read above was AsNoTracking.
+                dbContext.Attach(byKey);
+                ownRecord = byKey;
+            }
+        }
+
         PendingBookingIntent? existing = await dbContext.PendingBookingIntents.AsNoTracking()
             .SingleOrDefaultAsync(i => i.HoldId == holdId, cancellationToken);
 
@@ -504,7 +680,81 @@ public class ConfirmBookingHandler(
         // the intent it removed - only runs against a tracked instance.
         dbContext.Attach(existing);
 
-        return (existing, hold);
+        // ownRecord is null when no key was supplied, or when the key's
+        // reservation rolled back with the attempt that made it and only the
+        // intent index fired. Either way there is nothing for Transaction B to
+        // complete, which is correct: without a reservation there is nothing
+        // to replay.
+        return new ConfirmationStart { Intent = existing, Hold = hold, Record = ownRecord };
+    }
+
+    /// <summary>
+    ///     Identifies the checkout a key was issued for, so a key presented
+    ///     with a different payload can be refused rather than answered with
+    ///     somebody else's booking.
+    ///     <para>
+    ///         Covers exactly the fields that decide what gets booked and for
+    ///         whom. The unit-separated join is not cosmetic: without a
+    ///         separator, ("ab", "c") and ("a", "bc") hash identically, and
+    ///         guest names and emails are adjacent free text.
+    ///     </para>
+    /// </summary>
+    private static string ComputeRequestFingerprint(ConfirmBookingRequest request) =>
+        SecureToken.Hash(string.Join('\u001f',
+            request.HoldId.ToString(),
+            request.GuestName,
+            request.GuestEmail,
+            request.GuestPhone ?? string.Empty,
+            request.PromoCode ?? string.Empty));
+
+    /// <summary>
+    ///     Answers a repeated idempotency key: the original booking if there
+    ///     is one, and a retryable conflict otherwise.
+    /// </summary>
+    private async Task<ConfirmBookingResponse> ReplayAsync(
+        CheckoutIdempotencyRecord record, string requestFingerprint, CancellationToken cancellationToken)
+    {
+        if (!CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(record.RequestFingerprint), Encoding.UTF8.GetBytes(requestFingerprint)))
+        {
+            // Deliberately says nothing about the booking behind the key. A
+            // caller who reached here either has a client bug or is guessing
+            // keys, and the two get the same answer.
+            throw new ConflictException(
+                "This Idempotency-Key was already used for a different request. Use a new key, or resend the original request unchanged.");
+        }
+
+        if (record.CompletedAt is null)
+        {
+            // The first attempt is still running, or died mid-flight. Either
+            // way there is nothing to replay yet: if it lands, a later retry
+            // replays it; if it died, ReconcileOrphanedBookingIntentsJob
+            // removes the reservation and a later retry starts over.
+            throw new ConflictException(
+                "A confirmation using this Idempotency-Key is still in progress. Please retry shortly.");
+        }
+
+        Booking? booking = await dbContext.Bookings.AsNoTracking()
+            .SingleOrDefaultAsync(b => b.Id == record.BookingId, cancellationToken);
+
+        if (booking is null)
+        {
+            // Completed but the booking is gone - only reachable if something
+            // hard-deleted it, which nothing does. Refuses rather than
+            // inventing an answer.
+            throw new ConflictException(
+                "The booking this Idempotency-Key refers to no longer exists. Please start over.");
+        }
+
+        // Re-read rather than stored. Strict idempotency would replay the
+        // original response verbatim, but the only field that cannot be
+        // recovered from committed state is the management token, and
+        // everything else can go stale: a booking cancelled between the
+        // original request and the replay would otherwise be reported as
+        // Pending, and the client would act on it. Reporting settled state is
+        // the same choice CancelBookingHandler's recancel branch makes, and it
+        // keeps one secret in the table instead of a copy of the response.
+        return BuildResponse(booking, record.ManagementToken);
     }
 
     private static ConfirmBookingResponse BuildResponse(Booking booking, string? managementToken) =>

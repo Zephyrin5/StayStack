@@ -154,6 +154,22 @@ public partial class ReconcileOrphanedBookingIntentsJob(
             await promotionRedemption.ReverseRedemptionAsync(intent.Id, cancellationToken);
 
             dbContext.PendingBookingIntents.Remove(intent);
+
+            // The abandoned confirmation's idempotency reservation goes with
+            // it, in the same transaction, so the client's key is usable
+            // again. Leaving it would be the worst of both worlds: the key
+            // burned permanently, and every retry answered "still in
+            // progress" for a confirmation that has just been unwound.
+            //
+            // CompletedAt == null is what makes this safe. An intent only
+            // survives to be reconciled when its booking never committed, so
+            // a completed record here is not reachable - but the filter states
+            // the invariant rather than relying on it, and this row is a
+            // guest's only route back to their booking.
+            await dbContext.CheckoutIdempotencyRecords
+                .Where(r => r.BookingId == intent.Id && r.CompletedAt == null)
+                .ExecuteDeleteAsync(cancellationToken);
+
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 

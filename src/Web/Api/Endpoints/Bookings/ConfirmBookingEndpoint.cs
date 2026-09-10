@@ -29,18 +29,28 @@ public class ConfirmBookingEndpoint(IMediator mediator) : Endpoint<ConfirmBookin
                             "authenticated, the booking's CustomerId is set from their token automatically; " +
                             "guest name/email/phone are always stored on the booking either way. Created as " +
                             "Pending - payment integration isn't built yet, so nothing confirms a booking today.";
-            s.Response<ConfirmBookingResponse>(200, "Booking created.");
+            s.Description += " Send an `Idempotency-Key` header (16-128 characters, a UUID is ideal) to make " +
+                             "retries safe: if the connection drops after the booking commits, replaying the same " +
+                             "key and the same body returns the original response - including the management " +
+                             "token, which exists nowhere else. Replayable for 24 hours.";
+            s.Response<ConfirmBookingResponse>(200, "Booking created, or the original response replayed.");
             s.Response<ValidationProblemDetails>(400, "Validation failed.");
             s.Response<ProblemDetails>(404, "Hold not found, already used, or expired.");
             s.Response<ProblemDetails>(409,
                 "Another confirmation for this hold is in flight, or this one was interrupted and rolled back. " +
-                "Retryable - though an interrupted confirmation releases its hold, so the guest may need to re-hold.");
+                "Retryable - though an interrupted confirmation releases its hold, so the guest may need to re-hold. " +
+                "Also returned when an Idempotency-Key is replayed with a different request body.");
             s.Response(429, "Too many requests.");
         });
     }
 
     public override async Task HandleAsync(ConfirmBookingRequest req, CancellationToken ct)
     {
+        // Assigned unconditionally, overwriting whatever bound - see the
+        // property's own comment. Null when the header is absent, which is the
+        // pre-existing behaviour.
+        req.IdempotencyKey = HttpContext.Request.Headers["Idempotency-Key"].FirstOrDefault();
+
         ConfirmBookingResponse result = await mediator.Send(req, ct);
         await Send.OkAsync(result, ct);
     }

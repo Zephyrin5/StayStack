@@ -10,6 +10,7 @@ public class AppBookingsDbContext(DbContextOptions<AppBookingsDbContext> options
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<BookingManagementToken> BookingManagementTokens => Set<BookingManagementToken>();
     public DbSet<PendingBookingIntent> PendingBookingIntents => Set<PendingBookingIntent>();
+    public DbSet<CheckoutIdempotencyRecord> CheckoutIdempotencyRecords => Set<CheckoutIdempotencyRecord>();
 
     // Availability's table, now this module's. A hold is a booking in
     // progress: its lifecycle (held -> pending_payment -> booked) was the
@@ -35,6 +36,7 @@ public class AppBookingsDbContext(DbContextOptions<AppBookingsDbContext> options
         modelBuilder.ApplyConfiguration(new BookingConfiguration());
         modelBuilder.ApplyConfiguration(new BookingManagementTokenConfiguration());
         modelBuilder.ApplyConfiguration(new PendingBookingIntentConfiguration());
+        modelBuilder.ApplyConfiguration(new CheckoutIdempotencyRecordConfiguration());
 
         // Mapped only under Npgsql. UnitAvailabilityHold.StayRange is an
         // NpgsqlRange<DateOnly> over a daterange column - the type the GIST
