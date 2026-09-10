@@ -182,9 +182,14 @@ public class CancelBookingHandler(
             // back on here from booking.TotalPrice - the same currency, but
             // asserted at the call site rather than carried by the value, in
             // the one place getting it wrong costs real money.
+            // From the snapshot, not hardcoded false. A snapshot exists as
+            // soon as MarkRefundPending runs, and this used to report every
+            // one of those as settled - so a guest re-checking a cancellation
+            // whose refund was still queued was told the money had gone back
+            // when it had only been asked for.
             return BuildResponse(
                 booking, refundSnapshot.RefundAmount.Amount, refundSnapshot.RefundAmount.Currency,
-                refundPercent, refundPending: false);
+                refundPercent, refundPending: refundSnapshot.RefundPending);
         }
 
         // No snapshot yet - either there was never anything to refund, or a

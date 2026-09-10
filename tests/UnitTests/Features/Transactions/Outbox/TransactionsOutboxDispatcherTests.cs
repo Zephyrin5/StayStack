@@ -60,8 +60,16 @@ public class TransactionsOutboxDispatcherTests : IDisposable
             .Setup(x => x.ConfirmPaymentAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Booking not found."));
 
+        // The lookup answers "no such booking", which is the case this test is
+        // about: the confirmation exhausted its retries because the booking
+        // genuinely was not there, so a refund is the right compensation.
+        Mock<IBookingLookup> bookingLookupMock = new Mock<IBookingLookup>();
+        bookingLookupMock
+            .Setup(x => x.GetBookingDetailsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((BookingAccessResult?)null);
+
         TransactionsOutboxDispatcher dispatcher = new TransactionsOutboxDispatcher(
-            _dbContext, bookingPaymentConfirmationMock.Object, TimeProvider.System,
+            _dbContext, bookingPaymentConfirmationMock.Object, bookingLookupMock.Object, TimeProvider.System,
             NullLogger<TransactionsOutboxDispatcher>.Instance);
 
         // One attempt short of OutboxDispatcherBase's own MaxAttempts (10) -

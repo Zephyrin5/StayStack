@@ -166,7 +166,7 @@ public class CancelBookingHandlerTests : IDisposable
             .ReturnsAsync((Money?)null);
         transactionReversalMock
             .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new TransactionRefundSnapshot { Amount = Money.Of(200m, Currency.KWD), RefundAmount = Money.Of(100m, Currency.KWD) });
+            .ReturnsAsync(new TransactionRefundSnapshot { Amount = Money.Of(200m, Currency.KWD), RefundAmount = Money.Of(100m, Currency.KWD), RefundPending = false });
 
         BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
             _dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
@@ -387,7 +387,17 @@ public class CancelBookingHandlerTests : IDisposable
             // used to flip the response to RefundPending: false.
             transactionReversalMock
                 .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new TransactionRefundSnapshot { Amount = Money.Of(200m, Currency.KWD), RefundAmount = Money.Of(200m, Currency.KWD) });
+                // RefundPending: true, because that is what landing means -
+                // ReverseTransactionAsync moves the transaction to
+                // RefundPending, so a snapshot taken straight afterwards
+                // describes a refund that has been asked for, not one that
+                // has settled.
+                .ReturnsAsync(new TransactionRefundSnapshot
+                {
+                    Amount = Money.Of(200m, Currency.KWD),
+                    RefundAmount = Money.Of(200m, Currency.KWD),
+                    RefundPending = true
+                });
         }
         else
         {

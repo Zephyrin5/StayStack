@@ -73,4 +73,26 @@ public record TransactionRefundSnapshot
     // currency back onto RefundAmount by hand to build its response.
     public required Money Amount { get; init; }
     public required Money RefundAmount { get; init; }
+
+    /// <summary>
+    ///     Whether that refund is still outstanding.
+    ///     <para>
+    ///         RefundAmount records what was <em>requested</em>, not what
+    ///         happened: MarkRefundPending sets it, and the amount then stays
+    ///         put through Refunded and RefundFailed alike. Callers were
+    ///         reading its mere presence as "the refund is done" and
+    ///         reporting a queued refund as settled, which is the one thing a
+    ///         guest checking on their money must not be told.
+    ///     </para>
+    ///     <para>
+    ///         A bool rather than the TransactionStatus enum, for the same
+    ///         reason BookingSummary.IsPending is one: that type lives in
+    ///         Transactions.Entities and this contract stays dependency-free,
+    ///         and callers only need this one fact. Refunded and RefundFailed
+    ///         are both false here - the first because it settled, the second
+    ///         because it is a resolved failure needing intervention rather
+    ///         than something still in flight.
+    ///     </para>
+    /// </summary>
+    public required bool RefundPending { get; init; }
 }

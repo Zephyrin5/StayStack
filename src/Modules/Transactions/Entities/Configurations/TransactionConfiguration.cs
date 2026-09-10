@@ -10,29 +10,9 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
     {
         builder.HasKey(t => t.Id);
 
-        // Every transition on this entity guards its starting state -
-        // MarkSucceeded and MarkFailed require Pending, the refund trio
-        // requires Succeeded - and each of those guards reads an in-memory
-        // copy. Two callers that load the same Pending row both pass their
-        // own check, both write, and the second silently overwrites the
-        // first: a transaction both Succeeded and Failed depending on who
-        // committed last.
-        //
-        // xmin rather than a row lock in the handlers. The entity's own
-        // comment calls it a one-shot ledger entry, and that is a property
-        // of the row, not of the two call sites that happen to exist today -
-        // the refund sub-lifecycle races identically and would have needed
-        // the same treatment bolted on separately. As a system column it
-        // costs no schema change and no extra read: EF adds it to the WHERE
-        // clause of every UPDATE, so a stale write affects zero rows and
-        // raises DbUpdateConcurrencyException instead of landing.
-        // Spelled as the shadow system column rather than the older
-        // UseXminAsConcurrencyToken() helper, which this Npgsql version no
-        // longer exposes.
-        builder.Property<uint>("xmin")
-            .HasColumnName("xmin")
-            .IsRowVersion()
-            .ValueGeneratedOnAddOrUpdate();
+// The xmin concurrency token is applied by
+        // AppTransactionsDbContext, not here: it is a Postgres system column
+        // and only exists under that provider.
 
         builder.ComplexProperty(t => t.Amount, money => money.ConfigureMoney("amount"));
         // Mapped by backing-field name, not by the Money?-typed RefundAmount
