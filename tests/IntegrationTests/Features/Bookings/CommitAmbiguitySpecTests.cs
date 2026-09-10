@@ -1,0 +1,487 @@
+using Availability;
+using Availability.Contracts;
+using Availability.Entities;
+using Bookings;
+using Bookings.Contracts;
+using Bookings.Entities;
+using Bookings.Features.ConfirmBooking;
+using Bookings.Jobs;
+using Catalog;
+using Catalog.Entities;
+using Availability.Features.HoldAvailability;
+using Identity.Entities;
+using Identity.Features.SignIn;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
+using NpgsqlTypes;
+using Promotions.Contracts;
+using SeedWork.Enums;
+using SeedWork.ValueObjects;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using Transactions;
+using Transactions.Entities;
+using System.Net;
+using Transactions.Features.InitiateTransaction;
+using Transactions.Features.MarkTransactionFailed;
+using Transactions.Outbox;
+using Transactions.Features.MarkTransactionSucceeded;
+namespace IntegrationTests.Features.Bookings;
+
+// A specification, not a regression suite. Three of these four fail against
+// the code as it stands, and they are meant to: they describe what the
+// booking lifecycle must guarantee, not what it currently does.
+//
+// Every one of them is the same shape - a write commits, and then the caller
+// never learns that it did. That is not an exotic failure. It is what a
+// dropped connection, a killed process or a timeout on the acknowledgement
+// looks like from the outside, and it is the case that distinguishes a
+// system that recovers from one that strands inventory or money. The
+// compensating machinery here was built for exactly this and is tested for
+// the paths where the *call* fails; what is untested is the path where the
+// call succeeds and the answer is lost.
+//
+// Do not weaken an assertion here to match current behaviour. If one of
+// these has to change, the reason should be that the guarantee itself was
+// wrong, argued on its own terms.
+[Collection("Integration Tests")]
+public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory factory)
+{
+    private readonly HttpClient _client = factory.CreateClient();
+
+    // ---- seeding helpers -------------------------------------------------
+
+    private readonly List<Property> _pendingProperties = [];
+
+    private Unit CreateTestUnit()
+    {
+        Property property = CatalogSeeding.CreateProperty();
+        _pendingProperties.Add(property);
+
+        return Unit.Create(
+            property.Id,
+            LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
+            2,
+            100);
+    }
+
+    private async Task SeedCatalogAsync(params object[] entities)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        context.AddRange(_pendingProperties);
+        _pendingProperties.Clear();
+        context.AddRange(entities);
+        await context.SaveChangesAsync();
+    }
+
+    private async Task<Guid> HoldUnitAsync(HttpClient client, Guid unitId, int daysUntilCheckIn = 7)
+    {
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(daysUntilCheckIn);
+
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
+        {
+            UnitId = unitId,
+            CheckIn = checkIn,
+            CheckOut = checkIn.AddDays(3),
+            GuestCount = 2
+        }, TestContext.Current.CancellationToken);
+
+        HoldAvailabilityResponse? hold =
+            await response.Content.ReadFromJsonAsync<HoldAvailabilityResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(hold);
+        return hold.HoldId;
+    }
+
+    private async Task<string> SeedSignedInCustomerAsync()
+    {
+        string email = $"{Guid.NewGuid():N}@example.com";
+        const string password = "P@ssw0rd!spec";
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            ApplicationUser user = new ApplicationUser { Id = Guid.NewGuid(), Email = email, UserName = email };
+            Assert.True((await userManager.CreateAsync(user, password)).Succeeded);
+        }
+
+        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/auth/sign-in", new SignInRequest
+        {
+            Email = email,
+            Password = password
+        }, TestContext.Current.CancellationToken);
+        SignInResponse? result =
+            await response.Content.ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result?.AccessToken);
+        return result.AccessToken;
+    }
+
+    private static HttpRequestMessage Authorized(HttpMethod method, string uri, string accessToken)
+    {
+        HttpRequestMessage request = new HttpRequestMessage(method, uri);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        return request;
+    }
+
+    // ---- 1: the hold transition commits, the caller never finds out ------
+
+    // Delegates to the real implementation and then throws, so the UPDATE ...
+    // RETURNING has committed by the time the caller sees a failure. That is
+    // a lost acknowledgement, not a failed write.
+    private sealed class ConfirmHoldThenLoseTheAnswer(IHoldConfirmation inner) : IHoldConfirmation
+    {
+        public async Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken)
+        {
+            await inner.ConfirmHoldAsync(holdId, cancellationToken);
+            throw new InvalidOperationException("Connection lost after the hold transition committed.");
+        }
+
+        public Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken) =>
+            inner.MarkHoldPaidAsync(holdId, cancellationToken);
+
+        public Task ReleaseHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
+            inner.ReleaseHoldAsync(holdId, cancellationToken);
+    }
+
+    [Fact]
+    public async Task AHoldTransitionThatCommitsButLosesItsAnswer_LeavesSomethingThatCanRecoverIt()
+    {
+        // ConfirmBookingHandler opens a PendingBookingIntent, then confirms
+        // the hold, and its catch discards the intent on failure. If the
+        // failure is a lost acknowledgement rather than a failed write, that
+        // discard removes the only marker pointing at a hold which is now
+        // pending_payment with no booking behind it - nothing releases it,
+        // and nothing knows it exists.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+
+        HttpClient client = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                ServiceDescriptor original = services.Single(d => d.ServiceType == typeof(IHoldConfirmation));
+                services.Remove(original);
+                services.AddScoped<IHoldConfirmation>(sp => new ConfirmHoldThenLoseTheAnswer(
+                    (IHoldConfirmation)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!)));
+            })).CreateClient();
+
+        Guid holdId = await HoldUnitAsync(client, unit.Id);
+
+        // Act - the confirmation fails from the caller's point of view.
+        await client.PostAsJsonAsync("/api/bookings", new ConfirmBookingRequest
+        {
+            HoldId = holdId,
+            GuestName = "Jane Guest",
+            GuestEmail = "jane@example.com"
+        }, TestContext.Current.CancellationToken);
+
+        // Assert - whatever the outcome, the system must still be able to
+        // reach that hold. Either the transition did not stick, or something
+        // durable points at it.
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppAvailabilityDbContext availability = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+
+        UnitAvailabilityHold hold = await availability.UnitAvailabilityHolds.AsNoTracking()
+            .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
+
+        if (hold.Status != "pending_payment")
+        {
+            return; // The transition did not stick; nothing is stranded.
+        }
+
+        bool recoverable =
+            await bookings.Bookings.AsNoTracking().AnyAsync(b => b.HoldId == holdId, TestContext.Current.CancellationToken)
+            || await bookings.PendingBookingIntents.AsNoTracking().AnyAsync(i => i.HoldId == holdId, TestContext.Current.CancellationToken);
+
+        Assert.True(
+            recoverable,
+            "A hold left in pending_payment must have either a booking or an intent pointing at it. " +
+            "Without one, the unit is held for a checkout nobody can find and nothing will release.");
+    }
+
+    // ---- 2: inventory released, then the expiry rolls back ---------------
+
+    private sealed class ReverseRedemptionAlwaysFails(IPromotionRedemption inner) : IPromotionRedemption
+    {
+        public Task<PromotionRedemptionResult> RedeemAsync(
+            string code, Guid unitId, string guestEmail, Money subtotal, Guid bookingId, CancellationToken cancellationToken) =>
+            inner.RedeemAsync(code, unitId, guestEmail, subtotal, bookingId, cancellationToken);
+
+        public Task ReverseRedemptionAsync(Guid bookingId, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Promotions is unreachable.");
+    }
+
+    [Fact]
+    public async Task AnExpiryThatFailsAfterReleasingTheHold_DoesNotLeaveTheBookingHoldingNothing()
+    {
+        // ExpireUnpaidBookingsJob releases the hold on a different DbContext,
+        // so that write commits immediately - and only then does it reverse
+        // the redemption and cancel the booking inside its own transaction.
+        // A failure after the release rolls back the cancellation but cannot
+        // roll back the release: the booking stays Pending while its
+        // inventory has already gone back on sale.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(20);
+        Guid holdId = Guid.CreateVersion7();
+        Guid bookingId = Guid.CreateVersion7();
+
+        using (IServiceScope seedScope = factory.Services.CreateScope())
+        {
+            AppAvailabilityDbContext availability = seedScope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+            availability.UnitAvailabilityHolds.Add(new UnitAvailabilityHold
+            {
+                Id = holdId,
+                UnitId = unit.Id,
+                StayRange = new NpgsqlRange<DateOnly>(checkIn, true, checkIn.AddDays(2), false),
+                Status = "pending_payment",
+                GuestCount = 2,
+                CreatedAt = DateTimeOffset.UtcNow,
+                TotalPrice = Money.Of(200m, Currency.KWD),
+                Subtotal = 200m
+            });
+            await availability.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+            AppBookingsDbContext bookingsDb = seedScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            bookingsDb.Bookings.Add(Booking.Create(
+                bookingId, unit.Id, holdId, null, "Jane Guest", "jane@example.com", null,
+                checkIn, checkIn.AddDays(2), 2,
+                Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD),
+                CancellationPolicy.CreateDefault(), "Asia/Kuwait",
+                DateTimeOffset.UtcNow.AddMinutes(-1)));
+            await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(DateTimeOffset.UtcNow);
+
+        ExpireUnpaidBookingsJob job = new ExpireUnpaidBookingsJob(
+            scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
+            scope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
+            new ReverseRedemptionAlwaysFails(scope.ServiceProvider.GetRequiredService<IPromotionRedemption>()),
+            timeProvider,
+            NullLogger<ExpireUnpaidBookingsJob>.Instance);
+
+        // Act - the job swallows the per-row failure and moves on.
+        await job.ExpireAsync(null!, TestContext.Current.CancellationToken);
+
+        // Assert
+        using IServiceScope assertScope = factory.Services.CreateScope();
+        string holdStatus = (await assertScope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>()
+            .UnitAvailabilityHolds.AsNoTracking()
+            .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken)).Status;
+        BookingStatus bookingStatus = (await assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+            .Bookings.AsNoTracking()
+            .SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken)).BookingStatus;
+
+        Assert.False(
+            holdStatus == "held" && bookingStatus == BookingStatus.Pending,
+            "The hold was released while its booking is still Pending: the guest holds a live booking whose " +
+            "dates are back on sale, and the next sweep will try to release a hold someone else may now own.");
+    }
+
+    // ---- 3: the booking confirms, then the acknowledgement is lost -------
+
+    private sealed class ConfirmPaymentThenLoseTheAnswer(IBookingPaymentConfirmation inner) : IBookingPaymentConfirmation
+    {
+        public async Task<bool> ConfirmPaymentAsync(Guid bookingId, CancellationToken cancellationToken)
+        {
+            await inner.ConfirmPaymentAsync(bookingId, cancellationToken);
+            throw new InvalidOperationException("Connection lost after the booking was confirmed.");
+        }
+    }
+
+    [Fact]
+    public async Task ABookingConfirmedByAPaymentWhoseAnswerWasLost_IsNotRefunded()
+    {
+        // The dispatcher retries, exhausts its attempts, dead-letters, and
+        // OnDeadLetteredAsync then refunds any still-Succeeded transaction -
+        // without asking whether the booking it was paying for actually
+        // confirmed. It did: every one of those attempts confirmed it again.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        string customerToken = await SeedSignedInCustomerAsync();
+
+        // The derived host is kept, not just its client: the relay loop below
+        // has to run inside the same host, or it resolves the real
+        // confirmation, succeeds on the first pass, and the message never
+        // accumulates the attempts this test depends on.
+        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                ServiceDescriptor original = services.Single(d => d.ServiceType == typeof(IBookingPaymentConfirmation));
+                services.Remove(original);
+                services.AddScoped<IBookingPaymentConfirmation>(sp => new ConfirmPaymentThenLoseTheAnswer(
+                    (IBookingPaymentConfirmation)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!)));
+            }));
+        HttpClient client = host.CreateClient();
+
+        Guid holdId = await HoldUnitAsync(client, unit.Id);
+
+        using HttpRequestMessage confirmRequest = Authorized(HttpMethod.Post, "/api/bookings", customerToken);
+        confirmRequest.Content = JsonContent.Create(new ConfirmBookingRequest
+        {
+            HoldId = holdId,
+            GuestName = "Jane Guest",
+            GuestEmail = "jane@example.com"
+        });
+        HttpResponseMessage confirmResponse = await client.SendAsync(confirmRequest, TestContext.Current.CancellationToken);
+        ConfirmBookingResponse? booking =
+            await confirmResponse.Content.ReadFromJsonAsync<ConfirmBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(booking);
+
+        Guid transactionId = await InitiateTransactionAsync(client, booking.BookingId, customerToken);
+
+        string adminToken = await IntegrationTestAdmin.SignInAsync(client, TestContext.Current.CancellationToken);
+        using HttpRequestMessage succeedRequest = Authorized(HttpMethod.Post, $"/api/transactions/{transactionId}/succeed", adminToken);
+        await client.SendAsync(succeedRequest, TestContext.Current.CancellationToken);
+
+        // Drive the message to dead-letter. Rather than replaying the
+        // backoff, the row is advanced to its final attempt and dispatched
+        // once: what this test is about is what happens *at* dead-letter,
+        // not how many retries precede it, and replaying ten real backoff
+        // windows would only make the test slow and timing-dependent.
+        using (IServiceScope arrangeScope = host.Services.CreateScope())
+        {
+            AppTransactionsDbContext arrangeDb = arrangeScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+            await arrangeDb.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE "transactions_outbox_messages"
+                SET attempts = 9, next_attempt_at = now()
+                WHERE type = 'ConfirmBookingPaymentOutboxMessage'
+                  AND processed_at IS NULL AND dead_lettered_at IS NULL
+                """,
+                TestContext.Current.CancellationToken);
+        }
+
+        using (IServiceScope relayScope = host.Services.CreateScope())
+        {
+            await relayScope.ServiceProvider.GetRequiredService<TransactionsOutboxDispatcher>()
+                .DispatchPendingAsync(50, TestContext.Current.CancellationToken);
+        }
+
+        // Assert - first that the scenario actually happened. If the message
+        // never dead-lettered, the invariant below would hold vacuously and
+        // this test would be green while proving nothing.
+        using IServiceScope assertScope = factory.Services.CreateScope();
+
+        AppTransactionsDbContext transactionsDb = assertScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        var confirmationMessages = await transactionsDb.TransactionsOutboxMessages.AsNoTracking()
+            .Where(m => m.Type == "ConfirmBookingPaymentOutboxMessage")
+            .Select(m => new { m.Attempts, m.ProcessedAt, m.DeadLetteredAt })
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(
+            confirmationMessages.Any(m => m.Attempts >= 10),
+            "The confirmation message never exhausted its attempts, so this test never reached the case it describes. Rows: " +
+            string.Join("; ", confirmationMessages.Select(m => $"attempts={m.Attempts} processed={m.ProcessedAt} deadLettered={m.DeadLetteredAt}")));
+
+        Booking persisted = await assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+            .Bookings.AsNoTracking().SingleAsync(b => b.Id == booking.BookingId, TestContext.Current.CancellationToken);
+        Transaction transaction = await transactionsDb.Transactions.AsNoTracking()
+            .SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
+
+        Assert.False(
+            persisted.BookingStatus == BookingStatus.Confirmed
+            && transaction.TransactionStatus == TransactionStatus.RefundPending,
+            "The booking is Confirmed and its payment is queued for refund: the guest keeps a stay they are " +
+            "about to be refunded for. A dead-lettered confirmation must check whether the booking committed.");
+    }
+
+    private static async Task<Guid> InitiateTransactionAsync(HttpClient client, Guid bookingId, string customerToken)
+    {
+        using HttpRequestMessage request = Authorized(HttpMethod.Post, "/api/transactions", customerToken);
+        request.Content = JsonContent.Create(new InitiateTransactionRequest { BookingId = bookingId });
+
+        HttpResponseMessage response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        // Asserted, not assumed: a transaction that was never created would
+        // make both transitions below fail for a reason that has nothing to
+        // do with what these tests are about.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        InitiateTransactionResponse? result =
+            await response.Content.ReadFromJsonAsync<InitiateTransactionResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.NotEqual(Guid.Empty, result.TransactionId);
+        return result.TransactionId;
+    }
+
+    // ---- 4: two terminal transitions race -------------------------------
+
+    [Fact]
+    public async Task TwoTerminalTransactionTransitions_CannotBothWin()
+    {
+        // MarkSucceeded and MarkFailed both load the transaction, check it is
+        // Pending, mutate and save. Nothing arbitrates between them: no row
+        // lock, no conditional update, no concurrency token. Two callers that
+        // read before either writes both pass their own guard.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        string customerToken = await SeedSignedInCustomerAsync();
+
+        Guid holdId = await HoldUnitAsync(_client, unit.Id);
+
+        using HttpRequestMessage confirmRequest = Authorized(HttpMethod.Post, "/api/bookings", customerToken);
+        confirmRequest.Content = JsonContent.Create(new ConfirmBookingRequest
+        {
+            HoldId = holdId,
+            GuestName = "Jane Guest",
+            GuestEmail = "jane@example.com"
+        });
+        HttpResponseMessage confirmResponse = await _client.SendAsync(confirmRequest, TestContext.Current.CancellationToken);
+        ConfirmBookingResponse? booking =
+            await confirmResponse.Content.ReadFromJsonAsync<ConfirmBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(booking);
+
+        Guid transactionId = await InitiateTransactionAsync(_client, booking.BookingId, customerToken);
+
+        // Act - both readers observe Pending before either writes. Racing two
+        // handler invocations with Task.WhenAll would not guarantee that:
+        // the first can finish entirely before the second reads, and the
+        // second's own guard would then reject it, so the test would pass
+        // without the system arbitrating anything. Loading both first makes
+        // the interleaving the point rather than an accident.
+        using IServiceScope succeedScope = factory.Services.CreateScope();
+        using IServiceScope failScope = factory.Services.CreateScope();
+
+        AppTransactionsDbContext succeedDb = succeedScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        AppTransactionsDbContext failDb = failScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+
+        Transaction forSuccess = await succeedDb.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
+        Transaction forFailure = await failDb.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(TransactionStatus.Pending, forSuccess.TransactionStatus);
+        Assert.Equal(TransactionStatus.Pending, forFailure.TransactionStatus);
+
+        async Task<bool> TryCommitAsync(AppTransactionsDbContext context, Action transition)
+        {
+            try
+            {
+                transition();
+                await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        bool[] outcomes =
+        [
+            await TryCommitAsync(succeedDb, () => forSuccess.MarkSucceeded()),
+            await TryCommitAsync(failDb, () => forFailure.MarkFailed("declined"))
+        ];
+
+        // Assert - exactly one terminal transition may be accepted.
+        Assert.Equal(1, outcomes.Count(won => won));
+    }
+}
