@@ -22,46 +22,26 @@ internal class BookingPaymentConfirmation(
                           .SingleOrDefaultAsync(cancellationToken)
                       ?? throw new NotFoundException(nameof(Booking), bookingId);
 
-        // The hold first, the booking second, and the order is load-bearing.
+        // The hold transition and the confirmation are now one transaction,
+        // which retires the ordering argument that used to live here.
         //
-        // These are two commits on two DbContexts against two schemas - a
-        // compensating pair (docs/adr/0003), never one transaction - so one
-        // of them lands first and a crash can fall between. The question is
-        // only which half is safe to have alone.
+        // They were two commits on two DbContexts against two schemas - a
+        // compensating pair (docs/adr/0003) - so one landed first and a crash
+        // could fall between. Confirming the booking first left the worst
+        // possible remainder: a Confirmed booking whose inventory had been
+        // released to someone else, unrepairable because the range might
+        // already be sold. Marking the hold paid first inverted that into a
+        // sold hold against a still-Pending booking, recoverable in both
+        // directions. That inversion was the right call while the halves were
+        // separable; they are not separable any more, so neither remainder is
+        // reachable.
         //
-        // Confirming the booking first, which is what this did originally,
-        // leaves the worst possible remainder if the hold transition then
-        // fails: a Confirmed booking whose inventory has been released to
-        // someone else. Nothing can repair that - the range may already be
-        // sold - and because it threw, the outbox retried it forever, each
-        // attempt re-reading a booking that was already Confirmed and
-        // failing the same way until it dead-lettered into an hourly sweep.
-        // Money taken, nothing sold, and loud in metrics rather than fixed.
-        //
-        // Marking the hold paid first inverts that. If it fails, nothing has
-        // committed anywhere and the booking is untouched. If the confirm
-        // below then fails, the outbox retries and this call no-ops, because
-        // MarkHoldPaidAsync accepts an already-'booked' hold. The only
-        // remainder is a sold hold against a still-Pending booking, which is
-        // recoverable in both directions: a retry finishes it, and if the
-        // payment window lapses first, ExpireUnpaidBookingsJob cancels the
-        // booking and releases the hold, which drives this method's `false`
-        // path and the refund that goes with it. A compensated outcome
-        // instead of an uncompensatable one.
-        bool holdIsPaid = await holdConfirmation.MarkHoldPaidAsync(holdId, cancellationToken);
-
-        if (!holdIsPaid)
-        {
-            // The hold was released or expired before this payment resolved,
-            // so its range is no longer this booking's to sell. Reported as
-            // `false` rather than thrown: the caller's response to "this
-            // payment cannot be turned into a stay" is a refund, and it
-            // already has that path for the cancelled-booking case. Throwing
-            // would instead retry an outcome that will never improve.
-            return false;
-        }
-
-        return await ConfirmUnderRowLockAsync(bookingId, cancellationToken);
+        // The idempotent predicate MarkHoldPaidAsync uses - accepting a hold
+        // already in 'booked' as well as 'pending_payment' - deliberately
+        // stays. The outbox can still deliver this message more than once,
+        // and a redelivery arriving after a committed confirmation must
+        // remain a no-op rather than a failure.
+        return await ConfirmUnderRowLockAsync(bookingId, holdId, cancellationToken);
     }
 
     /// <summary>
@@ -82,6 +62,16 @@ internal class BookingPaymentConfirmation(
     ///         inventory had just been handed back.
     ///     </para>
     ///     <para>
+    ///         The hold's 'pending_payment' -> 'booked' transition happens
+    ///         inside this same transaction and inside this same lock, so a
+    ///         payment either sells the range and confirms the stay or does
+    ///         neither. It also means the cancelled-booking check below now
+    ///         runs <em>before</em> the hold is touched, where it used to run
+    ///         after: a payment resolving against a booking somebody already
+    ///         cancelled no longer marks that booking's hold sold on its way
+    ///         to reporting the refund.
+    ///     </para>
+    ///     <para>
     ///         FOR UPDATE, not FOR UPDATE SKIP LOCKED as the expiry job uses.
     ///         Their needs are opposite: a sweep should step over a row
     ///         someone else is working on and revisit it next run, while this
@@ -90,7 +80,7 @@ internal class BookingPaymentConfirmation(
     ///         cancelled and a refund is owed.
     ///     </para>
     /// </summary>
-    private async Task<bool> ConfirmUnderRowLockAsync(Guid bookingId, CancellationToken cancellationToken)
+    private async Task<bool> ConfirmUnderRowLockAsync(Guid bookingId, Guid holdId, CancellationToken cancellationToken)
     {
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
@@ -129,12 +119,33 @@ internal class BookingPaymentConfirmation(
             // flight at the gateway is an expected outcome the caller reacts
             // to with a refund, not an error to propagate.
             //
-            // The hold above is already 'booked' in this case, and is left
-            // that way deliberately: whoever cancelled the booking released
-            // it as part of doing so, and re-releasing it here could hand
-            // back a range that has since been sold to somebody else.
+            // Whoever cancelled it released the hold as part of doing so, and
+            // the range may since have been sold to somebody else. Returning
+            // before the transition below is what keeps this payment from
+            // claiming it.
             if (booking.BookingStatus == BookingStatus.Cancelled)
             {
+                await transaction.RollbackAsync(cancellationToken);
+                return false;
+            }
+
+            // Joins this transaction rather than autocommitting - see
+            // HoldConfirmation.AmbientTransaction.
+            bool holdIsPaid = await holdConfirmation.MarkHoldPaidAsync(holdId, cancellationToken);
+
+            if (!holdIsPaid)
+            {
+                // The hold was released or expired before this payment
+                // resolved, so its range is no longer this booking's to sell.
+                // Reported as `false` rather than thrown: the caller's answer
+                // to "this payment cannot be turned into a stay" is a refund,
+                // and it already has that path for the cancelled-booking case
+                // above. Throwing would instead retry an outcome that will
+                // never improve.
+                //
+                // Reachable even under the lock: the hold is a different row
+                // with its own lifecycle, and nothing in this transaction
+                // stopped the expiry sweep from releasing it a moment ago.
                 await transaction.RollbackAsync(cancellationToken);
                 return false;
             }

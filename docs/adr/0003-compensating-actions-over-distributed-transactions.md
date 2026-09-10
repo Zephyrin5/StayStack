@@ -1,6 +1,8 @@
 # 0003 - Compensating actions and a transactional outbox for cross-module writes
 
-**Status:** Accepted; partially superseded by [ADR-0017](0017-durable-intent-records-for-cross-module-writes.md)
+**Status:** Accepted; partially superseded by [ADR-0017](0017-durable-intent-records-for-cross-module-writes.md) and narrowed by [ADR-0021](0021-availability-is-part-of-bookings.md)
+
+> [ADR-0021](0021-availability-is-part-of-bookings.md) merged Availability into Bookings, so the hold/booking pair this ADR's examples are drawn from is now one transaction and needs no compensation at all. The rule below is unchanged for every boundary that remains (Promotions, Transactions, Identity): what changed is how many boundaries there are, not what crossing one costs. Read the examples as history - the reasoning about *why* a two-phase commit was refused is exactly why the boundary was worth removing.
 
 > ADR-0017 replaces this document's treatment of the *forward* half of
 > `ConfirmBookingHandler` - the reconciliation jobs described in Consequences

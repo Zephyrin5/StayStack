@@ -1,6 +1,7 @@
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;
+using Bookings.Outbox;
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;
@@ -142,6 +143,9 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
             throw new InvalidOperationException("Connection lost after the hold transition committed.");
         }
 
+        public Task<ConfirmedHold?> GetConfirmedHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
+            inner.GetConfirmedHoldAsync(holdId, cancellationToken);
+
         public Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken) =>
             inner.MarkHoldPaidAsync(holdId, cancellationToken);
 
@@ -152,12 +156,20 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
     [Fact]
     public async Task AHoldTransitionThatCommitsButLosesItsAnswer_LeavesSomethingThatCanRecoverIt()
     {
-        // ConfirmBookingHandler opens a PendingBookingIntent, then confirms
-        // the hold, and its catch discards the intent on failure. If the
-        // failure is a lost acknowledgement rather than a failed write, that
-        // discard removes the only marker pointing at a hold which is now
-        // pending_payment with no booking behind it - nothing releases it,
-        // and nothing knows it exists.
+        // The marker and the transition must agree. ConfirmBookingHandler
+        // used to open a PendingBookingIntent and confirm the hold in two
+        // independent commits, with a catch that discarded the intent on
+        // failure - so a lost acknowledgement (rather than a failed write)
+        // removed the only marker pointing at a hold that was now
+        // pending_payment with no booking behind it. Nothing released it and
+        // nothing knew it existed.
+        //
+        // Note what this test does NOT pin down: which of the two outcomes
+        // occurs. Rolling the transition back and recording a recoverable
+        // marker are both correct answers; leaving a hold moved with no marker
+        // is the only wrong one. Asserting the two agree is therefore the
+        // whole specification, and it holds regardless of where in the
+        // sequence the failure lands.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
 
@@ -190,42 +202,64 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
         UnitAvailabilityHold hold = await availability.UnitAvailabilityHolds.AsNoTracking()
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
 
-        if (hold.Status != "pending_payment")
-        {
-            return; // The transition did not stick; nothing is stranded.
-        }
+        bool holdMoved = hold.Status == "pending_payment";
 
         bool recoverable =
             await bookings.Bookings.AsNoTracking().AnyAsync(b => b.HoldId == holdId, TestContext.Current.CancellationToken)
             || await bookings.PendingBookingIntents.AsNoTracking().AnyAsync(i => i.HoldId == holdId, TestContext.Current.CancellationToken);
 
+        // Biconditional, not implication. "Moved implies recoverable" alone
+        // would also be satisfied by a handler that wrote an intent for a hold
+        // it never touched - a marker aimed at nothing, which the reconcile job
+        // would act on by releasing a hold that was never claimed.
         Assert.True(
-            recoverable,
-            "A hold left in pending_payment must have either a booking or an intent pointing at it. " +
-            "Without one, the unit is held for a checkout nobody can find and nothing will release.");
+            holdMoved == recoverable,
+            holdMoved
+                ? "A hold left in pending_payment must have either a booking or an intent pointing at it. " +
+                  "Without one, the unit is held for a checkout nobody can find and nothing will release."
+                : "A hold that was rolled back to 'held' must leave no intent behind. " +
+                  "An intent pointing at an unclaimed hold makes the reconcile job release inventory that was never taken.");
     }
 
     // ---- 2: inventory released, then the expiry rolls back ---------------
 
-    private sealed class ReverseRedemptionAlwaysFails(IPromotionRedemption inner) : IPromotionRedemption
+    // Releases the hold for real and then throws, so the release has happened
+    // by the time the expiry fails. Injected here rather than through the
+    // promotion reversal, which is what this test used before: the reversal is
+    // now an outbox row dispatched after the commit, so failing it proves
+    // nothing about what the transaction did. The release is the write that
+    // has to be inside.
+    private sealed class ReleaseHoldThenFail(IHoldConfirmation inner) : IHoldConfirmation
     {
-        public Task<PromotionRedemptionResult> RedeemAsync(
-            string code, Guid unitId, string guestEmail, Money subtotal, Guid bookingId, CancellationToken cancellationToken) =>
-            inner.RedeemAsync(code, unitId, guestEmail, subtotal, bookingId, cancellationToken);
+        public Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
+            inner.ConfirmHoldAsync(holdId, cancellationToken);
 
-        public Task ReverseRedemptionAsync(Guid bookingId, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("Promotions is unreachable.");
+        public Task<ConfirmedHold?> GetConfirmedHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
+            inner.GetConfirmedHoldAsync(holdId, cancellationToken);
+
+        public Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken) =>
+            inner.MarkHoldPaidAsync(holdId, cancellationToken);
+
+        public async Task ReleaseHoldAsync(Guid holdId, CancellationToken cancellationToken)
+        {
+            await inner.ReleaseHoldAsync(holdId, cancellationToken);
+            throw new InvalidOperationException("Connection lost after the hold was released.");
+        }
     }
 
     [Fact]
     public async Task AnExpiryThatFailsAfterReleasingTheHold_DoesNotLeaveTheBookingHoldingNothing()
     {
-        // ExpireUnpaidBookingsJob releases the hold on a different DbContext,
-        // so that write commits immediately - and only then does it reverse
-        // the redemption and cancel the booking inside its own transaction.
-        // A failure after the release rolls back the cancellation but cannot
-        // roll back the release: the booking stays Pending while its
-        // inventory has already gone back on sale.
+        // ExpireUnpaidBookingsJob used to release the hold on a different
+        // DbContext, so that write committed immediately and only then did the
+        // job cancel the booking inside its own transaction. A failure in
+        // between rolled back the cancellation but could not roll back the
+        // release: the booking stayed Pending while its inventory had already
+        // gone back on sale, and the next sweep would try to release a hold
+        // somebody else might own by then.
+        //
+        // Both halves are one DbContext and one transaction now, so the
+        // failure injected below has to take the release with it.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
 
@@ -265,8 +299,8 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
 
         ExpireUnpaidBookingsJob job = new ExpireUnpaidBookingsJob(
             scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
-            scope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
-            new ReverseRedemptionAlwaysFails(scope.ServiceProvider.GetRequiredService<IPromotionRedemption>()),
+            new ReleaseHoldThenFail(scope.ServiceProvider.GetRequiredService<IHoldConfirmation>()),
+            scope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>(),
             timeProvider,
             NullLogger<ExpireUnpaidBookingsJob>.Instance);
 

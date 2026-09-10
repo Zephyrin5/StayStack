@@ -47,6 +47,22 @@ public interface IHoldConfirmation
     ///     for a range it no longer holds and must compensate rather than
     ///     treat this as success.
     /// </summary>
+    /// <summary>
+    ///     The snapshot <see cref="ConfirmHoldAsync"/> would have returned, for
+    ///     a hold already in 'pending_payment' - without transitioning
+    ///     anything. Null when the hold is in any other state.
+    ///     <para>
+    ///         Exists for exactly one caller: ConfirmBookingHandler's
+    ///         execution-strategy retry path. Now that the hold transition and
+    ///         the PendingBookingIntent insert commit in one transaction,
+    ///         finding our own intent already present proves the hold moved
+    ///         with it, and re-calling ConfirmHoldAsync would fail its
+    ///         status = 'held' guard. This is how that attempt reads back what
+    ///         it already did.
+    ///     </para>
+    /// </summary>
+    Task<ConfirmedHold?> GetConfirmedHoldAsync(Guid holdId, CancellationToken cancellationToken);
+
     Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken);
 
     /// <summary>

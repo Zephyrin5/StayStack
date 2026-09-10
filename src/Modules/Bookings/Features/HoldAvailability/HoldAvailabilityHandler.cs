@@ -1,3 +1,4 @@
+using Bookings.Entities;
 using Bookings.Exceptions;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Time;
@@ -147,19 +148,49 @@ public class HoldAvailabilityHandler(
                 transaction.GetDbTransaction(),
                 cancellationToken: cancellationToken));
 
-            // Counts this client network's live holds across every unit.
-            // 'booked' is deliberately excluded: ConfirmHoldAsync
-            // sets it and nothing ever clears it (the reconciliation job
-            // depends on that persistence), so counting it would mean a
+            // Counts this client network's live holds across every unit -
+            // both the ones still being chosen ('held') and the ones already
+            // taken into a checkout ('pending_payment').
+            //
+            // Counting only 'held' left the cap trivially escapable, and not
+            // by a clever attack: hold a unit, POST the checkout form without
+            // paying, and the row moves to 'pending_payment' where the cap
+            // stopped seeing it - while the exclusion constraint went on
+            // blocking its range just the same. Repeat, and one anonymous
+            // caller accumulates as many blocked ranges as they have patience
+            // for, each one costing them nothing. The per-client cap was the
+            // only concurrency bound on that, and confirming was the way out
+            // of it.
+            //
+            // The objection to counting 'pending_payment' was that it denies
+            // checkout to everyone behind one NAT. It doesn't - the cap gates
+            // *taking a new hold*, never paying for one already taken - and
+            // what makes the residual sharing acceptable is that these rows
+            // are now finite: Booking.PaymentDueAt bounds them and
+            // ExpireUnpaidBookingsJob enforces it, so a slot occupied by
+            // somebody's abandoned checkout returns within the payment window
+            // instead of never. That was not true when the objection was
+            // raised, and it is what changed the answer.
+            //
+            // 'booked' stays excluded. ConfirmHoldAsync's payment transition
+            // sets it and nothing ever clears it, so counting it would mean a
             // customer permanently loses hold capacity after their Nth
-            // successful booking. Expired 'held' rows are excluded too -
-            // the cleanup DELETE above is scoped to this unit only, so a
-            // stale hold elsewhere would otherwise count until
-            // ExpiredHoldsSweepJob reaps it.
-            const string activeHoldCountSql = """
-                                              SELECT count(*) FROM unit_availability_holds
-                                              WHERE client_key = @ClientKey AND status = 'held' AND hold_expires_at > @Now;
-                                              """;
+            // successful stay - a customer-facing bug, not an index-tuning
+            // choice.
+            //
+            // hold_expires_at > @Now applies to 'held' rows only.
+            // 'pending_payment' rows are past that clock by construction: the
+            // transition stops hold_expires_at governing them and
+            // PaymentDueAt takes over, so testing it here would exclude every
+            // one of them and restore the escape this closes.
+            const string activeHoldCountSql = $"""
+                                               SELECT count(*) FROM unit_availability_holds
+                                               WHERE client_key = @ClientKey
+                                                 AND (
+                                                     (status = '{HoldStatuses.Held}' AND hold_expires_at > @Now)
+                                                     OR status = '{HoldStatuses.PendingPayment}'
+                                                 );
+                                               """;
 
             int activeHoldCount = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
                 activeHoldCountSql,

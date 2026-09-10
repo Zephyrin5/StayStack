@@ -1,4 +1,5 @@
 using Bookings;
+using Bookings.Contracts;
 using Bookings.Entities;
 using Bookings.Exceptions;
 using Bookings.Features.HoldAvailability;
@@ -550,6 +551,75 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         HoldAvailabilityResponse result = await handler.Handle(sixthRequest, CancellationToken.None);
 
         Assert.NotEqual(Guid.Empty, result.HoldId);
+    }
+
+    [Fact]
+    public async Task Handle_AlternatingHoldAndConfirmWithoutPaying_StillHitsTheCap()
+    {
+        // The cap's escape hatch. It used to count 'held' only, so submitting
+        // the checkout form - which moves a row to 'pending_payment' without
+        // any money changing hands - took that row out of the count while the
+        // exclusion constraint went on blocking its range. Hold, confirm,
+        // repeat: a caller with no account and no card accumulated blocked
+        // ranges without limit, and the per-client cap, the only concurrency
+        // bound on this, never fired.
+        //
+        // Alternating rather than seeding five 'pending_payment' rows
+        // directly: the seeded version passes against a cap that counts the
+        // status but still lets the transition itself free a slot, which is
+        // the actual bug. The loop below is the exploit, written out.
+        Unit unit = CreateTestUnit(maxCapacity: 10);
+        await SeedCatalogAsync(unit);
+
+        // The real clock, unlike the sibling cap tests. IHoldConfirmation is
+        // internal to Bookings and only reachable through the container, so it
+        // gets the container's real TimeProvider - and a hold minted at a
+        // fixed 2026 instant reads as long expired to it, failing
+        // ConfirmHoldAsync's hold_expires_at > @Now guard before the cap is
+        // ever exercised. Both clocks have to agree for the alternation to be
+        // the thing under test.
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateOnly today = DateOnly.FromDateTime(now.UtcDateTime).AddDays(1);
+        string clientKey = Guid.NewGuid().ToString();
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        FakeTimeProvider timeProvider = new FakeTimeProvider();
+        timeProvider.SetUtcNow(now);
+        HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
+
+        // Resolved from the container so this exercises the same transition
+        // ConfirmBookingHandler performs, not a hand-written UPDATE that
+        // could drift from it.
+        IHoldConfirmation holdConfirmation = scope.ServiceProvider.GetRequiredService<IHoldConfirmation>();
+
+        for (int i = 0; i < 5; i++)
+        {
+            HoldAvailabilityResponse held = await handler.Handle(new HoldAvailabilityRequest
+            {
+                UnitId = unit.Id,
+                CheckIn = today.AddDays(i * 3),
+                CheckOut = today.AddDays(i * 3 + 2),
+                GuestCount = 1,
+                ClientKey = clientKey
+            }, CancellationToken.None);
+
+            // Checkout submitted, nothing paid. Under the old cap this line
+            // is what made the loop unbounded.
+            await holdConfirmation.ConfirmHoldAsync(held.HoldId, CancellationToken.None);
+        }
+
+        HoldAvailabilityRequest sixthRequest = new HoldAvailabilityRequest
+        {
+            UnitId = unit.Id,
+            CheckIn = today.AddDays(100),
+            CheckOut = today.AddDays(102),
+            GuestCount = 1,
+            ClientKey = clientKey
+        };
+
+        await Assert.ThrowsAsync<TooManyActiveHoldsException>(() =>
+            handler.Handle(sixthRequest, CancellationToken.None).AsTask());
     }
 
     [Fact]

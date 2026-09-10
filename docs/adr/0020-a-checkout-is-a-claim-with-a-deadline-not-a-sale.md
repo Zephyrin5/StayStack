@@ -1,6 +1,8 @@
 # 0020 - A checkout is a claim with a deadline, not a sale
 
-**Status:** Accepted
+**Status:** Accepted; the cap decision below is reversed by [ADR-0021](0021-availability-is-part-of-bookings.md)
+
+> Two sections are superseded. **"The cap deliberately does *not* count `pending_payment`"** was reversed: its fallback bound (rate limit x deadline) is 600 concurrent claims per IP at the configured values, not a small number, and confirming a checkout was itself the way out of the cap. **The hold-first ordering** in `ConfirmPaymentAsync` no longer applies - both halves are one transaction, so neither crash remainder it weighed is reachable. Everything else here stands, including the `pending_payment` state itself, `PaymentDueAt`, and the status-literal audit.
 
 Amends [ADR-0010](0010-postgres-exclusion-constraint-for-double-booking.md) (the exclusion constraint that makes any hold row block its range) and [ADR-0016](0016-trust-model-for-anonymous-endpoints.md) (what an anonymous caller may cost this platform).
 

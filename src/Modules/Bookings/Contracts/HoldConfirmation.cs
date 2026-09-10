@@ -2,6 +2,7 @@ using Bookings.Entities;
 using BuildingBlocks.Exceptions;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using System.Data;
@@ -12,6 +13,35 @@ namespace Bookings.Contracts;
 // should only ever reach this through IHoldConfirmation, resolved via DI.
 internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider timeProvider) : IHoldConfirmation
 {
+    /// <summary>
+    ///     The columns a <see cref="ConfirmedHold"/> is built from, shared by
+    ///     the confirming UPDATE...RETURNING and the read below so a column
+    ///     added to one cannot go missing from the other - they must agree,
+    ///     since both map onto the same record by name.
+    /// </summary>
+    private const string HoldProjection =
+        """
+        unit_id AS "UnitId", lower(stay_range) AS "CheckIn", upper(stay_range) AS "CheckOut", guest_count AS "GuestCount", total_price AS "TotalPrice", subtotal AS "Subtotal", currency AS "Currency", length_of_stay_discount_amount AS "LengthOfStayDiscountAmount"
+        """;
+
+    /// <summary>
+    ///     The caller's transaction, when there is one.
+    ///     <para>
+    ///         These statements are Dapper, and Dapper does not discover an
+    ///         ambient EF transaction: without being handed it explicitly,
+    ///         a command on an enlisted connection either fails or - worse -
+    ///         commits on its own while the caller believes it is inside
+    ///         their transaction. That autocommit was the whole shape of
+    ///         defect 3, and now that holds live in this module it is
+    ///         avoidable rather than inherent.
+    ///     </para>
+    ///     <para>
+    ///         Null when the caller has no transaction open, which leaves
+    ///         every existing call site behaving exactly as before.
+    ///     </para>
+    /// </summary>
+    private DbTransaction? AmbientTransaction => dbContext.Database.CurrentTransaction?.GetDbTransaction();
+
     // Raw shape of the RETURNING row, materialized first and assembled into
     // Money afterward - the same materialize-first-map-after shape as
     // docs/adr/0006, applied to Dapper rather than EF. The three amounts
@@ -89,25 +119,31 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
         // when. Holding it through the payment window keeps it available to
         // any per-client reasoning during exactly the window it describes,
         // and the row loses it on payment or is released outright by
-        // Bookings' expiry job. Note the cap does not read it here: the cap
-        // counts 'held' only, deliberately, since capping bookings in
-        // progress by an IP-derived key would deny checkout to everyone
-        // behind one NAT.
+        // Bookings' expiry job. The concurrent-hold cap does read it here -
+        // it counts 'held' and 'pending_payment' together, because a
+        // transition that moved a row out of the cap's sight was the way to
+        // escape the cap entirely. See HoldAvailabilityHandler's count query.
         const string sql = $"""
                             UPDATE unit_availability_holds
                             SET status = '{HoldStatuses.PendingPayment}'
                             WHERE id = @HoldId AND status = '{HoldStatuses.Held}' AND hold_expires_at > @Now
-                            RETURNING unit_id AS "UnitId", lower(stay_range) AS "CheckIn", upper(stay_range) AS "CheckOut", guest_count AS "GuestCount", total_price AS "TotalPrice", subtotal AS "Subtotal", currency AS "Currency", length_of_stay_discount_amount AS "LengthOfStayDiscountAmount";
+                            RETURNING {HoldProjection};
                             """;
 
         ConfirmedHoldRow? row = await connection.QuerySingleOrDefaultAsync<ConfirmedHoldRow>(
-            new CommandDefinition(sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() }, cancellationToken: cancellationToken));
+            new CommandDefinition(sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() },
+                AmbientTransaction, cancellationToken: cancellationToken));
 
         if (row is null)
         {
             throw new NotFoundException("Hold", holdId);
         }
 
+        return MapConfirmedHold(row);
+    }
+
+    private static ConfirmedHold MapConfirmedHold(ConfirmedHoldRow row)
+    {
         Currency currency = row.Currency;
 
         return new ConfirmedHold
@@ -125,6 +161,43 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
                 ? Money.Of(discount, currency)
                 : null
         };
+    }
+
+    public async Task<ConfirmedHold?> GetConfirmedHoldAsync(Guid holdId, CancellationToken cancellationToken)
+    {
+        DbConnection connection = dbContext.Database.GetDbConnection();
+        bool openedHere = connection.State != ConnectionState.Open;
+        if (openedHere)
+        {
+            await dbContext.Database.OpenConnectionAsync(cancellationToken);
+        }
+
+        try
+        {
+            // Deliberately no expiry check, unlike ConfirmHoldAsync's WHERE.
+            // A hold in 'pending_payment' has already been sold into a
+            // checkout; hold_expires_at stopped governing it at that
+            // transition, and the payment deadline on the Booking governs it
+            // now. Reading one back is not re-confirming it.
+            const string sql = $"""
+                                SELECT {HoldProjection}
+                                FROM unit_availability_holds
+                                WHERE id = @HoldId AND status = '{HoldStatuses.PendingPayment}';
+                                """;
+
+            ConfirmedHoldRow? row = await connection.QuerySingleOrDefaultAsync<ConfirmedHoldRow>(
+                new CommandDefinition(sql, new { HoldId = holdId },
+                    AmbientTransaction, cancellationToken: cancellationToken));
+
+            return row is null ? null : MapConfirmedHold(row);
+        }
+        finally
+        {
+            if (openedHere)
+            {
+                await dbContext.Database.CloseConnectionAsync();
+            }
+        }
     }
 
     public async Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken)
@@ -181,7 +254,8 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
         try
         {
             int rowsAffected = await connection.ExecuteAsync(new CommandDefinition(
-                sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() }, cancellationToken: cancellationToken));
+                sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() },
+                AmbientTransaction, cancellationToken: cancellationToken));
 
             return rowsAffected > 0;
         }
@@ -235,7 +309,8 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
         try
         {
             await connection.ExecuteAsync(new CommandDefinition(
-                sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() }, cancellationToken: cancellationToken));
+                sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() },
+                AmbientTransaction, cancellationToken: cancellationToken));
         }
         finally
         {

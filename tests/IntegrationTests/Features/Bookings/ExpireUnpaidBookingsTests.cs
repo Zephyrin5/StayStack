@@ -17,6 +17,7 @@ using NpgsqlTypes;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using Bookings.Contracts;
+using Bookings.Outbox;
 using Promotions.Contracts;
 namespace IntegrationTests.Features.Bookings;
 
@@ -99,7 +100,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         return new ExpireUnpaidBookingsJob(
             scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
             scope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
-            scope.ServiceProvider.GetRequiredService<IPromotionRedemption>(),
+            scope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>(),
             timeProvider,
             NullLogger<ExpireUnpaidBookingsJob>.Instance);
     }

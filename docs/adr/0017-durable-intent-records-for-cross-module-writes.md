@@ -1,6 +1,8 @@
 # 0017 - Durable intent records for the forward half of cross-module writes
 
-**Status:** Accepted (partially supersedes [ADR-0003](0003-compensating-actions-over-distributed-transactions.md))
+**Status:** Accepted (partially supersedes [ADR-0003](0003-compensating-actions-over-distributed-transactions.md)); narrowed by [ADR-0021](0021-availability-is-part-of-bookings.md)
+
+> The mechanism stands and `PendingBookingIntent` is still live, but it now covers only the promo redemption, which still crosses into Promotions. The hold transition it was originally built for shares a transaction with the intent after [ADR-0021](0021-availability-is-part-of-bookings.md), so that half needs no recovery marker - the intent is present if and only if the hold moved.
 
 ## Context
 

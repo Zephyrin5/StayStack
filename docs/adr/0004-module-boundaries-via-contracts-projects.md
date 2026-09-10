@@ -1,6 +1,8 @@
 # 0004 - Module boundaries via per-module Contracts projects
 
-**Status:** Accepted
+**Status:** Accepted; module list amended by [ADR-0021](0021-availability-is-part-of-bookings.md)
+
+> Availability is no longer a module. [ADR-0021](0021-availability-is-part-of-bookings.md) merged it into Bookings, leaving the order `Hosts -> Catalog -> Promotions -> Bookings -> Transactions`. The direction rule below is unchanged, and is part of why the merge happened: being upstream of Bookings meant Availability could not name a `Booking`, while every question worth asking about a hold is answered by the booking's state.
 
 ## Context
 

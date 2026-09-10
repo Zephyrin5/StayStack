@@ -38,6 +38,9 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
         public Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Availability is unreachable.");
 
+        public Task<ConfirmedHold?> GetConfirmedHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Availability is unreachable.");
+
         public Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Availability is unreachable.");
 

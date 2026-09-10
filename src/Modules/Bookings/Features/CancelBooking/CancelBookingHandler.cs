@@ -2,6 +2,8 @@ using Microsoft.Extensions.Options;
 using Bookings.Entities;
 using Bookings.Features.Common;
 using Bookings.Outbox;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Bookings.Serialization;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
@@ -17,6 +19,7 @@ namespace Bookings.Features.CancelBooking;
 public class CancelBookingHandler(
     AppBookingsDbContext dbContext,
     BookingsOutboxDispatcher dispatcher,
+    IHoldConfirmation holdConfirmation,
     ITransactionReversal transactionReversal,
     ICurrentUserProvider currentUserProvider,
     TimeProvider timeProvider,
@@ -114,25 +117,52 @@ public class CancelBookingHandler(
 
             (Money refundAmount, decimal refundPercent) = ComputeRefund(today);
 
-            // Enqueued in the same SaveChangesAsync as booking.Cancel() -
-            // atomic with the cancellation itself, then dispatched inline so
-            // the common case still completes within this request. Each
-            // message is independent: ReverseRedemptionAsync/
-            // ReleaseHoldAsync are no-ops when there's nothing to reverse/
-            // release, and ReverseTransactionAsync's own no-op case (nothing
-            // Succeeded to reverse) is exactly as safe (and simpler) to let
-            // it discover on its own than to skip enqueueing it here.
-            OutboxMessage releaseHoldRow = dispatcher.Enqueue(
-                new ReleaseHoldOutboxMessage(booking.HoldId), BookingsJsonSerializerContext.Default.ReleaseHoldOutboxMessage);
+            // Two messages now, not three. The hold release used to be one of
+            // them because the hold lived in another module and another
+            // DbContext, so an outbox row was the only way to make "cancel the
+            // booking" and "release its inventory" eventually agree. They are
+            // now the same DbContext, and a plain call inside the transaction
+            // below makes them agree immediately instead of eventually -
+            // no row, no dispatch, no relay, no window in which a Cancelled
+            // booking still blocks its range.
+            //
+            // The other two stay on the outbox because they genuinely cross a
+            // module boundary (Transactions, Promotions) and cannot join this
+            // transaction. Each is independent: ReverseRedemptionAsync is a
+            // no-op when there is nothing to reverse, and
+            // ReverseTransactionAsync's own no-op case (nothing Succeeded to
+            // reverse) is exactly as safe, and simpler, to let it discover on
+            // its own than to skip enqueueing it here.
+            //
+            // Enqueued before the strategy delegate rather than inside it. A
+            // retried attempt re-runs the release and the save - both
+            // idempotent, the release because a rolled-back transaction undid
+            // it - but re-running Enqueue would add a second copy of each row
+            // to the tracker, and the rows are still Added from the failed
+            // attempt.
             OutboxMessage reverseTransactionRow = dispatcher.Enqueue(
                 new ReverseTransactionOutboxMessage(booking.Id, refundAmount.Amount, refundAmount.Currency),
                 BookingsJsonSerializerContext.Default.ReverseTransactionOutboxMessage);
             OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
                 new ReverseRedemptionOutboxMessage(booking.Id), BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
 
-            await dbContext.SaveChangesAsync(cancellationToken);
+            IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
-            await dispatcher.TryDispatchAsync(releaseHoldRow, cancellationToken);
+            await strategy.ExecuteAsync(async () =>
+            {
+                await using IDbContextTransaction transaction =
+                    await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+                // Joins the transaction rather than autocommitting - see
+                // HoldConfirmation.AmbientTransaction. Ordering within it no
+                // longer matters, which is the point: either both the
+                // cancellation and the release land or neither does.
+                await holdConfirmation.ReleaseHoldAsync(booking.HoldId, cancellationToken);
+
+                await dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            });
+
             await dispatcher.TryDispatchAsync(reverseTransactionRow, cancellationToken);
             await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
 

@@ -1,11 +1,13 @@
 using Bookings.Contracts;
+using Bookings.Outbox;
+using Bookings.Serialization;
+using Outbox;
 using Bookings.Entities;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using System.Data.Common;
 using Microsoft.Extensions.Logging;
-using Promotions.Contracts;
 using TickerQ.Utilities.Base;
 using TickerQ.Utilities.Models;
 namespace Bookings.Jobs;
@@ -44,7 +46,7 @@ namespace Bookings.Jobs;
 public partial class ExpireUnpaidBookingsJob(
     AppBookingsDbContext dbContext,
     IHoldConfirmation holdConfirmation,
-    IPromotionRedemption promotionRedemption,
+    BookingsOutboxDispatcher dispatcher,
     TimeProvider timeProvider,
     ILogger<ExpireUnpaidBookingsJob> logger)
 {
@@ -109,24 +111,29 @@ public partial class ExpireUnpaidBookingsJob(
     ///     cancellation and the hold release must not be able to commit
     ///     independently in the wrong order.
     ///     <para>
-    ///         Precisely the same guarantee as that job, and the same limit
-    ///         on it: <b>the re-read and the cancellation commit together;
-    ///         the cross-module calls are idempotent and may repeat.</b>
-    ///         ReleaseHoldAsync runs on AppBookingsDbContext and
-    ///         ReverseRedemptionAsync on AppPromotionsDbContext, so a
-    ///         rollback here just means the next run repeats them, which
-    ///         their contracts allow.
+    ///         The re-read, the release and the cancellation now all commit
+    ///         together. The hold is in this module's own DbContext, so
+    ///         ReleaseHoldAsync joins this transaction (see
+    ///         HoldConfirmation.AmbientTransaction) instead of autocommitting
+    ///         beside it.
     ///     </para>
     ///     <para>
-    ///         Order matters within that. The hold is released before the
-    ///         cancellation commits, so a crash in between leaves a Pending
-    ///         booking whose hold is already back to 'held' - found again next
-    ///         run, cancelled then, and meanwhile the released hold expires on
-    ///         its own clock rather than staying blocked. The reverse order
-    ///         would commit a Cancelled booking whose hold nothing would ever
-    ///         release again, since the next run's Pending filter would no
-    ///         longer match it: inventory lost permanently, which is the
-    ///         failure this whole job exists to prevent.
+    ///         That retires an ordering argument this job used to carry. The
+    ///         release had to precede the cancellation's commit, because the
+    ///         two could commit independently and the wrong order would leave
+    ///         a Cancelled booking whose hold nothing would ever release
+    ///         again - the next run's Pending filter would no longer match it,
+    ///         and the range stayed blocked permanently. There is no longer a
+    ///         wrong order to pick: a rollback takes both.
+    ///     </para>
+    ///     <para>
+    ///         ReverseRedemptionAsync is the one piece that cannot join,
+    ///         since it writes AppPromotionsDbContext across a module
+    ///         boundary. It goes on the outbox in the same SaveChangesAsync as
+    ///         the cancellation and is dispatched inline afterwards, matching
+    ///         CancelBookingHandler - so it is durable before anything acts on
+    ///         it, and OutboxRelayJob delivers whatever this run misses
+    ///         (docs/adr/0003).
     ///     </para>
     /// </summary>
     private async Task ClaimAndExpireAsync(Guid bookingId, CancellationToken cancellationToken)
@@ -193,10 +200,9 @@ public partial class ExpireUnpaidBookingsJob(
                 return false;
             }
 
-            // Both idempotent: ReleaseHoldAsync is a no-op unless the hold is
-            // 'pending_payment' or 'booked', ReverseRedemptionAsync unless a
-            // redemption is still outstanding. A repeat costs nothing, which
-            // is what makes retrying this whole block safe.
+            // Idempotent, and still worth being: a no-op unless the hold is
+            // 'pending_payment' or 'booked', so a retried attempt costs
+            // nothing.
             await holdConfirmation.ReleaseHoldAsync(booking.HoldId, cancellationToken);
 
             // The promo code goes back to the guest along with the room. A
@@ -204,11 +210,18 @@ public partial class ExpireUnpaidBookingsJob(
             // booking that never happened would quietly burn a single-use
             // code - the same compensation the orphaned-intent job performs
             // for the same reason.
-            await promotionRedemption.ReverseRedemptionAsync(booking.Id, cancellationToken);
+            OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
+                new ReverseRedemptionOutboxMessage(booking.Id),
+                BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
 
             booking.Cancel();
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+
+            // Dispatched after the commit, not inside it. Inside, a
+            // successful reversal followed by a rollback would strand a
+            // Promotions write with no Bookings state explaining it.
+            await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
 
             return true;
         });

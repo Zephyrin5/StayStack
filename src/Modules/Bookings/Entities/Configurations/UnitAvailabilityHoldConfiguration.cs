@@ -19,20 +19,23 @@ public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAv
         builder.HasIndex(h => h.UnitId);
 
         // Backs HoldAvailabilityHandler's concurrent-hold cap - partial on
-        // 'held' only, matching that query's WHERE clause exactly.
+        // the two statuses that query counts, matching its WHERE clause
+        // exactly. A filter narrower than the query silently stops covering
+        // it, and the cap runs inside a Serializable transaction on the hold
+        // path, so a sequential scan there is not merely slower.
         // Deliberately excludes 'booked' - see that query's own comment for
         // why counting a successfully-booked hold would be a permanent
         // customer-facing bug, not just an index-tuning choice.
         // hold_expires_at > @Now is a residual filter applied after this
-        // index narrows to the client's 'held' rows - a runtime comparison
-        // can't be baked into a static partial-index predicate.
+        // index narrows to the client's rows - a runtime comparison can't be
+        // baked into a static partial-index predicate.
         //
         // Keyed on client_key. The cap used to be keyed on a hold-session
         // cookie, which meant the caller chose their own budget by dropping
         // it (docs/adr/0016); that cookie and its holder_token column have
         // since been removed entirely, since nothing ever read them back.
         builder.HasIndex(h => h.ClientKey, "ix_unit_availability_holds_client_key_active")
-            .HasFilter("status = 'held'")
+            .HasFilter($"status IN ('{HoldStatuses.Held}', '{HoldStatuses.PendingPayment}')")
             .HasDatabaseName("ix_unit_availability_holds_client_key_active");
 
         // No (status, booked_at) index any more. It existed solely for

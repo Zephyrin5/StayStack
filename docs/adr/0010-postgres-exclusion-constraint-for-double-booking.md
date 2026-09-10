@@ -1,6 +1,8 @@
 # 0010 - Postgres exclusion constraint for double-booking prevention
 
-**Status:** Accepted
+**Status:** Accepted; amended by [ADR-0020](0020-a-checkout-is-a-claim-with-a-deadline-not-a-sale.md), table now owned by Bookings per [ADR-0021](0021-availability-is-part-of-bookings.md)
+
+> The constraint itself is untouched - same table, same `EXCLUDE USING gist`, same absence of a status predicate. Only the owning module changed.
 
 ## Context
 

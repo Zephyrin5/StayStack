@@ -8,6 +8,7 @@ using BuildingBlocks.Security;
 using Catalog.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using Outbox;
 using Promotions.Contracts;
@@ -35,7 +36,17 @@ public class ConfirmBookingHandler(
         // committed rather than inferring it from an exception type.
         Guid bookingId = Guid.CreateVersion7();
 
-        PendingBookingIntent intent = await OpenIntentAsync(request.HoldId, bookingId, cancellationToken);
+        // Transaction A. The hold transition and the marker saying "a
+        // confirmation for this hold began" now commit together, which is what
+        // makes an ambiguous commit answerable: the intent is present if and
+        // only if the hold moved. Before, they were two independent commits,
+        // so a connection lost between them left a hold in 'pending_payment'
+        // with nothing recording that it had been claimed - the reconcile job
+        // had no row to find, and the range stayed blocked until someone
+        // noticed. They were only ever separable because they lived in
+        // different modules.
+        (PendingBookingIntent intent, ConfirmedHold hold) =
+            await BeginConfirmationAsync(request.HoldId, bookingId, cancellationToken);
 
         // ExecuteDelete, not a tracked Remove: on a failure path a zero-row
         // delete just means the reconcile job got here first, which has to be
@@ -96,31 +107,6 @@ public class ConfirmBookingHandler(
             }
 
             await DiscardIntentAsync();
-        }
-
-        ConfirmedHold hold;
-
-        try
-        {
-            // Confirms the hold first (marks it 'booked' in Availability).
-            // Cross-module write, no shared transaction (docs/adr/0003) - but
-            // no longer unmarked: the intent row above is already durable, so
-            // even a hard process death on the next line leaves something for
-            // ReconcileOrphanedBookingIntentsJob to recover from.
-            //
-            // Price/currency come from the hold's own snapshot, not a fresh
-            // unit lookup - the price a customer saw when they held is the
-            // price they get, even if the unit's base price changed since.
-            hold = await holdConfirmation.ConfirmHoldAsync(request.HoldId, cancellationToken);
-        }
-        catch (Exception)
-        {
-            // An ordinary failure, not a crash - most often this hold was
-            // already consumed by an earlier attempt. Without this the intent
-            // would sit until the grace period elapsed and the job released a
-            // hold that nothing was wrong with.
-            await DiscardIntentAsync();
-            throw;
         }
 
         Money totalPrice = hold.TotalPrice;
@@ -385,70 +371,140 @@ public class ConfirmBookingHandler(
     }
 
     /// <summary>
-    ///     Writes the durable marker that this confirmation has begun, before
-    ///     any cross-module work happens. Returns the tracked instance the
-    ///     success path later removes.
+    ///     Transaction A: writes the durable marker that this confirmation has
+    ///     begun and transitions the hold ('held' -> 'pending_payment') in one
+    ///     commit. Returns the tracked intent the success path later removes,
+    ///     and the hold's price snapshot.
+    ///     <para>
+    ///         Price/currency come from the hold's own snapshot, not a fresh
+    ///         unit lookup - the price a customer saw when they held is the
+    ///         price they get, even if the unit's base price changed since.
+    ///     </para>
+    ///     <para>
+    ///         A failure anywhere inside rolls back both, so there is no
+    ///         compensation to run and nothing for the reconcile job to find -
+    ///         which is why the caller no longer discards the intent when the
+    ///         hold transition fails. The cross-module work that genuinely
+    ///         cannot join a transaction (the redemption, in Promotions) still
+    ///         happens afterwards on the outbox, exactly as before.
+    ///     </para>
     /// </summary>
-    private async Task<PendingBookingIntent> OpenIntentAsync(Guid holdId, Guid bookingId, CancellationToken cancellationToken)
+    private async Task<(PendingBookingIntent Intent, ConfirmedHold Hold)> BeginConfirmationAsync(
+        Guid holdId, Guid bookingId, CancellationToken cancellationToken)
     {
-        PendingBookingIntent intent = new PendingBookingIntent
+        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
+
+        return await strategy.ExecuteAsync(async () =>
         {
-            Id = bookingId,
-            HoldId = holdId,
-            CreatedAt = timeProvider.GetUtcNow()
-        };
+            // Each attempt starts from a clean tracker. A retry following a
+            // committed-but-unacknowledged SaveChanges would otherwise Add a
+            // second instance carrying the same key as the one already tracked
+            // Unchanged, and fail on the identity map rather than on anything
+            // real. Safe here specifically because this is the first database
+            // work the handler does.
+            dbContext.ChangeTracker.Clear();
 
-        dbContext.PendingBookingIntents.Add(intent);
-
-        try
-        {
-            await dbContext.SaveChangesAsync(cancellationToken);
-            return intent;
-        }
-        catch (DbUpdateException ex)
-            when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
-        {
-            // Detached before anything else so the Attach below can't collide
-            // with this instance in the identity map, and so the throwing
-            // branches don't leave a phantom Added row behind.
-            dbContext.Entry(intent).State = EntityState.Detached;
-
-            PendingBookingIntent? existing = await dbContext.PendingBookingIntents.AsNoTracking()
-                .SingleOrDefaultAsync(i => i.HoldId == holdId, cancellationToken);
-
-            if (existing is null)
+            PendingBookingIntent intent = new PendingBookingIntent
             {
-                // The conflicting intent was resolved between the violation
-                // and this read, so a retry would now succeed.
-                throw new ConflictException(
-                    "A previous confirmation for this hold was interrupted and is being cleaned up. Please try again shortly.");
+                Id = bookingId,
+                HoldId = holdId,
+                CreatedAt = timeProvider.GetUtcNow()
+            };
+
+            await using IDbContextTransaction transaction =
+                await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+            dbContext.PendingBookingIntents.Add(intent);
+
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException ex)
+                when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+            {
+                // Detached before anything else so the Attach in the recovery
+                // can't collide with this instance in the identity map, and so
+                // the throwing branches don't leave a phantom Added row behind.
+                dbContext.Entry(intent).State = EntityState.Detached;
+
+                // The violation aborted this transaction - Postgres fails every
+                // further statement on it with 25P02 until it ends - so the
+                // recovery's reads cannot run inside it. Rolled back explicitly
+                // rather than left to the dispose below, because those reads
+                // are the next thing that happens.
+                await transaction.RollbackAsync(cancellationToken);
+
+                return await RecoverInterruptedConfirmationAsync(holdId, bookingId, cancellationToken);
             }
 
-            if (existing.Id != bookingId)
-            {
-                // A different request owns this hold. Deliberately refuses
-                // rather than taking the intent over: taking over would
-                // replay a redemption that may already hold the
-                // (promotion_id, guest_email) slot.
-                throw new ConflictException(
-                    existing.CreatedAt > timeProvider.GetUtcNow() - PendingBookingIntent.ReconcileGrace
-                        ? "A confirmation for this hold is already in progress."
-                        : "A previous confirmation for this hold was interrupted and is being cleaned up. Please try again shortly.");
-            }
+            // Joins the transaction above rather than autocommitting - see
+            // HoldConfirmation.AmbientTransaction. If this throws, the dispose
+            // takes the intent down with it.
+            ConfirmedHold confirmed = await holdConfirmation.ConfirmHoldAsync(holdId, cancellationToken);
 
-            // Our own insert: it committed and the acknowledgement was lost
-            // to an execution-strategy retry (see EnableRetryOnFailure).
-            //
-            // Re-attaching is not cosmetic. The instance above is still
-            // tracked Added, and Remove on an Added entity detaches it rather
-            // than marking it Deleted - EF would emit no DELETE at all, which
-            // silently disables the success path's row-count assertion (the
-            // structural guarantee) *and* leaves this row alive behind a
-            // confirmed booking for the job to reconcile later, releasing the
-            // hold underneath it.
-            dbContext.Attach(existing);
-            return existing;
+            await transaction.CommitAsync(cancellationToken);
+
+            return (intent, confirmed);
+        });
+    }
+
+    /// <summary>
+    ///     Reached when the intent insert hits a unique violation: either
+    ///     another request owns this hold, or this attempt's own earlier
+    ///     transaction committed and the acknowledgement was lost to an
+    ///     execution-strategy retry (see EnableRetryOnFailure).
+    /// </summary>
+    private async Task<(PendingBookingIntent Intent, ConfirmedHold Hold)> RecoverInterruptedConfirmationAsync(
+        Guid holdId, Guid bookingId, CancellationToken cancellationToken)
+    {
+        PendingBookingIntent? existing = await dbContext.PendingBookingIntents.AsNoTracking()
+            .SingleOrDefaultAsync(i => i.HoldId == holdId, cancellationToken);
+
+        if (existing is null)
+        {
+            // The conflicting intent was resolved between the violation and
+            // this read, so a retry would now succeed.
+            throw new ConflictException(
+                "A previous confirmation for this hold was interrupted and is being cleaned up. Please try again shortly.");
         }
+
+        if (existing.Id != bookingId)
+        {
+            // A different request owns this hold. Deliberately refuses rather
+            // than taking the intent over: taking over would replay a
+            // redemption that may already hold the (promotion_id, guest_email)
+            // slot.
+            throw new ConflictException(
+                existing.CreatedAt > timeProvider.GetUtcNow() - PendingBookingIntent.ReconcileGrace
+                    ? "A confirmation for this hold is already in progress."
+                    : "A previous confirmation for this hold was interrupted and is being cleaned up. Please try again shortly.");
+        }
+
+        // Our own insert, and it now says more than it used to. The intent
+        // committed in the same transaction as the hold transition, so its
+        // presence proves the hold moved too - which means re-calling
+        // ConfirmHoldAsync would fail its status = 'held' guard and abandon a
+        // confirmation that had in fact succeeded. Read the snapshot back
+        // instead of redoing the transition.
+        ConfirmedHold? hold = await holdConfirmation.GetConfirmedHoldAsync(holdId, cancellationToken);
+
+        if (hold is null)
+        {
+            // The intent is ours but the hold is no longer in
+            // 'pending_payment' - something (the reconcile job, the expiry
+            // sweep) has already begun unwinding this attempt. Nothing here
+            // can safely continue on top of that.
+            throw new ConflictException(
+                "A previous confirmation for this hold was interrupted and is being cleaned up. Please try again shortly.");
+        }
+
+        // Re-attaching is not cosmetic: the success path's row-count assertion
+        // on the delete - the structural guarantee that this confirmation owned
+        // the intent it removed - only runs against a tracked instance.
+        dbContext.Attach(existing);
+
+        return (existing, hold);
     }
 
     private static ConfirmBookingResponse BuildResponse(Booking booking, string? managementToken) =>
