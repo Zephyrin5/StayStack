@@ -66,9 +66,14 @@ public class OptionsValidationTests(IntegrationTestWebApplicationFactory factory
     [Fact]
     public void AZeroRateLimit_RefusesToStart()
     {
+        // "PermitLimit" rather than "AuthPermitLimit": each policy binds its
+        // own nested section now, so the property no longer carries its
+        // policy's name. The DataAnnotations failure names the member, not the
+        // options type, so this asserts the field and the key path together
+        // identify which limit was rejected.
         AssertRefusesToStart(
-            "AuthPermitLimit",
-            ("App:RateLimiting:AuthPermitLimit", "0"));
+            "PermitLimit",
+            ("App:RateLimiting:Auth:PermitLimit", "0"));
     }
 
     [Fact]
@@ -169,7 +174,7 @@ public class OptionsValidationTests(IntegrationTestWebApplicationFactory factory
             ("App:BookingLifecycle:ReviewWindowDaysAfterCheckOut", "30"),
             ("App:BookingLifecycle:ManagementTokenLifetimeDaysAfterCheckOut", "45"),
             ("App:Holds:MaxActiveHoldsPerClient", "3"),
-            ("App:RateLimiting:AuthPermitLimit", "7"));
+            ("App:RateLimiting:Auth:PermitLimit", "7"));
 
         using IServiceScope scope = host.Services.CreateScope();
 
@@ -178,7 +183,7 @@ public class OptionsValidationTests(IntegrationTestWebApplicationFactory factory
         Assert.Equal(3, scope.ServiceProvider
             .GetRequiredService<IOptions<HoldCapOptions>>().Value.MaxActiveHoldsPerClient);
         Assert.Equal(7, scope.ServiceProvider
-            .GetRequiredService<IOptions<AuthRateLimitOptions>>().Value.AuthPermitLimit);
+            .GetRequiredService<IOptions<AuthRateLimitOptions>>().Value.PermitLimit);
         Assert.NotEmpty(scope.ServiceProvider
             .GetRequiredService<IOptions<AuthTokenConfiguration>>().Value.Key);
     }

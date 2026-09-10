@@ -92,8 +92,9 @@ builder.Services.AddOptions<AuthRateLimitOptions>()
     .Bind(builder.Configuration.AppSection(AuthRateLimitOptions.SectionName))
     .ValidateDataAnnotations()
     .ValidateOnStart();
-// Same "RateLimiting" section, sibling keys - HoldPermitLimit/HoldWindowSeconds
-// coexist with AuthPermitLimit/AuthWindowSeconds without colliding.
+// Each policy binds its own nested section under RateLimiting rather than
+// sharing one and prefixing property names to stay out of each other's way -
+// see AuthRateLimitOptions.SectionName.
 builder.Services.AddOptions<HoldRateLimitOptions>()
     .Bind(builder.Configuration.AppSection(HoldRateLimitOptions.SectionName))
     .ValidateDataAnnotations()
@@ -115,8 +116,8 @@ builder.Services.AddRateLimiter(options =>
             httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = limits.AuthPermitLimit,
-                Window = TimeSpan.FromSeconds(limits.AuthWindowSeconds),
+                PermitLimit = limits.PermitLimit,
+                Window = TimeSpan.FromSeconds(limits.WindowSeconds),
                 QueueLimit = 0
             });
     });
@@ -136,8 +137,8 @@ builder.Services.AddRateLimiter(options =>
             httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = limits.HoldPermitLimit,
-                Window = TimeSpan.FromSeconds(limits.HoldWindowSeconds),
+                PermitLimit = limits.PermitLimit,
+                Window = TimeSpan.FromSeconds(limits.WindowSeconds),
                 QueueLimit = 0
             });
     });
@@ -161,8 +162,8 @@ builder.Services.AddRateLimiter(options =>
             httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = limits.ReadPermitLimit,
-                Window = TimeSpan.FromSeconds(limits.ReadWindowSeconds),
+                PermitLimit = limits.PermitLimit,
+                Window = TimeSpan.FromSeconds(limits.WindowSeconds),
                 QueueLimit = 0
             });
     });

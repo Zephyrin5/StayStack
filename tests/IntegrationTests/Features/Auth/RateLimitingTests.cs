@@ -7,7 +7,8 @@ using System.Net;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Auth;
 
-// appsettings.Testing.json deliberately sets a very high AuthPermitLimit so
+// appsettings.Testing.json deliberately sets a very high limit for each
+// policy so
 // the shared IntegrationTestWebApplicationFactory (one instance, one rate
 // limiter, reused by every other test in the collection) never trips it on
 // ordinary test traffic. This test overrides the limit back down on its
@@ -29,8 +30,8 @@ public class RateLimitingTests(IntegrationTestWebApplicationFactory factory)
             {
                 services.Configure<AuthRateLimitOptions>(o =>
                 {
-                    o.AuthPermitLimit = limit;
-                    o.AuthWindowSeconds = 60;
+                    o.PermitLimit = limit;
+                    o.WindowSeconds = 60;
                 });
             });
         }).CreateClient();
@@ -64,8 +65,8 @@ public class RateLimitingTests(IntegrationTestWebApplicationFactory factory)
             {
                 services.Configure<AuthRateLimitOptions>(o =>
                 {
-                    o.AuthPermitLimit = limit;
-                    o.AuthWindowSeconds = 60;
+                    o.PermitLimit = limit;
+                    o.WindowSeconds = 60;
                 });
             });
         }).CreateClient();
@@ -98,7 +99,7 @@ public class RateLimitingTests(IntegrationTestWebApplicationFactory factory)
         // still costs a cross-module availability call and a pricing load.
         //
         // Same shape as the auth test above: the shared factory runs with a
-        // very high ReadPermitLimit so ordinary test traffic never trips it,
+        // very high reads limit so ordinary test traffic never trips it,
         // and this client overrides it back down to prove the policy is
         // actually attached rather than merely defined.
         const int limit = 3;
@@ -109,8 +110,8 @@ public class RateLimitingTests(IntegrationTestWebApplicationFactory factory)
             {
                 services.Configure<ReadRateLimitOptions>(o =>
                 {
-                    o.ReadPermitLimit = limit;
-                    o.ReadWindowSeconds = 60;
+                    o.PermitLimit = limit;
+                    o.WindowSeconds = 60;
                 });
             });
         }).CreateClient();
@@ -140,8 +141,8 @@ public class RateLimitingTests(IntegrationTestWebApplicationFactory factory)
             {
                 services.Configure<ReadRateLimitOptions>(o =>
                 {
-                    o.ReadPermitLimit = limit;
-                    o.ReadWindowSeconds = 60;
+                    o.PermitLimit = limit;
+                    o.WindowSeconds = 60;
                 });
             });
         }).CreateClient();

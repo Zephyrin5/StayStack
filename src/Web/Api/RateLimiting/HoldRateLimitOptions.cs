@@ -1,12 +1,21 @@
 using System.ComponentModel.DataAnnotations;
 namespace Api.RateLimiting;
 
+/// <summary>
+///     The "holds" policy: HoldAvailabilityEndpoint, anonymous and a real
+///     database write. Bounds how many holds a caller can fire; what bounds
+///     the inventory they can hold at once is HoldCapOptions, not this. See
+///     docs/adr/0016.
+/// </summary>
 public class HoldRateLimitOptions
 {
-    public const string SectionName = AuthRateLimitOptions.SectionName;
+    // Its own section - see AuthRateLimitOptions.SectionName for why the
+    // three policies no longer share one.
+    public const string SectionName = "RateLimiting:Holds";
 
     [Range(1, int.MaxValue)]
-    public int HoldPermitLimit { get; set; } = 20;
+    public int PermitLimit { get; set; } = 20;
+
     [Range(1, int.MaxValue)]
-    public int HoldWindowSeconds { get; set; } = 60;
+    public int WindowSeconds { get; set; } = 60;
 }
