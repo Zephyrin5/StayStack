@@ -7,9 +7,10 @@ using Transactions.Entities;
 using Transactions.Serialization;
 namespace Transactions.Outbox;
 
-public class TransactionsOutboxDispatcher(
+public partial class TransactionsOutboxDispatcher(
     AppTransactionsDbContext dbContext,
     IBookingPaymentConfirmation bookingPaymentConfirmation,
+    IBookingLookup bookingLookup,
     TimeProvider timeProvider,
     ILogger<TransactionsOutboxDispatcher> logger)
     : OutboxDispatcherBase<AppTransactionsDbContext>(dbContext, timeProvider, logger)
@@ -74,11 +75,47 @@ public class TransactionsOutboxDispatcher(
         }
 
         ConfirmBookingPaymentOutboxMessage payload = DeserializeConfirmBookingPayment(message);
+
+        // Ask the booking what actually happened before refunding anything.
+        //
+        // This used to look only at the transaction: still Succeeded meant
+        // refund. But every failed attempt on the way here ran
+        // ConfirmPaymentAsync, and the reason a message exhausts its retries
+        // is not necessarily that the work failed - a confirmation that
+        // commits and then loses its acknowledgement fails identically from
+        // out here, and re-running it just confirms an already-Confirmed
+        // booking again. Refunding on that evidence takes a stay away from a
+        // guest who paid for it and keeps it, since the booking stays
+        // Confirmed while the money goes back.
+        //
+        // Same principle as ConfirmBookingHandler's own catch: ask the
+        // database what committed, never infer it from how the call ended.
+        BookingAccessResult? booking = await bookingLookup.GetBookingDetailsAsync(payload.BookingId, cancellationToken);
+
+        if (booking is { IsConfirmed: true })
+        {
+            // The confirmation landed after all. There is nothing to
+            // compensate, and the message has done its job - resolve it
+            // rather than leaving it dead-lettered for a sweep to retry
+            // forever.
+            LogConfirmationAlreadyLanded(logger, payload.BookingId, payload.TransactionId);
+
+            message.ProcessedAt = message.DeadLetteredAt;
+            message.DeadLetteredAt = null;
+            return;
+        }
+
+        // Not confirmed, or gone entirely: the payment bought nothing, which
+        // is the case this compensation was written for.
         await MarkRefundPendingIfStillSucceededAsync(payload.TransactionId, cancellationToken);
 
         message.ProcessedAt = message.DeadLetteredAt;
         message.DeadLetteredAt = null;
     }
+
+    [LoggerMessage(LogLevel.Warning,
+        "Confirmation for booking {BookingId} dead-lettered, but the booking is Confirmed - transaction {TransactionId} is left alone rather than refunded. The acknowledgement was lost, not the work")]
+    private static partial void LogConfirmationAlreadyLanded(ILogger logger, Guid bookingId, Guid transactionId);
 
     private static ConfirmBookingPaymentOutboxMessage DeserializeConfirmBookingPayment(OutboxMessage message) =>
         JsonSerializer.Deserialize(message.Payload, TransactionsJsonSerializerContext.Default.ConfirmBookingPaymentOutboxMessage)
