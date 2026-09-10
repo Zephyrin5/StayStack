@@ -1,5 +1,6 @@
 using Bookings.Entities;
 using BuildingBlocks.Identity;
+using BuildingBlocks.Time;
 using BuildingBlocks.Pagination;
 using Catalog.Contracts;
 using Mediator;
@@ -10,7 +11,8 @@ namespace Bookings.Features.GetMyBookings;
 public class GetMyBookingsHandler(
     AppBookingsDbContext dbContext,
     IUnitLookup unitLookup,
-    ICurrentUserProvider currentUserProvider) : IRequestHandler<GetMyBookingsRequest, PagedResponse<BookingSummary>>
+    ICurrentUserProvider currentUserProvider,
+    TimeProvider timeProvider) : IRequestHandler<GetMyBookingsRequest, PagedResponse<BookingSummary>>
 {
     public async ValueTask<PagedResponse<BookingSummary>> Handle(GetMyBookingsRequest request, CancellationToken cancellationToken)
     {
@@ -48,6 +50,11 @@ public class GetMyBookingsHandler(
                     TotalPrice = b.TotalPrice.Amount,
                     Currency = b.TotalPrice.Currency,
                     BookingStatus = b.BookingStatus,
+                    // Resolved per booking in its property's own zone, not
+                    // once for the whole page - a customer's bookings can sit
+                    // in different zones, and "has this stay started" is a
+                    // property-local question (docs/adr/0018).
+                    CanCancel = b.CanBeCancelledOn(PropertyTimeZone.Today(timeProvider, b.TimeZoneId)),
                     CreatedAt = b.CreatedAt
                 })
             ],

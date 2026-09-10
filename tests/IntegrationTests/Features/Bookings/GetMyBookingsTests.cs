@@ -1,4 +1,5 @@
 using Bogus;
+using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
 using Bookings.Features.GetMyBookings;
 using BuildingBlocks.Pagination;
@@ -77,9 +78,9 @@ public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
         return signInResult.AccessToken;
     }
 
-    private async Task<Guid> HoldUnitAsync(Guid unitId)
+    private async Task<Guid> HoldUnitAsync(Guid unitId, int daysUntilCheckIn = 0)
     {
-        DateOnly today = CatalogSeeding.Today();
+        DateOnly today = CatalogSeeding.Today().AddDays(daysUntilCheckIn);
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
         {
             UnitId = unitId,
@@ -181,4 +182,55 @@ public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task GetMyBookings_ShouldReportCanCancelFalse_ForAStayThatHasAlreadyStarted()
+    {
+        // The client's bookings list used to derive this itself as "not
+        // cancelled", which is what the server did too until cancellation
+        // became bounded by check-in. The guest-checkout view corrected
+        // itself then, because it reads the flag from the API; this list
+        // went on offering a Cancel button that answers 409. Sending the
+        // flag is what stops the two implementations diverging again.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        string accessToken = await SeedSignedInCustomerAsync();
+        Guid holdId = await HoldUnitAsync(unit.Id);
+        await ConfirmBookingAsAsync(holdId, accessToken);
+
+        // Act
+        HttpResponseMessage response = await GetMyBookingsAsync(accessToken);
+
+        // Assert
+        PagedResponse<BookingSummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<BookingSummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        BookingSummary booking = Assert.Single(result.Items);
+
+        // The stay starts today, so it is past the point of cancelling.
+        Assert.False(booking.CanCancel);
+        Assert.NotEqual(BookingStatus.Cancelled, booking.BookingStatus);
+    }
+
+    [Fact]
+    public async Task GetMyBookings_ShouldReportCanCancelTrue_ForAStayStillAhead()
+    {
+        // The other side, so the flag cannot be satisfied by always being
+        // false - which would hide the button from everyone.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        string accessToken = await SeedSignedInCustomerAsync();
+        Guid holdId = await HoldUnitAsync(unit.Id, daysUntilCheckIn: 7);
+        await ConfirmBookingAsAsync(holdId, accessToken);
+
+        // Act
+        HttpResponseMessage response = await GetMyBookingsAsync(accessToken);
+
+        // Assert
+        PagedResponse<BookingSummary>? result = await response.Content.ReadFromJsonAsync<PagedResponse<BookingSummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        BookingSummary booking = Assert.Single(result.Items);
+
+        Assert.True(booking.CanCancel);
+    }
+
 }
