@@ -68,8 +68,13 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
 
         // Same materialize-first-map-after constraint, and same left-join
         // reasoning, as GetUnitAsync above.
+        // IgnoreQueryFilters: every caller is decorating bookings that have
+        // already happened, and a stay does not stop having taken place in a
+        // unit because the host has since archived it. With the filter on,
+        // those rows silently dropped out and the booking rendered with a
+        // blank name.
         var rows = await (
-            from unit in dbContext.Units.AsNoTracking()
+            from unit in dbContext.Units.AsNoTracking().IgnoreQueryFilters()
             where ids.Contains(unit.Id)
             join property in dbContext.Properties.AsNoTracking() on unit.PropertyId equals property.Id into properties
             from property in properties.DefaultIfEmpty()
@@ -107,10 +112,59 @@ internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
 
     public async Task<IReadOnlyList<Guid>> GetUnitIdsForHostAsync(Guid hostId, CancellationToken cancellationToken)
     {
-        return await dbContext.Units.AsNoTracking()
-            .Where(u => dbContext.Properties.Where(p => p.HostId == hostId).Select(p => p.Id).Contains(u.PropertyId))
+        // IgnoreQueryFilters, on both the units and the properties they are
+        // matched against. This answers "which units has this host ever had",
+        // and its callers use it to find that host's bookings - so with the
+        // soft-delete filter on, archiving a unit retroactively removed its
+        // completed bookings from the host's own list. The bookings still
+        // happened and the money still moved; only the listing forgot.
+        return await dbContext.Units.AsNoTracking().IgnoreQueryFilters()
+            .Where(u => dbContext.Properties.IgnoreQueryFilters()
+                .Where(p => p.HostId == hostId).Select(p => p.Id).Contains(u.PropertyId))
             .Select(u => u.Id)
             .ToListAsync(cancellationToken);
+    }
+
+    public async Task<UnitSummary?> GetUnitIncludingArchivedAsync(Guid unitId, CancellationToken cancellationToken)
+    {
+        // The same query as GetUnitAsync with the soft-delete filter lifted.
+        // Kept as a separate method rather than a flag on that one so each
+        // call site says which question it is asking: "can this be sold" or
+        // "what was this".
+        var row = await (
+            from unit in dbContext.Units.AsNoTracking().IgnoreQueryFilters()
+            where unit.Id == unitId
+            join property in dbContext.Properties.AsNoTracking().IgnoreQueryFilters() on unit.PropertyId equals property.Id into properties
+            from property in properties.DefaultIfEmpty()
+            select new
+            {
+                unit,
+                HostId = (Guid?)(property != null ? property.HostId : null),
+                TimeZoneId = property != null ? property.TimeZoneId : null
+            }
+        ).SingleOrDefaultAsync(cancellationToken);
+
+        if (row is null)
+        {
+            return null;
+        }
+
+        if (row.HostId is null || row.TimeZoneId is null)
+        {
+            throw new OrphanedUnitException(row.unit.Id, row.unit.PropertyId);
+        }
+
+        return new UnitSummary
+        {
+            Id = row.unit.Id,
+            Name = new Dictionary<string, string>(row.unit.Name.Values),
+            MaxOccupancy = row.unit.MaxOccupancy,
+            BasePrice = row.unit.BasePrice,
+            PropertyId = row.unit.PropertyId,
+            HostId = row.HostId.Value,
+            TimeZoneId = row.TimeZoneId,
+            CancellationPolicy = row.unit.CancellationPolicy
+        };
     }
 
     public async Task<StayPricingResult?> ResolveStayPricingAsync(

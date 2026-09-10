@@ -181,6 +181,9 @@ public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory f
         public Task<IReadOnlyList<Guid>> GetUnitIdsForHostAsync(Guid hostId, CancellationToken cancellationToken) =>
             inner.GetUnitIdsForHostAsync(hostId, cancellationToken);
 
+        public Task<UnitSummary?> GetUnitIncludingArchivedAsync(Guid unitId, CancellationToken cancellationToken) =>
+            inner.GetUnitIncludingArchivedAsync(unitId, cancellationToken);
+
         public Task<StayPricingResult?> ResolveStayPricingAsync(
             Guid unitId, DateOnly checkIn, DateOnly checkOut, CancellationToken cancellationToken) =>
             inner.ResolveStayPricingAsync(unitId, checkIn, checkOut, cancellationToken);

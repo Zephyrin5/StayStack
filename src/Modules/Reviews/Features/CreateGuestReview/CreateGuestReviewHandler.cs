@@ -30,7 +30,7 @@ public class CreateGuestReviewHandler(
         BookingAccessResult booking = await bookingLookup.GetBookingDetailsAsync(request.BookingId, cancellationToken)
                                        ?? throw new NotFoundException("Booking", request.BookingId);
 
-        UnitSummary unit = await unitLookup.GetUnitAsync(booking.UnitId, cancellationToken)
+        UnitSummary unit = await unitLookup.GetUnitIncludingArchivedAsync(booking.UnitId, cancellationToken)
                             ?? throw new NotFoundException("Unit", booking.UnitId);
 
         // Not found, not forbidden, for a unit belonging to another host -

@@ -66,6 +66,11 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
         public Task<IReadOnlyDictionary<Guid, UnitSummary>> GetUnitsAsync(IEnumerable<Guid> unitIds, CancellationToken cancellationToken) =>
             inner.GetUnitsAsync(unitIds, cancellationToken);
 
+
+        public Task<UnitSummary?> GetUnitIncludingArchivedAsync(Guid unitId, CancellationToken cancellationToken) =>
+
+            inner.GetUnitIncludingArchivedAsync(unitId, cancellationToken);
+
         public Task<IReadOnlyList<Guid>> GetUnitIdsForHostAsync(Guid hostId, CancellationToken cancellationToken) =>
             inner.GetUnitIdsForHostAsync(hostId, cancellationToken);
 

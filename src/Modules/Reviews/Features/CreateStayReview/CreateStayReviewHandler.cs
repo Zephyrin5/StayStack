@@ -68,7 +68,7 @@ public class CreateStayReviewHandler(
             throw new StayAlreadyReviewedException(request.BookingId);
         }
 
-        UnitSummary unit = await unitLookup.GetUnitAsync(access.UnitId, cancellationToken)
+        UnitSummary unit = await unitLookup.GetUnitIncludingArchivedAsync(access.UnitId, cancellationToken)
                             ?? throw new NotFoundException("Unit", access.UnitId);
 
         StayReview review = StayReview.Create(

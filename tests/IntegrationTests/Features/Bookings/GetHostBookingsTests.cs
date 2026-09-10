@@ -3,6 +3,8 @@ using Bookings.Features.ConfirmBooking;
 using Bookings.Features.GetHostBookings;
 using BuildingBlocks.Pagination;
 using Availability.Features.HoldAvailability;
+using Catalog;
+using Catalog.Entities;
 using Catalog.Enums;
 using Catalog.Features.CreateProperty;
 using Catalog.Features.CreateUnit;
@@ -10,6 +12,7 @@ using Identity.Entities;
 using Identity.Features.BecomeHost;
 using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Net.Http.Headers;
@@ -253,4 +256,49 @@ public class GetHostBookingsTests(IntegrationTestWebApplicationFactory factory)
         // Assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
+
+    [Fact]
+    public async Task GetHostBookings_ShouldStillReturnABooking_AfterItsUnitHasBeenArchived()
+    {
+        // Archiving a unit is a decision about future bookings. It used to
+        // reach backwards: GetUnitIdsForHostAsync ran through the soft-delete
+        // filter, so the host's own completed bookings vanished from their
+        // list the moment they archived the unit - along with the guest
+        // details and the money attached to them.
+        // Arrange
+        string hostToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostToken);
+        Guid unitId = await CreateUnitAsync(propertyId, hostToken);
+
+        string customerToken = await SeedSignedInCustomerAsync();
+        Guid holdId = await HoldUnitAsync(unitId);
+        (Guid bookingId, _, _) = await ConfirmBookingAsAsync(holdId, customerToken);
+
+        // Archived directly rather than through DeleteUnitHandler: that
+        // handler refuses while a booking is live, which is correct and is
+        // exactly why this state is reached later, once the stay is over.
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            Unit unit = await catalog.Units.SingleAsync(u => u.Id == unitId, TestContext.Current.CancellationToken);
+            unit.Archive(DateTimeOffset.UtcNow, null);
+            await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        // Act
+        HttpResponseMessage response = await GetHostBookingsAsync(hostToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        PagedResponse<HostBookingSummary>? result =
+            await response.Content.ReadFromJsonAsync<PagedResponse<HostBookingSummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+
+        HostBookingSummary booking = Assert.Single(result.Items, b => b.BookingId == bookingId);
+
+        // And still named: the batch lookup that decorates these rows has to
+        // see archived units too, or the booking renders blank.
+        Assert.Equal("Standard Room", booking.UnitName["en"]);
+    }
+
 }
