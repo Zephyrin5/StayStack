@@ -4,7 +4,7 @@ using Bookings.Entities;
 using Bookings.Features.CancelBooking;
 using Bookings.Features.ConfirmBooking;
 using BuildingBlocks.Security;
-using Availability.Features.HoldAvailability;
+using Bookings.Features.HoldAvailability;
 using Catalog;
 using Catalog.Entities;
 using Identity.Entities;

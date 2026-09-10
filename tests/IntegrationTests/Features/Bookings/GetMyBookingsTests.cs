@@ -3,7 +3,7 @@ using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
 using Bookings.Features.GetMyBookings;
 using BuildingBlocks.Pagination;
-using Availability.Features.HoldAvailability;
+using Bookings.Features.HoldAvailability;
 using Catalog;
 using Catalog.Entities;
 using Identity.Entities;

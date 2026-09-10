@@ -1,4 +1,4 @@
-using Availability.Contracts;
+using Bookings.Contracts;
 using Bookings.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -103,7 +103,7 @@ public partial class ReconcileOrphanedBookingIntentsJob(
     ///         Precisely: <b>the claim and the delete commit together; the
     ///         cross-module work is idempotent and may repeat.</b> It is not
     ///         all three atomically - ReleaseHoldAsync runs on
-    ///         AppAvailabilityDbContext and ReverseRedemptionAsync on
+    ///         AppBookingsDbContext and ReverseRedemptionAsync on
     ///         AppPromotionsDbContext, separate connections committing
     ///         independently. A rollback anywhere just means the next run
     ///         repeats both calls, which their contracts allow.

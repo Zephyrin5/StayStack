@@ -1,4 +1,4 @@
-using Availability.Contracts;
+using Bookings.Contracts;
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Features.ConfirmBooking;

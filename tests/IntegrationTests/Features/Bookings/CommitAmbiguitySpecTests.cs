@@ -1,6 +1,6 @@
-using Availability;
-using Availability.Contracts;
-using Availability.Entities;
+using Bookings;
+using Bookings.Contracts;
+using Bookings.Entities;
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;
@@ -8,7 +8,7 @@ using Bookings.Features.ConfirmBooking;
 using Bookings.Jobs;
 using Catalog;
 using Catalog.Entities;
-using Availability.Features.HoldAvailability;
+using Bookings.Features.HoldAvailability;
 using Identity.Entities;
 using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Hosting;
@@ -184,7 +184,7 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
         // reach that hold. Either the transition did not stick, or something
         // durable points at it.
         using IServiceScope scope = factory.Services.CreateScope();
-        AppAvailabilityDbContext availability = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        AppBookingsDbContext availability = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
         AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
 
         UnitAvailabilityHold hold = await availability.UnitAvailabilityHolds.AsNoTracking()
@@ -235,7 +235,7 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
 
         using (IServiceScope seedScope = factory.Services.CreateScope())
         {
-            AppAvailabilityDbContext availability = seedScope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+            AppBookingsDbContext availability = seedScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
             availability.UnitAvailabilityHolds.Add(new UnitAvailabilityHold
             {
                 Id = holdId,
@@ -275,7 +275,7 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
 
         // Assert
         using IServiceScope assertScope = factory.Services.CreateScope();
-        string holdStatus = (await assertScope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>()
+        string holdStatus = (await assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
             .UnitAvailabilityHolds.AsNoTracking()
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken)).Status;
         BookingStatus bookingStatus = (await assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
@@ -355,7 +355,10 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
             await arrangeDb.Database.ExecuteSqlRawAsync(
                 """
                 UPDATE "transactions_outbox_messages"
-                SET attempts = 9, next_attempt_at = now()
+                -- An hour in the past, not now(): the dispatcher compares
+                -- against its own TimeProvider, and "exactly now" by
+                -- Postgres' clock is not reliably <= "now" by the app's.
+                SET attempts = 9, next_attempt_at = now() - interval '1 hour'
                 WHERE type = 'ConfirmBookingPaymentOutboxMessage'
                   AND processed_at IS NULL AND dead_lettered_at IS NULL
                 """,

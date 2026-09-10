@@ -1,6 +1,6 @@
-using Availability;
-using Availability.Contracts;
-using Availability.Entities;
+using Bookings;
+using Bookings.Contracts;
+using Bookings.Entities;
 using Catalog;
 using Catalog.Contracts;
 using Catalog.Entities;
@@ -36,7 +36,7 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
     private async Task SeedHoldAsync(UnitAvailabilityHold hold)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
         context.Add(hold);
         await context.SaveChangesAsync();
     }

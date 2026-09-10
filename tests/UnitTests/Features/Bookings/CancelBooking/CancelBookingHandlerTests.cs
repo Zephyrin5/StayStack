@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Options;
-using Availability.Contracts;
+using Bookings.Contracts;
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.CancelBooking;

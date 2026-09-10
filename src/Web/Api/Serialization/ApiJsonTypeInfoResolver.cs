@@ -1,4 +1,4 @@
-using Availability.Serialization;
+using Bookings.Serialization;
 using Bookings.Serialization;
 using Catalog.Serialization;
 using Hosts.Serialization;
@@ -28,7 +28,7 @@ public static class ApiJsonTypeInfoResolver
         CatalogJsonSerializerContext.Default,
         HostsJsonSerializerContext.Default,
         PromotionsJsonSerializerContext.Default,
-        AvailabilityJsonSerializerContext.Default,
+        BookingsJsonSerializerContext.Default,
         BookingsJsonSerializerContext.Default,
         ReviewsJsonSerializerContext.Default,
         TransactionsJsonSerializerContext.Default,

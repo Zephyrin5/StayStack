@@ -1,5 +1,5 @@
-using Availability;
-using Availability.Entities;
+using Bookings;
+using Bookings.Entities;
 using Dapper;
 using Bookings;
 using Bookings.Contracts;
@@ -16,7 +16,7 @@ using Microsoft.Extensions.Time.Testing;
 using NpgsqlTypes;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
-using Availability.Contracts;
+using Bookings.Contracts;
 using Promotions.Contracts;
 namespace IntegrationTests.Features.Bookings;
 
@@ -57,7 +57,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
     private async Task<Guid> SeedHoldAsync(Guid unitId, DateOnly checkIn, DateOnly checkOut, string status)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
 
         UnitAvailabilityHold hold = new UnitAvailabilityHold
         {
@@ -114,7 +114,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
     private async Task<string> GetHoldStatusAsync(Guid holdId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
         UnitAvailabilityHold hold = await context.UnitAvailabilityHolds.AsNoTracking()
             .SingleAsync(h => h.Id == holdId);
         return hold.Status;

@@ -1,4 +1,4 @@
-using Availability.Contracts;
+using Bookings.Contracts;
 using Bookings.Entities;
 using BuildingBlocks.Exceptions;
 using Dapper;

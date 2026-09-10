@@ -2,7 +2,7 @@ using Bogus;
 using Bookings.Features.ConfirmBooking;
 using Bookings.Features.GetHostBookings;
 using BuildingBlocks.Pagination;
-using Availability.Features.HoldAvailability;
+using Bookings.Features.HoldAvailability;
 using Catalog;
 using Catalog.Entities;
 using Catalog.Enums;

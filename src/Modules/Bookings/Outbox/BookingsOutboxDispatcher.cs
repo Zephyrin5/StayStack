@@ -1,4 +1,4 @@
-using Availability.Contracts;
+using Bookings.Contracts;
 using Bookings.Serialization;
 using Microsoft.Extensions.Logging;
 using Outbox;

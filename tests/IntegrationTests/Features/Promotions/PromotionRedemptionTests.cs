@@ -1,9 +1,9 @@
 using Bogus;
 using Bookings.Features.CancelBooking;
 using Bookings.Features.ConfirmBooking;
-using Availability.Features.HoldAvailability;
-using Availability;
-using Availability.Entities;
+using Bookings.Features.HoldAvailability;
+using Bookings;
+using Bookings.Entities;
 using Catalog.Enums;
 using Catalog.Features.CreatePricingRule;
 using Catalog.Features.CreateProperty;
@@ -196,8 +196,8 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         // hold_expires_at to now, which is what makes the row collectable.
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppAvailabilityDbContext availability =
-                scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+            AppBookingsDbContext availability =
+                scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
             UnitAvailabilityHold hold = await availability.UnitAvailabilityHolds
                 .AsNoTracking()
                 .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);

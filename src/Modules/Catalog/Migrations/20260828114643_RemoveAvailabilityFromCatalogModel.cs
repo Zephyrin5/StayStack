@@ -8,7 +8,7 @@ namespace Catalog.Migrations
     public partial class RemoveAvailabilityFromCatalogModel : Migration
     {
         // Deliberately empty: UnitAvailabilityHold moved to the new
-        // Availability module's own AppAvailabilityDbContext, not away from
+        // Availability module's own AppBookingsDbContext, not away from
         // the database - the physical table (unit_availability_holds, its
         // indexes, and its GIST exclusion constraint) stays exactly where
         // it is, since every module shares one Postgres schema (no

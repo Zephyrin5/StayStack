@@ -1,6 +1,6 @@
-using Availability;
-using Availability.Entities;
-using Availability.Features.HoldAvailability;
+using Bookings;
+using Bookings.Entities;
+using Bookings.Features.HoldAvailability;
 using Bogus;
 using Bookings;
 using Bookings.Entities;
@@ -63,7 +63,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
     private async Task SeedAvailabilityAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
         context.AddRange(entities);
         await context.SaveChangesAsync();
     }
@@ -125,7 +125,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal("jane@example.com", booking.GuestEmail);
         Assert.Equal(2, booking.GuestCount); // from the hold, not re-collected at confirm time
 
-        AppAvailabilityDbContext availabilityDb = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        AppBookingsDbContext availabilityDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
         UnitAvailabilityHold persistedHold = await availabilityDb.UnitAvailabilityHolds
             .AsNoTracking()
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);

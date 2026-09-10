@@ -1,4 +1,4 @@
-using Availability.Entities;
+using Bookings.Entities;
 using System.Net;
 using System.Net.Sockets;
 namespace Api.Security;

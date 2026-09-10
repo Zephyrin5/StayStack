@@ -1,5 +1,5 @@
 using Api.RateLimiting;
-using Availability.Features.HoldAvailability;
+using Bookings.Features.HoldAvailability;
 using Bookings.Contracts;
 using BuildingBlocks.Localization;
 using Identity.Configurations;

@@ -1,5 +1,5 @@
-using Availability;
-using Availability.Entities;
+using Bookings;
+using Bookings.Entities;
 using Bookings;
 using Bookings.Jobs;
 using Bookings.Outbox;
@@ -40,7 +40,7 @@ public class OutboxRelayJobTests(IntegrationTestWebApplicationFactory factory)
     private async Task SeedHoldAsync(UnitAvailabilityHold hold)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
         context.Add(hold);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
     }
@@ -48,7 +48,7 @@ public class OutboxRelayJobTests(IntegrationTestWebApplicationFactory factory)
     private async Task<string> GetHoldStatusAsync(Guid holdId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
         UnitAvailabilityHold hold = await context.UnitAvailabilityHolds.AsNoTracking()
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
         return hold.Status;

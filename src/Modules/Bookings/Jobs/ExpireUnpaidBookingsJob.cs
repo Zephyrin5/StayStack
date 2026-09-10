@@ -1,4 +1,4 @@
-using Availability.Contracts;
+using Bookings.Contracts;
 using Bookings.Entities;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
@@ -112,7 +112,7 @@ public partial class ExpireUnpaidBookingsJob(
     ///         Precisely the same guarantee as that job, and the same limit
     ///         on it: <b>the re-read and the cancellation commit together;
     ///         the cross-module calls are idempotent and may repeat.</b>
-    ///         ReleaseHoldAsync runs on AppAvailabilityDbContext and
+    ///         ReleaseHoldAsync runs on AppBookingsDbContext and
     ///         ReverseRedemptionAsync on AppPromotionsDbContext, so a
     ///         rollback here just means the next run repeats them, which
     ///         their contracts allow.

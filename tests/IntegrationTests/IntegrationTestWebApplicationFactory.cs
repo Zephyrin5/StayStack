@@ -1,4 +1,4 @@
-using Availability;
+using Bookings;
 using Bookings;
 using Catalog;
 using Hosts;
@@ -90,7 +90,10 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
         await MigrateAsync<AppCatalogDbContext>("catalog");
         await MigrateAsync<AppHostsDbContext>("hosts");
         await MigrateAsync<AppPromotionsDbContext>("promotions");
-        await MigrateAsync<AppAvailabilityDbContext>("availability");
+        // No "availability" line any more: that module merged into Bookings,
+        // and its migrations went with it. Running the Bookings set a second
+        // time into Availability's old history table would re-apply every one
+        // of them against a schema that already has them.
         await MigrateAsync<AppBookingsDbContext>("bookings");
         await MigrateAsync<AppTransactionsDbContext>("transactions");
         await MigrateAsync<AppReviewsDbContext>("reviews");
@@ -173,8 +176,8 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             services.AddDbContext<AppPromotionsDbContext>(options =>
                 options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "promotions", false));
 
-            services.RemoveAll<DbContextOptions<AppAvailabilityDbContext>>();
-            services.AddDbContext<AppAvailabilityDbContext>(options =>
+            services.RemoveAll<DbContextOptions<AppBookingsDbContext>>();
+            services.AddDbContext<AppBookingsDbContext>(options =>
                 options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "availability", false));
 
             services.RemoveAll<DbContextOptions<AppBookingsDbContext>>();

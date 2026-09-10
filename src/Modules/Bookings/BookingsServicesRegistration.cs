@@ -1,4 +1,6 @@
 using Bookings.Contracts;
+using BuildingBlocks.Configuration;
+using Bookings.Features.HoldAvailability;
 using Bookings.Outbox;
 using Catalog.Contracts;
 using Microsoft.AspNetCore.Hosting;
@@ -48,6 +50,26 @@ public static class BookingsServicesRegistration
         // see IUnitArchivalGuard's own doc comment for why the interface
         // lives on the Catalog side of this relationship.
         services.AddScoped<IUnitArchivalGuard, UnitArchivalGuard>();
+
+        // Folded in from the deleted AvailabilityServicesRegistration.
+        //
+        // IUnitAvailabilityLookup stays a Catalog contract implemented here,
+        // which is the inverted-interface pattern docs/adr/0004 already
+        // established for IUnitArchivalGuard just above: Catalog genuinely
+        // needs availability for search and the price calendar, and Catalog
+        // is upstream, so it declares and this module implements. No cycle -
+        // contracts projects are separate assemblies, so Catalog.Contracts
+        // being referenced by Bookings coexists with Bookings.Contracts being
+        // referenced by Catalog.
+        //
+        // IHoldConfirmation is no longer a cross-module contract at all; it
+        // is internal to this module now that both halves live here.
+        services.AddOptions<HoldCapOptions>()
+            .Bind(configuration.AppSection(HoldCapOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddScoped<IHoldConfirmation, HoldConfirmation>();
+        services.AddScoped<IUnitAvailabilityLookup, UnitAvailabilityLookup>();
 
         return services;
     }

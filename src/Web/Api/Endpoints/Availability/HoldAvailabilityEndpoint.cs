@@ -1,11 +1,15 @@
 using Api.Security;
-using Availability.Features.HoldAvailability;
+using Bookings.Features.HoldAvailability;
 using FastEndpoints;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 namespace Api.Endpoints.Availability;
 
+// Still under Endpoints/Availability, and still on /api/availability/holds,
+// though the module behind it merged into Bookings. This folder mirrors the
+// public API surface rather than the module layout, and the merge is an
+// internal reorganisation that clients should not be able to observe.
 public class HoldAvailabilityEndpoint(IMediator mediator)
     : Endpoint<HoldAvailabilityRequest, HoldAvailabilityResponse>
 {

@@ -1,7 +1,7 @@
-using Availability;
-using Availability.Contracts;
-using Availability.Entities;
-using Availability.Features.HoldAvailability;
+using Bookings;
+using Bookings.Contracts;
+using Bookings.Entities;
+using Bookings.Features.HoldAvailability;
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
@@ -142,7 +142,7 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
     private async Task<string> GetHoldStatusAsync(Guid holdId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppAvailabilityDbContext context = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
         UnitAvailabilityHold hold = await context.UnitAvailabilityHolds.AsNoTracking()
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
         return hold.Status;
@@ -222,7 +222,7 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppAvailabilityDbContext availabilityDb = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+            AppBookingsDbContext availabilityDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
             UnitAvailabilityHold hold = await availabilityDb.UnitAvailabilityHolds
                 .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
             hold.Status = "booked";
@@ -257,7 +257,7 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppAvailabilityDbContext availabilityDb = scope.ServiceProvider.GetRequiredService<AppAvailabilityDbContext>();
+            AppBookingsDbContext availabilityDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
             UnitAvailabilityHold hold = await availabilityDb.UnitAvailabilityHolds
                 .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
             hold.Status = "booked";
