@@ -53,6 +53,51 @@ public class ConfirmBookingHandler(
             dbContext.Entry(intent).State = EntityState.Detached;
         }
 
+        // The compensating procedure, written once. All three failure paths
+        // below run exactly this - enqueue, save, dispatch, discard - and the
+        // ordering within it took several passes to get right, which is
+        // precisely why having it spelled out three times was a liability: a
+        // future edit to one copy diverges from the other two silently, and
+        // every copy reads as deliberate because each is internally
+        // consistent.
+        //
+        // The order is the whole content of this function:
+        //
+        //  - Enqueue then save, so the compensations are durable rows before
+        //    anything acts on them (docs/adr/0003). Dispatching is a best
+        //    effort on top; OutboxRelayJob delivers whatever this misses.
+        //  - Save before DiscardIntentAsync, never after. The intent is the
+        //    marker that says "a confirmation started and did not finish", so
+        //    discarding it first would remove the safety net before the
+        //    replacement was durable. A crash between the two instead leaves
+        //    the intent alive and lets the reconcile job repeat these
+        //    compensations, which are idempotent by construction.
+        //  - DiscardIntentAsync last, which also means its ExecuteDelete is
+        //    registered after the caller's ChangeTracker.Clear() where there
+        //    is one, and its detach runs after the delete rather than before.
+        //
+        // reverseRedemption is the only thing that varies between the three
+        // callers, so it is the only parameter.
+        async Task CompensateAsync(bool reverseRedemption)
+        {
+            OutboxMessage releaseHoldRow = dispatcher.Enqueue(
+                new ReleaseHoldOutboxMessage(request.HoldId), BookingsJsonSerializerContext.Default.ReleaseHoldOutboxMessage);
+            OutboxMessage? reverseRedemptionRow = reverseRedemption
+                ? dispatcher.Enqueue(
+                    new ReverseRedemptionOutboxMessage(bookingId), BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage)
+                : null;
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            await dispatcher.TryDispatchAsync(releaseHoldRow, cancellationToken);
+            if (reverseRedemptionRow is not null)
+            {
+                await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
+            }
+
+            await DiscardIntentAsync();
+        }
+
         ConfirmedHold hold;
 
         try
@@ -110,20 +155,11 @@ public class ConfirmBookingHandler(
                 // re-hold, the correct cost for a code that was never
                 // valid. Enqueued via the outbox (docs/adr/0003), not a
                 // direct call that could be silently lost.
-                OutboxMessage releaseHoldRow = dispatcher.Enqueue(
-                    new ReleaseHoldOutboxMessage(request.HoldId), BookingsJsonSerializerContext.Default.ReleaseHoldOutboxMessage);
-                OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
-                    new ReverseRedemptionOutboxMessage(bookingId), BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
-
-                await dbContext.SaveChangesAsync(cancellationToken);
-                await dispatcher.TryDispatchAsync(releaseHoldRow, cancellationToken);
-                await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
-
-                // After the compensating save, deliberately - see
-                // DiscardIntentAsync's own comment. A crash between the two
-                // leaves the intent alive and the job repeats these
-                // (idempotent) compensations, which is safe.
-                await DiscardIntentAsync();
+                // Reversed even though RedeemAsync threw and may never have
+                // created a redemption to reverse: ReverseRedemptionAsync is
+                // a no-op when there is nothing outstanding, and guessing
+                // wrong the other way would leave a single-use code burned.
+                await CompensateAsync(reverseRedemption: true);
 
                 if (redemptionException is PromotionInvalidException promotionInvalidException)
                 {
@@ -192,22 +228,10 @@ public class ConfirmBookingHandler(
             // rather than a domain guard's.
             if (discountedPrice.Amount <= 0m || discountedPrice.Amount >= hold.TotalPrice.Amount)
             {
-                OutboxMessage releaseHoldRow = dispatcher.Enqueue(
-                    new ReleaseHoldOutboxMessage(request.HoldId), BookingsJsonSerializerContext.Default.ReleaseHoldOutboxMessage);
-                OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
-                    new ReverseRedemptionOutboxMessage(bookingId), BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
-
-                await dbContext.SaveChangesAsync(cancellationToken);
-                await dispatcher.TryDispatchAsync(releaseHoldRow, cancellationToken);
-                await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
-
-                // After the compensating save, deliberately - same ordering
-                // and same reasoning as the branch above: a crash between the
-                // two leaves the intent alive and the job repeats these
-                // (idempotent) compensations, which is safe. Discarding first
-                // would remove the marker before the compensations were
-                // durable.
-                await DiscardIntentAsync();
+                // The redemption succeeded here, so it definitely needs
+                // reversing - the code was consumed by a booking that is
+                // about to be refused.
+                await CompensateAsync(reverseRedemption: true);
 
                 throw new ValidationException(
                     nameof(request.PromoCode),
@@ -346,22 +370,9 @@ public class ConfirmBookingHandler(
             // (docs/adr/0003): revert the hold to 'held' and give back the
             // redeemed code (if any), so neither is left permanently
             // consumed by a Booking that was never created.
-            OutboxMessage releaseHoldRow = dispatcher.Enqueue(
-                new ReleaseHoldOutboxMessage(request.HoldId), BookingsJsonSerializerContext.Default.ReleaseHoldOutboxMessage);
-            OutboxMessage? reverseRedemptionRow = redeemedDiscountAmount is not null
-                ? dispatcher.Enqueue(
-                    new ReverseRedemptionOutboxMessage(bookingId), BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage)
-                : null;
-
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            await dispatcher.TryDispatchAsync(releaseHoldRow, cancellationToken);
-            if (reverseRedemptionRow is not null)
-            {
-                await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
-            }
-
-            await DiscardIntentAsync();
+            // Only if a code was actually redeemed - unlike the two branches
+            // above, this path is reached whether or not one was.
+            await CompensateAsync(reverseRedemption: redeemedDiscountAmount is not null);
 
             // The original failure, preserved - now that compensating is a
             // durable local write rather than two independent cross-module
