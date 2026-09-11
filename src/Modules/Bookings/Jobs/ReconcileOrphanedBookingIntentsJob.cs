@@ -1,9 +1,11 @@
 using Bookings.Contracts;
+using Outbox;
+using Bookings.Serialization;
+using Bookings.Outbox;
 using Bookings.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
-using Promotions.Contracts;
 using TickerQ.Utilities.Base;
 namespace Bookings.Jobs;
 
@@ -32,7 +34,7 @@ namespace Bookings.Jobs;
 public partial class ReconcileOrphanedBookingIntentsJob(
     AppBookingsDbContext dbContext,
     IHoldConfirmation holdConfirmation,
-    IPromotionRedemption promotionRedemption,
+    BookingsOutboxDispatcher dispatcher,
     TimeProvider timeProvider,
     ILogger<ReconcileOrphanedBookingIntentsJob> logger)
 {
@@ -124,7 +126,7 @@ public partial class ReconcileOrphanedBookingIntentsJob(
         // whole delegate is safe for the same reason a repeat run is.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
-        bool reconciled = await strategy.ExecuteAsync(async () =>
+        OutboxMessage? reverseRedemptionRow = await strategy.ExecuteAsync(async () =>
         {
             dbContext.ChangeTracker.Clear();
 
@@ -146,12 +148,40 @@ public partial class ReconcileOrphanedBookingIntentsJob(
             if (intent is null)
             {
                 // Locked by a concurrent run, or the request that owns it
-                // finished between the scan above and this claim.
-                return false;
+                // finished between the scan above and this claim. Null stands
+                // for "claimed nothing", which is also why the caller checks
+                // the row rather than a bool.
+                return null;
             }
 
+            // In-transaction: the hold lives in this module's own DbContext
+            // since the merge, so releasing it rolls back with everything else.
             await holdConfirmation.ReleaseHoldAsync(intent.HoldId, cancellationToken);
-            await promotionRedemption.ReverseRedemptionAsync(intent.Id, cancellationToken);
+
+            // The redemption reversal is NOT called here, and that is the
+            // whole of this job's correctness.
+            //
+            // ReverseRedemptionAsync writes AppPromotionsDbContext on its own
+            // connection, so it autocommits - before the decision that
+            // authorises it. A slow confirmation that has already redeemed and
+            // outlived the grace period gets reconciled: the redemption is
+            // reversed, then this transaction fails, and the rollback puts the
+            // intent and the hold back. The original request then resumes and
+            // succeeds, writing a booking whose discount has already been
+            // clawed back and whose promotion's redemption_count has already
+            // been decremented.
+            //
+            // Idempotency does not help. A second reconciler run is a no-op
+            // against an already-reversed redemption, which is exactly the
+            // protection that fails here: it only holds while nothing else can
+            // succeed in between, and the original request can.
+            //
+            // So it becomes a durable row committed with the decision itself,
+            // dispatched afterwards - the shape ExpireUnpaidBookingsJob and
+            // CancelBookingHandler already use (docs/adr/0003).
+            OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
+                new ReverseRedemptionOutboxMessage(intent.Id),
+                BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
 
             dbContext.PendingBookingIntents.Remove(intent);
 
@@ -173,11 +203,17 @@ public partial class ReconcileOrphanedBookingIntentsJob(
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
-            return true;
+            return reverseRedemptionRow;
         });
 
-        if (reconciled)
+        if (reverseRedemptionRow is not null)
         {
+            // Dispatched after the commit, never inside it: a reversal that
+            // landed and was then rolled back is precisely the stranded
+            // cross-module write this job was rewritten to avoid. The relay
+            // delivers whatever this attempt misses.
+            await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
+
             // Deferred until after the commit - a process-local side effect,
             // not part of the transaction, so firing it inside the retried
             // delegate would double-count one logical reconciliation. Same

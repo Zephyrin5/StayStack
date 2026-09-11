@@ -304,16 +304,19 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task Reconcile_WhenOneIntentThrows_StillProcessesTheRest()
     {
-        // The loop had no per-item guard, and nothing it can throw is
-        // classified transient - so EnableRetryOnFailure would not absorb it
-        // and the exception ended the whole run, abandoning every candidate
-        // behind the failing one. The next run five minutes later meets the
-        // same row first, so one persistently-conflicting intent could starve
-        // the queue indefinitely.
+        // This used to assert a per-item guard around the job's cross-module
+        // call: a registrar throwing for one host ended the whole run,
+        // abandoning every candidate behind it, and the next run five minutes
+        // later met the same row first - so one bad intent could starve the
+        // queue indefinitely.
         //
-        // Driven by a registrar that throws for one specific host id: the
-        // job's only cross-module call, and the realistic place a single row
-        // fails while its neighbours are fine.
+        // The guard is still there, but the call is not. Deleting the Host is
+        // an outbox row now (docs/adr/0025), committed with the unlink and
+        // dispatched after, so a failing registrar cannot fail a reconcile at
+        // all - TryDispatchAsync absorbs it and the relay retries. The
+        // starvation risk is structurally gone rather than caught, and this
+        // asserts the stronger property: BOTH intents resolve locally, even
+        // the one whose host deletion will fail.
         (Guid poisonUserId, _) = await SeedAndSignInUserAsync();
         (Guid healthyUserId, _) = await SeedAndSignInUserAsync();
 
@@ -345,13 +348,20 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
             await job.ReconcileAsync(default!, TestContext.Current.CancellationToken);
         }
 
-        // The failing row is untouched and will be retried next run.
-        Assert.True(await HostExistsAsync(poisonHostId));
-        Assert.True(await IntentExistsAsync(poisonHostId));
-
-        // And the one behind it was still processed, which is the point.
-        Assert.False(await HostExistsAsync(healthyHostId));
+        // Both intents are resolved. The local decision - unlink the user,
+        // delete the intent - no longer depends on a cross-module call
+        // succeeding, which is exactly the coupling that made one row able to
+        // block the others.
+        Assert.False(await IntentExistsAsync(poisonHostId));
         Assert.False(await IntentExistsAsync(healthyHostId));
+
+        // The healthy host is gone, dispatched inline after its commit.
+        Assert.False(await HostExistsAsync(healthyHostId));
+
+        // The poisoned one survives its failed dispatch, and that is now a
+        // durable outbox row's problem rather than a lost write: the relay
+        // will keep trying. Nothing about it held up the row behind it.
+        Assert.True(await HostExistsAsync(poisonHostId));
     }
 
     private async Task SeedAbandonedIntentAsync(Guid userId, Guid hostId)

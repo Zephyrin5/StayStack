@@ -1,5 +1,8 @@
 using Hosts.Contracts;
 using Identity.Entities;
+using Outbox;
+using Identity.Serialization;
+using Identity.Outbox;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
@@ -37,7 +40,7 @@ namespace Identity.Jobs;
 /// </summary>
 public partial class ReconcileOrphanedHostLinkIntentsJob(
     AppIdentityDbContext dbContext,
-    IHostRegistrar hostRegistrar,
+    IdentityOutboxDispatcher dispatcher,
     TimeProvider timeProvider,
     ILogger<ReconcileOrphanedHostLinkIntentsJob> logger)
 {
@@ -107,21 +110,21 @@ public partial class ReconcileOrphanedHostLinkIntentsJob(
     ///         writes on this same AppIdentityDbContext inside one transaction,
     ///         which is what makes half-recovery impossible - a user cannot end
     ///         up unlinked with the intent still present, or the reverse.
-    ///         <c>hostRegistrar.DeleteAsync</c> runs on AppHostsDbContext: a
-    ///         different connection, committing independently and before this
-    ///         transaction does. An earlier version of this note said "the
-    ///         claim and the intent delete", which was written before the
-    ///         unlink existed and omitted the member of that set that matters
-    ///         most.
+    ///         The host deletion is no longer one of them, and no longer
+    ///         races them. <c>IHostRegistrar.DeleteAsync</c> writes
+    ///         AppHostsDbContext on its own connection, so calling it inline
+    ///         committed the deletion before this transaction authorised it -
+    ///         and the defence that "the next run repeats an idempotent
+    ///         delete" only holds while nothing else can succeed in between.
+    ///         The original become-host request can: the rollback restores its
+    ///         intent and its user link, it resumes, and it completes against
+    ///         a Host that has already been deleted.
     ///     </para>
     ///     <para>
-    ///         So the reachable partial state is: Host deleted, Identity
-    ///         transaction rolled back. The next run then repeats the unlink
-    ///         and an idempotent delete against a Host that is already gone,
-    ///         and converges. The reverse ordering - committing Identity first
-    ///         - could unlink and then never delete, leaving an orphan with no
-    ///         intent pointing at it, which is the failure this job exists to
-    ///         remove.
+    ///         It is a <c>DeleteHostOutboxMessage</c> now, committed with the
+    ///         unlink and the intent delete and dispatched afterwards, with
+    ///         the relay as the backstop the "next run" was standing in for.
+    ///         See docs/adr/0025.
     ///     </para>
     ///     <para>
     ///         <c>DeleteAsync</c> can also run more than once for a single
@@ -144,7 +147,7 @@ public partial class ReconcileOrphanedHostLinkIntentsJob(
     {
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
-        bool reconciled = await strategy.ExecuteAsync(async () =>
+        OutboxMessage? deleteHostRow = await strategy.ExecuteAsync(async () =>
         {
             dbContext.ChangeTracker.Clear();
 
@@ -166,7 +169,7 @@ public partial class ReconcileOrphanedHostLinkIntentsJob(
             {
                 // Locked by a concurrent run, or the request that owns it
                 // finished between the scan above and this claim.
-                return false;
+                return null;
             }
 
             // Unlink first, in this same transaction as the intent delete.
@@ -188,21 +191,41 @@ public partial class ReconcileOrphanedHostLinkIntentsJob(
             }
 
             // Intent.Id IS the host id - that is why this needs no
-            // cross-module lookup to find what to clean up. Before the commit
-            // deliberately: if this succeeds and the commit then fails, the
-            // intent survives and the next run repeats an idempotent delete.
-            // The reverse order could unlink and never delete.
-            await hostRegistrar.DeleteAsync(intent.Id, cancellationToken);
+            // cross-module lookup to find what to clean up.
+            //
+            // Enqueued rather than called. DeleteAsync writes
+            // AppHostsDbContext on its own connection, so calling it here
+            // committed the deletion before the transaction that authorises
+            // it. The old note defended that ordering as the lesser evil -
+            // "if this succeeds and the commit then fails, the next run
+            // repeats an idempotent delete" - and the repeat does converge,
+            // but only if nothing else succeeds in between. The original
+            // become-host request can: it resumes after the rollback restores
+            // its intent and its user link, and completes against a Host row
+            // that has already been deleted, leaving an account linked to
+            // nothing.
+            //
+            // A durable row committed with the unlink and the intent delete
+            // removes the window entirely, and the relay is the backstop the
+            // "next run" was standing in for.
+            OutboxMessage deleteHostRow = dispatcher.Enqueue(
+                new DeleteHostOutboxMessage(intent.Id),
+                IdentityJsonSerializerContext.Default.DeleteHostOutboxMessage);
 
             dbContext.PendingHostLinkIntents.Remove(intent);
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
-            return true;
+            return deleteHostRow;
         });
 
-        if (reconciled)
+        if (deleteHostRow is not null)
         {
+            // After the commit, never inside it - a deletion that landed and
+            // was then rolled back is the stranded cross-module write this
+            // rewrite exists to prevent.
+            await dispatcher.TryDispatchAsync(deleteHostRow, cancellationToken);
+
             // Deferred until after the commit - a process-local side effect,
             // so firing it inside the retried delegate would double-count one
             // logical reconciliation.

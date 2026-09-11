@@ -16,6 +16,7 @@ using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Json;
+using Bookings.Outbox;
 namespace IntegrationTests.Features.Bookings;
 
 // The durable-intent redesign (docs/adr/0017). ConfirmHoldAsync commits to
@@ -167,7 +168,7 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
         ReconcileOrphanedBookingIntentsJob job = new ReconcileOrphanedBookingIntentsJob(
             bookingsDb,
             scope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
-            scope.ServiceProvider.GetRequiredService<IPromotionRedemption>(),
+            scope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>(),
             timeProvider,
             scope.ServiceProvider.GetRequiredService<ILogger<ReconcileOrphanedBookingIntentsJob>>());
 
@@ -461,7 +462,7 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
         ReconcileOrphanedBookingIntentsJob job = new ReconcileOrphanedBookingIntentsJob(
             scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
             new UnreachableHoldConfirmation(),
-            scope.ServiceProvider.GetRequiredService<IPromotionRedemption>(),
+            scope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>(),
             timeProvider,
             scope.ServiceProvider.GetRequiredService<ILogger<ReconcileOrphanedBookingIntentsJob>>());
 
