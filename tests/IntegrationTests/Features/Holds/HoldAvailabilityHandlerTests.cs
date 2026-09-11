@@ -1,6 +1,7 @@
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;
+using Bookings.Jobs;
 using Bookings.Exceptions;
 using Bookings.Features.HoldAvailability;
 using BuildingBlocks.Exceptions;
@@ -46,6 +47,74 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         context.AddRange(entities);
         await context.SaveChangesAsync();
     }
+
+    /// <summary>
+    ///     A fixed instant, deliberately a month ahead of the real clock, for
+    ///     the two tests whose <c>'held'</c> rows have to still be there when
+    ///     the assertion runs.
+    ///     <para>
+    ///         Everything else in this file pins <c>2026-08-20</c>, and should:
+    ///         two tests depend on that date being a Thursday (day-of-week
+    ///         pricing) or on 21:30 UTC being tomorrow in Kuwait, and the rest
+    ///         either assert on the handler's return value or seed rows with a
+    ///         null <c>hold_expires_at</c>, which no sweep predicate matches.
+    ///     </para>
+    ///     <para>
+    ///         <b>These two are different, and the reason is a job rather than
+    ///         a date.</b> The test host runs TickerQ on the real clock, and
+    ///         ExpiredHoldsSweepJob deletes <em>every</em> row matching
+    ///         <c>status = 'held' AND hold_expires_at &lt;= now()</c>
+    ///         platform-wide, every five minutes. A hold minted at a fake
+    ///         2026-08-20 gets <c>hold_expires_at</c> fifteen minutes later -
+    ///         so once the real date passed it, every such row was born already
+    ///         eligible for that sweep. The two tests and the scheduler
+    ///         disagreed about what "expired" meant, and they broke in opposite
+    ///         directions:
+    ///     </para>
+    ///     <list type="bullet">
+    ///         <item>
+    ///             <description>
+    ///                 <c>Handle_SixthActiveHoldFromSameClientNetwork...</c>
+    ///                 fills the cap with five live holds and expects the sixth
+    ///                 to be refused. A sweep landing between the fifth and the
+    ///                 sixth deleted all five and the sixth succeeded - the
+    ///                 intermittent failure this fixes.
+    ///             </description>
+    ///         </item>
+    ///         <item>
+    ///             <description>
+    ///                 <c>Handle_WithExpiredHeldRowsOnDifferentUnits...</c> is
+    ///                 the worse one, because it was <em>green</em>. It seeds
+    ///                 five expired rows to prove the cap's count query excludes
+    ///                 them; if the sweep gets there first there is nothing left
+    ///                 to exclude, and it passes without exercising the
+    ///                 predicate it exists for.
+    ///             </description>
+    ///         </item>
+    ///     </list>
+    ///     <para>
+    ///         Dating forward separates the two clocks. A row these tests call
+    ///         expired (<c>fixedInstant - 1 min</c>) is still an hour in the
+    ///         future by <c>now()</c>, so the sweep leaves it alone and the
+    ///         count query has to do its own job. Every date in both tests is
+    ///         derived from this instant, so no fake-clock relationship
+    ///         changes - only the real-clock one, which was the bug.
+    ///     </para>
+    /// </summary>
+    private static DateTimeOffset InstantOutliving(TimeSpan sweepMargin) =>
+        new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero) + sweepMargin + TimeSpan.FromHours(12);
+
+    /// <summary>
+    ///     Runs ExpiredHoldsSweepJob on the real clock, which is how TickerQ
+    ///     runs it. Called at the exact moment the scheduler's own timing made
+    ///     dangerous, so the hazard is exercised on every run instead of once
+    ///     in a while.
+    /// </summary>
+    private static Task SweepExpiredHoldsAsync(IServiceScope scope) =>
+        new ExpiredHoldsSweepJob(
+                scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
+                TimeProvider.System)
+            .SweepAsync(null!, TestContext.Current.CancellationToken);
 
     private Unit CreateTestUnit(int maxCapacity = 2)
     {
@@ -452,7 +521,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         Unit unit = CreateTestUnit(maxCapacity: 10);
         await SeedCatalogAsync(unit);
 
-        DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
+        DateTimeOffset fixedInstant = InstantOutliving(sweepMargin: TimeSpan.FromDays(30));
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
         string holderToken = Guid.NewGuid().ToString();
         string clientKey = Guid.NewGuid().ToString();
@@ -477,6 +546,15 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             };
             await handler.Handle(request, CancellationToken.None);
         }
+
+        // The sweep, here, on purpose. TickerQ runs it every five minutes on
+        // the real clock against every 'held' row on the platform, so it can
+        // land in exactly this gap - and when these holds were minted at a
+        // hardcoded 2026-08-20 they were born expired by that clock, so it
+        // deleted all five and the sixth request sailed through. Running it
+        // explicitly turns an intermittent failure into a permanent one if the
+        // dating above is ever reverted.
+        await SweepExpiredHoldsAsync(scope);
 
         // A 6th, on a range that doesn't even overlap the first five -
         // the cap is per-client, not per-unit/range, so a clean exclusion-
@@ -645,7 +723,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         Unit unit = CreateTestUnit(maxCapacity: 10);
         await SeedCatalogAsync(unit);
 
-        DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
+        DateTimeOffset fixedInstant = InstantOutliving(sweepMargin: TimeSpan.FromDays(30));
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
         string holderToken = Guid.NewGuid().ToString();
         string clientKey = Guid.NewGuid().ToString();
@@ -670,6 +748,15 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
 
         await context.SaveChangesAsync();
 
+        // Expired by this test's clock, and the sweep must still not be the
+        // thing that removes them - otherwise there is nothing left for the
+        // count query to exclude and this test proves nothing at all. It was
+        // green for that reason before the instant above moved forward.
+        await SweepExpiredHoldsAsync(scope);
+
+        Assert.Equal(5, await context.UnitAvailabilityHolds.AsNoTracking()
+            .CountAsync(h => h.ClientKey == clientKey, TestContext.Current.CancellationToken));
+
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(fixedInstant);
         HoldAvailabilityHandler handler = CreateHandler(context, timeProvider, scope);
@@ -683,6 +770,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
             ClientKey = clientKey
         };
 
+        // Succeeds despite five rows still sitting there under the same key,
+        // which is the whole point: the count query excludes them by date.
         HoldAvailabilityResponse result = await handler.Handle(sixthRequest, CancellationToken.None);
 
         Assert.NotEqual(Guid.Empty, result.HoldId);
