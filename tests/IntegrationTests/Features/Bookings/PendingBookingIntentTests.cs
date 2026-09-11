@@ -288,6 +288,13 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
         // cross-module join safe: without it a second intent for the same hold
         // would survive, and the job would later release a hold out from under
         // a live request.
+        //
+        // The state seeded below - a live intent for a hold that is back to
+        // 'held' - is no longer how a losing race looks (the conditional
+        // UPDATE settles those, and the loser gets 404). It is what
+        // CompensateAsync leaves between releasing a hold and discarding the
+        // intent that went with it, which is a real window and a retryable
+        // one.
         Unit unit = await SeedUnitAsync();
         Guid holdId = await HoldUnitAsync(unit.Id);
 
@@ -308,8 +315,11 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
-        // The hold is untouched - the request never got as far as
-        // ConfirmHoldAsync, so the in-flight confirmation still owns it.
+        // The hold is untouched. It is reached now - the UPDATE runs first
+        // and moves it - but the intent collision rolls the whole transaction
+        // back, which takes the transition with it. That is the property worth
+        // asserting either way: a refused confirmation must not consume the
+        // hold it refused.
         Assert.Equal("held", await GetHoldStatusAsync(holdId));
     }
 

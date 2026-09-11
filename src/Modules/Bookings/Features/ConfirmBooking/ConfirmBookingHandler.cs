@@ -495,6 +495,59 @@ public class ConfirmBookingHandler(
             // work the handler does.
             dbContext.ChangeTracker.Clear();
 
+            await using IDbContextTransaction transaction =
+                await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+            // The hold transition goes FIRST, and the ordering is the whole
+            // arbitration story.
+            //
+            // ExecuteConfirmAsync is a conditional UPDATE - `WHERE id = @HoldId
+            // AND status = 'held' AND hold_expires_at > @Now` - so it is already
+            // an exactly-one-winner compare-and-set on the contended row. Doing
+            // it before the intent insert lets it decide every race, because a
+            // second transaction's UPDATE blocks on the winner's row lock and
+            // then re-evaluates that WHERE against the committed row: 'held' is
+            // gone, no row comes back, and the loser never reaches the intent
+            // table at all.
+            //
+            // Inserting the intent first, as this used to, made the intent's
+            // unique index on hold_id the arbiter instead - deciding a race
+            // about a hold by contending on a marker that points at it. That
+            // worked, but it answered second-hand ("somebody else has an intent
+            // for this") where the UPDATE answers directly ("this hold is no
+            // longer available"), and it forced a recovery path to tell three
+            // situations apart using the age of the other request's intent row.
+            //
+            // Joins the transaction rather than autocommitting - see
+            // HoldConfirmation.AmbientTransaction.
+            ConfirmedHold confirmed;
+
+            try
+            {
+                confirmed = await holdConfirmation.ConfirmHoldAsync(holdId, cancellationToken);
+            }
+            catch (NotFoundException)
+            {
+                // No row matched. Three ways to get here, and only the last is
+                // this request's own doing:
+                //
+                //  - Another confirmation took this hold. Correct answer: the
+                //    hold is gone, which is what NotFoundException already says.
+                //  - The hold expired, or never existed. Same answer.
+                //  - This delegate already ran, committed, and lost its
+                //    acknowledgement to an execution-strategy retry - so the
+                //    'held' row this attempt is looking for was consumed by its
+                //    own previous attempt.
+                //
+                // The pre-generated bookingId separates the last from the other
+                // two: only our own attempt could have written an intent under
+                // it. Nothing has been staged in this transaction yet, which is
+                // why the UPDATE running first also makes this recovery simple -
+                // there is no half-built state to unpick.
+                return await RecoverOwnCommittedAttemptAsync(
+                    holdId, bookingId, keyHash, requestFingerprint, transaction, cancellationToken);
+            }
+
             PendingBookingIntent intent = new PendingBookingIntent
             {
                 Id = bookingId,
@@ -502,27 +555,12 @@ public class ConfirmBookingHandler(
                 CreatedAt = timeProvider.GetUtcNow()
             };
 
-            await using IDbContextTransaction transaction =
-                await dbContext.Database.BeginTransactionAsync(cancellationToken);
-
             dbContext.PendingBookingIntents.Add(intent);
 
-            // Reserved here, in the same transaction as the intent and the
-            // hold transition, rather than written on the way out. Three
-            // things follow from that, and none of them do if the record is
-            // written at the end:
-            //
-            //  - Two concurrent requests carrying the same key are separated
-            //    by the unique index, before either transitions a hold. The
-            //    loser learns it lost from a unique violation, not from a 404
-            //    on a hold the winner has consumed.
-            //  - A rollback frees the key, because the reservation rolls back
-            //    with everything else. A key burned by a failed attempt would
-            //    be worse than no key at all - the client's retry, the whole
-            //    point of having one, would be refused.
-            //  - The record is present if and only if the confirmation began,
-            //    which is the same property the intent has, for the same
-            //    reason.
+            // Reserved in the same transaction as the hold transition rather
+            // than written on the way out, so a rollback frees the key and the
+            // record is present if and only if the confirmation began. See
+            // docs/adr/0022.
             CheckoutIdempotencyRecord? record = keyHash is null
                 ? null
                 : new CheckoutIdempotencyRecord
@@ -545,9 +583,20 @@ public class ConfirmBookingHandler(
             catch (DbUpdateException ex)
                 when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
             {
-                // Detached before anything else so the Attach in the recovery
-                // can't collide with this instance in the identity map, and so
-                // the throwing branches don't leave a phantom Added row behind.
+                // Two indexes can fire here, and neither means a race for the
+                // hold - the UPDATE above already settled that.
+                //
+                // The intent's index on hold_id fires in one narrow window: a
+                // failing confirmation's CompensateAsync releases its hold back
+                // to 'held' and only then discards its intent, so between those
+                // two statements the hold is available while its old intent is
+                // still there. A confirmation arriving in that gap legitimately
+                // wins the UPDATE and then collides. Transient, and the remedy
+                // is to try again in a moment.
+                //
+                // The key's index fires when two requests carrying one
+                // idempotency key are confirming *different* holds - both win
+                // their own UPDATE, and the second one's reservation collides.
                 dbContext.Entry(intent).State = EntityState.Detached;
 
                 if (record is not null)
@@ -557,19 +606,34 @@ public class ConfirmBookingHandler(
 
                 // The violation aborted this transaction - Postgres fails every
                 // further statement on it with 25P02 until it ends - so the
-                // recovery's reads cannot run inside it. Rolled back explicitly
-                // rather than left to the dispose below, because those reads
-                // are the next thing that happens.
+                // recovery's reads cannot run inside it.
                 await transaction.RollbackAsync(cancellationToken);
 
-                return await RecoverInterruptedConfirmationAsync(
-                    holdId, bookingId, keyHash, requestFingerprint, cancellationToken);
-            }
+                if (keyHash is not null)
+                {
+                    CheckoutIdempotencyRecord? byKey = await dbContext.CheckoutIdempotencyRecords.AsNoTracking()
+                        .SingleOrDefaultAsync(r => r.KeyHash == keyHash, cancellationToken);
 
-            // Joins the transaction above rather than autocommitting - see
-            // HoldConfirmation.AmbientTransaction. If this throws, the dispose
-            // takes the intent down with it.
-            ConfirmedHold confirmed = await holdConfirmation.ConfirmHoldAsync(holdId, cancellationToken);
+                    if (byKey is not null)
+                    {
+                        return new ConfirmationStart
+                        {
+                            Replay = await ReplayAsync(byKey, requestFingerprint, cancellationToken)
+                        };
+                    }
+                }
+
+                // The hold_id collision, then. One message, where there used to
+                // be two chosen by dating the other intent against
+                // PendingBookingIntent.ReconcileGrace - that comparison existed
+                // to tell "another confirmation is running right now" from "one
+                // died and is being cleaned up", and the first of those is no
+                // longer something this code can be looking at. The rollback
+                // above put the hold back to 'held', so trying again shortly
+                // genuinely works.
+                throw new ConflictException(
+                    "A previous confirmation for this hold is still being cleaned up. Please try again shortly.");
+            }
 
             await transaction.CommitAsync(cancellationToken);
 
@@ -578,90 +642,64 @@ public class ConfirmBookingHandler(
     }
 
     /// <summary>
-    ///     Reached when the intent insert hits a unique violation: either
-    ///     another request owns this hold, or this attempt's own earlier
-    ///     transaction committed and the acknowledgement was lost to an
-    ///     execution-strategy retry (see EnableRetryOnFailure).
+    ///     Reached when the hold transition finds no 'held' row. Recovers this
+    ///     request's own committed-but-unacknowledged attempt, and otherwise
+    ///     lets the "hold is gone" answer stand.
+    ///     <para>
+    ///         One branch, where there used to be three. The other two - "a
+    ///         confirmation for this hold is already in progress" and "a
+    ///         previous one was interrupted and is being cleaned up" - were
+    ///         only ever reachable because the intent's unique index arbitrated
+    ///         races, which meant reading another request's intent and dating
+    ///         it against a grace period to guess which situation produced it.
+    ///         The conditional UPDATE decides those races now, so both are
+    ///         states this code can no longer be in.
+    ///     </para>
     /// </summary>
-    private async Task<ConfirmationStart> RecoverInterruptedConfirmationAsync(
+    private async Task<ConfirmationStart> RecoverOwnCommittedAttemptAsync(
         Guid holdId, Guid bookingId, string? keyHash, string requestFingerprint,
-        CancellationToken cancellationToken)
+        IDbContextTransaction transaction, CancellationToken cancellationToken)
     {
-        // Either unique index could have produced the violation, and the key's
-        // gives the better answer where it applies - a duplicate key names the
-        // specific checkout being repeated, where the hold lookup would report
-        // a stranger's confirmation as being in progress.
-        CheckoutIdempotencyRecord? ownRecord = null;
+        // Keyed on this request's own pre-generated bookingId, not on holdId.
+        // That is the whole test: only an earlier attempt of *this* invocation
+        // could have written an intent under an id generated in this
+        // invocation, so a hit means "I already did this" and a miss means
+        // somebody else has the hold - or nobody does and it simply expired.
+        PendingBookingIntent? own = await dbContext.PendingBookingIntents.AsNoTracking()
+            .SingleOrDefaultAsync(i => i.Id == bookingId, cancellationToken);
 
-        if (keyHash is not null)
+        if (own is null)
         {
-            CheckoutIdempotencyRecord? byKey = await dbContext.CheckoutIdempotencyRecords.AsNoTracking()
-                .SingleOrDefaultAsync(r => r.KeyHash == keyHash, cancellationToken);
-
-            // Whose reservation this is decides everything, and the
-            // distinction is the pre-generated booking id. A different id
-            // means a different attempt - a concurrent duplicate, or the
-            // client retrying after a lost response - and the replay path
-            // answers it.
-            if (byKey is not null && byKey.BookingId != bookingId)
+            // Not ours. Before giving up, one case remains worth answering
+            // precisely: a client retrying the same checkout under the same
+            // idempotency key, whose earlier attempt won the hold under a
+            // different bookingId. Replaying that is the entire promise of
+            // ADR-0022, and answering 404 instead would report "gone" for a
+            // checkout that succeeded.
+            if (keyHash is not null)
             {
-                // Replays or throws; someone else's reservation is never taken
-                // over. Taking it over would mean two live confirmations
-                // sharing one key, the second overwriting the first's answer.
-                return new ConfirmationStart
+                CheckoutIdempotencyRecord? byKey = await dbContext.CheckoutIdempotencyRecords.AsNoTracking()
+                    .SingleOrDefaultAsync(r => r.KeyHash == keyHash, cancellationToken);
+
+                if (byKey is not null)
                 {
-                    Replay = await ReplayAsync(byKey, requestFingerprint, cancellationToken)
-                };
+                    return new ConfirmationStart
+                    {
+                        Replay = await ReplayAsync(byKey, requestFingerprint, cancellationToken)
+                    };
+                }
             }
 
-            if (byKey is not null)
-            {
-                // Our own reservation, from an earlier attempt of *this*
-                // invocation whose commit was acknowledged too late - the
-                // execution strategy re-ran the delegate and both unique
-                // indexes fired. Exactly the case the intent recovery below
-                // was already written for, so this must fall through to it
-                // rather than report a conflict: replying "still in progress"
-                // to our own retry would strand a confirmation that is not
-                // stuck at all, until the reconcile job unwinds it minutes
-                // later.
-                //
-                // Tracked, because Transaction B has to complete this row and
-                // the read above was AsNoTracking.
-                dbContext.Attach(byKey);
-                ownRecord = byKey;
-            }
+            // The hold is genuinely not available to this caller. NotFound,
+            // the same answer an expired or nonexistent hold gets, because a
+            // caller can do exactly one thing about any of them.
+            throw new NotFoundException("Hold", holdId);
         }
 
-        PendingBookingIntent? existing = await dbContext.PendingBookingIntents.AsNoTracking()
-            .SingleOrDefaultAsync(i => i.HoldId == holdId, cancellationToken);
-
-        if (existing is null)
-        {
-            // The conflicting intent was resolved between the violation and
-            // this read, so a retry would now succeed.
-            throw new ConflictException(
-                "A previous confirmation for this hold was interrupted and is being cleaned up. Please try again shortly.");
-        }
-
-        if (existing.Id != bookingId)
-        {
-            // A different request owns this hold. Deliberately refuses rather
-            // than taking the intent over: taking over would replay a
-            // redemption that may already hold the (promotion_id, guest_email)
-            // slot.
-            throw new ConflictException(
-                existing.CreatedAt > timeProvider.GetUtcNow() - PendingBookingIntent.ReconcileGrace
-                    ? "A confirmation for this hold is already in progress."
-                    : "A previous confirmation for this hold was interrupted and is being cleaned up. Please try again shortly.");
-        }
-
-        // Our own insert, and it now says more than it used to. The intent
-        // committed in the same transaction as the hold transition, so its
-        // presence proves the hold moved too - which means re-calling
-        // ConfirmHoldAsync would fail its status = 'held' guard and abandon a
-        // confirmation that had in fact succeeded. Read the snapshot back
-        // instead of redoing the transition.
+        // Our own attempt, committed. Its intent proves the hold moved with it
+        // - they share a transaction - so re-confirming would fail the
+        // status = 'held' guard and abandon a confirmation that had in fact
+        // succeeded. Read the snapshot back instead.
         ConfirmedHold? hold = await holdConfirmation.GetConfirmedHoldAsync(holdId, cancellationToken);
 
         if (hold is null)
@@ -671,20 +709,31 @@ public class ConfirmBookingHandler(
             // sweep) has already begun unwinding this attempt. Nothing here
             // can safely continue on top of that.
             throw new ConflictException(
-                "A previous confirmation for this hold was interrupted and is being cleaned up. Please try again shortly.");
+                "This booking confirmation was interrupted and is being cleaned up. Please start over.");
         }
+
+        // Nothing was staged in this transaction: the UPDATE returned no rows
+        // and the inserts are downstream of it. Ending it explicitly rather
+        // than committing an empty one, since the work it would have done was
+        // already committed by the attempt this is recovering.
+        await transaction.RollbackAsync(cancellationToken);
 
         // Re-attaching is not cosmetic: the success path's row-count assertion
         // on the delete - the structural guarantee that this confirmation owned
         // the intent it removed - only runs against a tracked instance.
-        dbContext.Attach(existing);
+        dbContext.Attach(own);
 
-        // ownRecord is null when no key was supplied, or when the key's
-        // reservation rolled back with the attempt that made it and only the
-        // intent index fired. Either way there is nothing for Transaction B to
-        // complete, which is correct: without a reservation there is nothing
-        // to replay.
-        return new ConfirmationStart { Intent = existing, Hold = hold, Record = ownRecord };
+        CheckoutIdempotencyRecord? ownRecord = null;
+
+        if (keyHash is not null)
+        {
+            // Tracked for the same reason, so Transaction B can complete the
+            // reservation this attempt's earlier run reserved.
+            ownRecord = await dbContext.CheckoutIdempotencyRecords
+                .SingleOrDefaultAsync(r => r.BookingId == bookingId, cancellationToken);
+        }
+
+        return new ConfirmationStart { Intent = own, Hold = hold, Record = ownRecord };
     }
 
     /// <summary>
