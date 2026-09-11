@@ -1,10 +1,14 @@
 using BuildingBlocks.Exceptions;
+using BuildingBlocks.Persistence;
+using Catalog.Archival;
+using Dapper;
 using BuildingBlocks.Identity;
 using BuildingBlocks.Localization;
 using Catalog.Entities;
 using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using SeedWork.ValueObjects;
 using Unit = Catalog.Entities.Unit;
@@ -52,8 +56,48 @@ public class CreateUnitHandler(
             request.Currency,
             cancellationPolicy);
 
-        dbContext.Units.Add(unit);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        // Shared against the exclusive lock DeletePropertyHandler takes, so
+        // concurrent creation under one property still runs in parallel and
+        // only archival is excluded.
+        //
+        // Without it, a property archive that read its units a moment ago
+        // commits, this insert lands, and the result is a live unit under an
+        // archived property - the orphan UnitLookup throws
+        // OrphanedUnitException for. No per-unit lock can cover that: there was
+        // no row to lock.
+        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
+
+        await strategy.ExecuteAsync(async () =>
+        {
+            dbContext.ChangeTracker.Clear();
+
+            await using IDbContextTransaction transaction =
+                await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+            if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
+            {
+                await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
+                    AdvisoryLock.AcquireSharedSql,
+                    new { LockKey = PropertyUnitsLock.KeyFor(request.PropertyId) },
+                    transaction.GetDbTransaction(),
+                    cancellationToken: cancellationToken));
+            }
+
+            // Re-read under the lock, and this is what makes the lock worth
+            // anything. The property was resolved before this transaction
+            // opened, so it was seen while it still existed; ordering the two
+            // operations does not tell either what the other did. The
+            // soft-delete query filter is what answers here - an archived
+            // property is simply not found.
+            if (!await dbContext.Properties.AnyAsync(p => p.Id == request.PropertyId, cancellationToken))
+            {
+                throw new NotFoundException(nameof(Property), request.PropertyId);
+            }
+
+            dbContext.Units.Add(unit);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
 
         return new CreateUnitResponse { UnitId = unit.Id };
     }

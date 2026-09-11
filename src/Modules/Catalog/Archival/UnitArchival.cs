@@ -1,0 +1,96 @@
+using BuildingBlocks.Persistence;
+using BuildingBlocks.Time;
+using Catalog.Contracts;
+using Catalog.Exceptions;
+using Dapper;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+namespace Catalog.Archival;
+
+/// <summary>
+///     The one way to decide a unit may be archived.
+///     <para>
+///         This used to be a bare static check hanging off
+///         <c>DeleteUnitHandler</c> and called from
+///         <c>DeletePropertyHandler</c>, which was fine while it really was
+///         just a check. It stopped being fine when its correctness came to
+///         depend on running under a lock inside a transaction: the locking
+///         lived in one caller and the other reproduced the bug, which is the
+///         failure mode a shared helper is supposed to prevent rather than
+///         cause. So the lock and the check are one call now, and the
+///         precondition they need is asserted rather than assumed.
+///     </para>
+/// </summary>
+public static class UnitArchival
+{
+    /// <summary>
+    ///     Takes this unit's availability lock exclusively and then verifies
+    ///     nothing live is transacting against it. Both, in that order, or the
+    ///     check means nothing.
+    ///     <para>
+    ///         The caller must already be in a transaction that also carries
+    ///         the archiving write. Advisory locks here are transaction-scoped,
+    ///         so a caller without one releases the lock the instant this
+    ///         returns - re-opening the exact gap this closes, and doing it
+    ///         invisibly. Hence the throw rather than a comment.
+    ///     </para>
+    ///     <para>
+    ///         A caller archiving several units must call this for all of them
+    ///         before committing, so every lock is still held when the archive
+    ///         lands. Acquiring and checking one unit at a time and then
+    ///         archiving is not enough: a hold can be taken on unit three after
+    ///         unit three passed its own check.
+    ///     </para>
+    /// </summary>
+    public static async Task EnsureArchivableAsync(
+        AppCatalogDbContext dbContext,
+        Guid unitId,
+        string timeZoneId,
+        TimeProvider timeProvider,
+        IUnitArchivalGuard unitArchivalGuard,
+        IUnitAvailabilityLookup availabilityLookup,
+        CancellationToken cancellationToken)
+    {
+        IDbContextTransaction transaction = dbContext.Database.CurrentTransaction
+                                            ?? throw new InvalidOperationException(
+                                                $"{nameof(EnsureArchivableAsync)} must run inside a transaction. Its advisory lock is " +
+                                                "transaction-scoped, so without one it is released before the archive it guards is written.");
+
+        // SQLite in the unit tests has no advisory locks. The check below still
+        // runs there - it just cannot provide cross-connection exclusion, the
+        // same split every other Postgres-specific claim in this codebase makes.
+        if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
+        {
+            await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
+                AdvisoryLock.AcquireExclusiveSql,
+                new { LockKey = UnitAvailabilityLock.KeyFor(unitId) },
+                transaction.GetDbTransaction(),
+                cancellationToken: cancellationToken));
+        }
+
+        // A held/booked hold or a live booking both mean someone is actively
+        // transacting against this unit - archiving out from under either one
+        // is exactly the mid-checkout 404 (ConfirmBookingHandler's
+        // unitLookup.GetUnitAsync returning null) this guard exists to prevent,
+        // on top of the more obvious case of pulling a unit out from under a
+        // guest mid-stay.
+        //
+        // The property's own zone, not UTC - "is a booking still active" is
+        // measured against CheckOut, itself a property-local date. Both callers
+        // already have the Property loaded. See docs/adr/0018.
+        DateOnly today = PropertyTimeZone.Today(timeProvider, timeZoneId);
+
+        if (await unitArchivalGuard.HasActiveBookingForUnitAsync(unitId, today, cancellationToken))
+        {
+            throw new UnitHasActiveBookingsException(unitId);
+        }
+
+        // The UTC instant, not the property-local `today` above. A hold's
+        // expiry is a timestamp rather than a date - the two questions are
+        // measured in different units and only one of them is a calendar day.
+        if (await availabilityLookup.HasActiveHoldForUnitAsync(unitId, timeProvider.GetUtcNow(), cancellationToken))
+        {
+            throw new UnitHasActiveBookingsException(unitId);
+        }
+    }
+}

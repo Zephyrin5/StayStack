@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 namespace BuildingBlocks.Persistence;
 
 /// <summary>
@@ -22,40 +20,27 @@ namespace BuildingBlocks.Persistence;
 ///         the other's schema.
 ///     </para>
 ///     <para>
-///         Taken with <c>pg_advisory_xact_lock</c>, so it is released when the
-///         transaction ends however it ends - no unlock call to forget, and no
-///         leak on an exception path.
+///         <b>Archival takes it exclusively</b>
+///         (<see cref="AdvisoryLock.AcquireExclusiveSql"/>), waiting for every
+///         in-flight hold on the unit and excluding new ones until the archive
+///         commits. <b>Taking a hold takes it shared</b>
+///         (<see cref="AdvisoryLock.AcquireSharedSql"/>): holds on one unit do
+///         not block each other - that path already arbitrates through the
+///         exclusion constraint, and serialising it would put a queue on the
+///         hottest write in the system to defend against an operation a host
+///         performs by hand.
+///     </para>
+///     <para>
+///         The mechanics - transaction scope, why the scope string is part of
+///         the key - live on <see cref="AdvisoryLock"/>. This type exists so
+///         that both sides have one name to agree on.
 ///     </para>
 /// </summary>
 public static class UnitAvailabilityLock
 {
-    /// <summary>
-    ///     A stable 64-bit key for one unit.
-    ///     <para>
-    ///         Hashed rather than derived from the Guid's bits directly so the
-    ///         namespace prefix is part of it: advisory locks share one global
-    ///         key space per database, so an unprefixed id could collide with
-    ///         some future lock on a different kind of entity that happened to
-    ///         hash the same way. Collisions cost correctness nothing - two
-    ///         unrelated operations would merely serialise - but they cost
-    ///         throughput silently, which is the worst way to pay.
-    ///     </para>
-    /// </summary>
-    public static long KeyFor(Guid unitId) =>
-        BitConverter.ToInt64(SHA256.HashData(Encoding.UTF8.GetBytes($"unit-availability:{unitId}")), 0);
+    public static long KeyFor(Guid unitId) => AdvisoryLock.KeyFor(Scope, unitId);
 
-    /// <summary>
-    ///     Exclusive: archival. Waits for every in-flight hold on this unit and
-    ///     excludes new ones until the archiving transaction commits.
-    /// </summary>
-    public const string AcquireExclusiveSql = "SELECT pg_advisory_xact_lock(@LockKey);";
-
-    /// <summary>
-    ///     Shared: taking a hold. Holds on one unit do not block each other -
-    ///     that path already arbitrates through the exclusion constraint, and
-    ///     serialising it would put a queue on the hottest write in the system
-    ///     to defend against an operation that happens by hand. They only block
-    ///     archival, which is the whole point.
-    /// </summary>
-    public const string AcquireSharedSql = "SELECT pg_advisory_xact_lock_shared(@LockKey);";
+    // Part of the key rather than a label, so it is a wire format between
+    // deployments - see AdvisoryLock.KeyFor.
+    private const string Scope = "unit-availability";
 }

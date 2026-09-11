@@ -142,7 +142,7 @@ public class HoldAvailabilityHandler(
             // handler can insert one, and the unit is archived with live
             // inventory against it. See BuildingBlocks.UnitAvailabilityLock.
             await connection.ExecuteAsync(new CommandDefinition(
-                UnitAvailabilityLock.AcquireSharedSql,
+                AdvisoryLock.AcquireSharedSql,
                 new { LockKey = UnitAvailabilityLock.KeyFor(request.UnitId) },
                 transaction.GetDbTransaction(),
                 cancellationToken: cancellationToken));
