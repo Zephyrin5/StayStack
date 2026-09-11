@@ -29,11 +29,17 @@ public class ConfirmBookingEndpoint(IMediator mediator) : Endpoint<ConfirmBookin
                             "authenticated, the booking's CustomerId is set from their token automatically; " +
                             "guest name/email/phone are always stored on the booking either way. Created as " +
                             "Pending - payment integration isn't built yet, so nothing confirms a booking today.";
+            // "The same booking, a freshly issued token" - not "the original
+            // response". The distinction is the contract, not a detail: a
+            // client that assumed byte-identical replay would compare tokens
+            // and conclude the replay failed.
             s.Description += " Send an `Idempotency-Key` header (16-128 characters, a UUID is ideal) to make " +
                              "retries safe: if the connection drops after the booking commits, replaying the same " +
-                             "key and the same body returns the original response - including the management " +
-                             "token, which exists nowhere else. Replayable for 24 hours.";
-            s.Response<ConfirmBookingResponse>(200, "Booking created, or the original response replayed.");
+                             "key and the same body returns that booking's current state together with a **newly " +
+                             "issued** management token - the original is never stored, only its hash, so it " +
+                             "cannot be handed back. The first token stays valid; the replay adds one rather than " +
+                             "rotating. Replayable for 24 hours.";
+            s.Response<ConfirmBookingResponse>(200, "Booking created, or the booking behind this key with a fresh management token.");
             s.Response<ValidationProblemDetails>(400, "Validation failed.");
             s.Response<ProblemDetails>(404, "Hold not found, already used, or expired.");
             s.Response<ProblemDetails>(409,

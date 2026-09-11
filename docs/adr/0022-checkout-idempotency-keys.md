@@ -1,8 +1,8 @@
-# 0022 - Checkout idempotency keys, and the one secret we store in plaintext
+# 0022 - Checkout idempotency keys
 
 **Status:** Accepted
 
-Builds on [ADR-0017](0017-durable-intent-records-for-cross-module-writes.md) (the durable-marker shape this reuses) and [ADR-0021](0021-availability-is-part-of-bookings.md) (which made the transaction this row commits inside possible). Makes a bounded exception to the hash-only rule that governs [ADR-0009](0009-refresh-token-rotation-with-family-reuse-detection.md)-style bearer credentials.
+Builds on [ADR-0017](0017-durable-intent-records-for-cross-module-writes.md) (the durable-marker shape this reuses) and [ADR-0021](0021-availability-is-part-of-bookings.md) (which made the transaction this row commits inside possible). Keeps the hash-only rule that governs [ADR-0009](0009-refresh-token-rotation-with-family-reuse-detection.md)-style bearer credentials - see the amendment at the end, which is where this ADR first broke it and then took it back.
 
 ## Context
 
@@ -45,24 +45,17 @@ Written alongside the `PendingBookingIntent` and the hold transition, inside Tra
 
 Completion - `completed_at` and the token - is written in the same `SaveChangesAsync` as the `Booking` insert. Anything later would reintroduce the original bug one level up: a committed booking whose replay record never landed is a guest stranded by the mechanism meant to rescue them.
 
-### Replay re-reads the booking; only the token is stored
+### Replay re-reads the booking and mints a new token
 
-Strict idempotency replays the original response verbatim. This does not, and the reason is that only one field is unrecoverable.
+Strict idempotency replays the original response verbatim. This does not, and the contract is worth stating exactly: **the same booking's current state, and a newly issued capability.**
 
-Everything else in the response is derivable from committed state, and *can go stale*: a booking cancelled between the original request and the replay would be reported as `Pending`, and the client would act on that. Reporting settled state is the same choice `CancelBookingHandler`'s recancel branch already makes. It also keeps exactly one secret in the table instead of a copy of the whole response.
+Everything derivable from committed state is re-read, because all of it *can go stale*: a booking cancelled between the original request and the replay would be reported as `Pending`, and the client would act on that. Reporting settled state is the same choice `CancelBookingHandler`'s recancel branch already makes.
 
-### Storing the plaintext token is the cost, and it is bounded
+The management token is re-issued rather than returned, because it was never stored. `booking_management_tokens` holds `SecureToken.Hash` and nothing else, so the original plaintext exists only in the response that was lost - there is nothing to hand back.
 
-This is the part worth arguing with, so it is stated plainly: `management_token` holds a live credential in plaintext, reversing the rule that `booking_management_tokens` follows.
+Nothing requires the replayed token to be *the same* token. `BookingAccessChecker` matches on hash, so several valid tokens work unchanged, and the replay is additive rather than rotating: **the original token stays valid.** That is the deliberate half - a guest who did receive the first response is not locked out by their own client's retry.
 
-The alternative was considered and rejected: replay the booking but not the token. That leaves the guest exactly as locked out as before - it implements the feature for authenticated callers, who never needed it, and not for anonymous ones, who are the only people it is for.
-
-What bounds the cost:
-
-- **24 hours** (`CheckoutIdempotencyRecord.ReplayWindow`), enforced by `PurgeReplayedCheckoutsJob`. Unlike most retention sweeps this job is not about table size - it is the only thing that makes the window real, and it runs hourly rather than daily so a token is not readable for up to a day past the window it was promised.
-- **One column**, not a serialised response.
-- **A value the client already holds in plaintext anyway**, and which travels in plaintext in the original response.
-- **Null for authenticated callers**, who get no management token at all.
+The 24-hour window (`BookingLifecyclePolicyOptions.CheckoutReplayWindowHours`) is checked in `ReplayAsync`, on the path that actually hands the credential over. It used to live only in `PurgeReplayedCheckoutsJob`'s `DELETE` - which is to say it existed only as a background job's behaviour: stop that job, break its cron, or let it fail quietly, and replay went on working indefinitely. A window nothing checks is not a window. The purge is cleanup now, not enforcement.
 
 ### The fingerprint is what makes a guessed key useless
 
@@ -80,3 +73,16 @@ The key itself is never stored, only `SHA-256` of it, so a database reader canno
 - **`ReconcileOrphanedBookingIntentsJob` deletes the reservation with the intent**, in the same transaction, so an abandoned confirmation frees its key. Both that delete and the handler's own compensating delete filter on `completed_at IS NULL` - the handler's runs on the verify-before-compensate path where the booking *did* commit, and deleting a completed record there would destroy the replay for exactly the case this feature exists for.
 - **Not applied to the other write endpoints.** Cancel is already idempotent by state (a re-cancel is a no-op success), and the hold endpoint is cheap to repeat and self-expiring. Checkout is the one place where a lost response destroys information that exists nowhere else.
 - **This does not deduplicate distinct requests.** Two different keys against one hold are two checkouts as far as this table is concerned; the second still fails on the consumed hold, which is the hold's own guarantee and not idempotency's. The failure mode being fixed is not a double booking - the exclusion constraint and the single-use hold already prevent that - it is a guest locked out of a real one.
+
+## Amendment: the plaintext token is gone, and so is the exception
+
+This ADR originally stored the management token in plaintext in `checkout_idempotency_records.management_token`, and argued the cost was bounded: one column, a 24-hour window, a value the client already holds. That argument was wrong about which threat matters.
+
+A leaked *link* exposes one booking. A leaked *backup* - or one read of that table by anyone with database access - yielded live bearer credentials for every anonymous guest checkout inside the window, all at once. `booking_management_tokens` stores only a hash precisely so that a database read cannot produce a working credential, and keeping a plaintext copy beside it undid that property for exactly the population with no account to fall back on. The bound was on how long, never on how many.
+
+The column is dropped (`DropStoredManagementTokenFromCheckoutIdempotency`). Replay mints a fresh token instead, which delivers the same thing the guest actually needs - a working credential for their booking - without a recoverable secret at rest. Encrypting at rest was the other option and buys identical semantics for the price of shared key storage and a rotation story across instances.
+
+Two things followed that were not obvious when the change was made:
+
+- **A unique index on `booking_management_tokens.booking_id` had to go.** Minting on replay failed with `23505`. The index recorded an invariant that was true when it was written - one `ConfirmBookingHandler` call per booking - and replay is precisely the exception to it. Now a plain index (`AllowSeveralManagementTokensPerBooking`).
+- **Tokens accumulate.** Each replay adds a row, and nothing removes them. That is acceptable at the scale this operates: replay is rare, it is bounded to a 24-hour window per key, and the rows are small. It is also the reason the window moved into `ReplayAsync` - unbounded replay would have made it unbounded accumulation. Worth a sweep if replay ever becomes routine; not worth a cap, which would have to choose between refusing a legitimate retry and evicting a token the guest is holding.

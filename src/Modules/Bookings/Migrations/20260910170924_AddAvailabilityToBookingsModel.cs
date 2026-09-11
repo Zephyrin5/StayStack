@@ -11,6 +11,15 @@ namespace Bookings.Migrations
     ///     Availability/AddAvailabilityToAvailabilityModel - and it carries
     ///     the same trap, so it is written by hand.
     ///     <para>
+    ///         <b>This migration depends on Catalog's having been applied
+    ///         first</b>, which is a real ordering constraint between two
+    ///         modules that otherwise migrate independently. It is stated in
+    ///         README.md's migration step and executed by
+    ///         IntegrationTestWebApplicationFactory.MigrateAllModulesAsync;
+    ///         nothing in EF enforces it, because EF has no notion of one
+    ///         history table depending on another.
+    ///     </para>
+    ///     <para>
     ///         <b>No CreateTable.</b> EF scaffolds one, because as far as the
     ///         Bookings model is concerned this entity is new. The table is
     ///         not: Catalog's original Initial migration created it, along

@@ -48,13 +48,20 @@ ASP.NET Core / FastEndpoints, Mediator, EF Core (Npgsql) + Dapper.AOT for hot-pa
    ```
    docker run -d --name staystack-db -e POSTGRES_PASSWORD=<yours> -e POSTGRES_DB=StayStack -p 5432:5432 postgres:16-alpine
    ```
-3. **Apply migrations** - each module owns its own, applied independently against the one database:
+3. **Apply migrations - in this order.** Each module owns its own set and its own history table, but they are *not* independent of each other, and the list was previously both incomplete and described as though they were:
    ```
    dotnet ef database update --project src/Infrastructure/Identity/Identity.csproj --startup-project src/Web/Api/Api.csproj --context AppIdentityDbContext
-   dotnet ef database update --project src/Modules/Catalog/Catalog.csproj --startup-project src/Web/Api/Api.csproj --context AppCatalogDbContext
-   dotnet ef database update --project src/Modules/Hosts/Hosts.csproj --startup-project src/Web/Api/Api.csproj --context AppHostsDbContext
-   dotnet ef database update --project src/Modules/Bookings/Bookings.csproj --startup-project src/Web/Api/Api.csproj --context AppBookingsDbContext
+   dotnet ef database update --project src/Modules/Catalog/Catalog.csproj      --startup-project src/Web/Api/Api.csproj --context AppCatalogDbContext
+   dotnet ef database update --project src/Modules/Hosts/Hosts.csproj          --startup-project src/Web/Api/Api.csproj --context AppHostsDbContext
+   dotnet ef database update --project src/Modules/Promotions/Promotions.csproj --startup-project src/Web/Api/Api.csproj --context AppPromotionsDbContext
+   dotnet ef database update --project src/Modules/Bookings/Bookings.csproj    --startup-project src/Web/Api/Api.csproj --context AppBookingsDbContext
+   dotnet ef database update --project src/Modules/Transactions/Transactions.csproj --startup-project src/Web/Api/Api.csproj --context AppTransactionsDbContext
+   dotnet ef database update --project src/Modules/Reviews/Reviews.csproj      --startup-project src/Web/Api/Api.csproj --context AppReviewsDbContext
+   dotnet ef database update --project src/Infrastructure/Jobs/Jobs.csproj     --startup-project src/Web/Api/Api.csproj --context TickerQDbContext
    ```
+   **Catalog must precede Bookings.** `unit_availability_holds` was created by Catalog's `Initial` migration and later handed to Bookings, so Bookings' `AddAvailabilityToBookingsModel` deliberately has no `CreateTable` - it alters a table it expects to already exist. Running Bookings first against an empty database leaves that table missing. There is no `availability` step: that module merged into Bookings and its migrations went with it.
+
+   `tests/IntegrationTests/IntegrationTestWebApplicationFactory.MigrateAllModulesAsync` is the executable copy of this order - it migrates a fresh container on every test run, so a break in the fresh-database path fails the suite rather than waiting for someone to set up a new machine.
 4. **Run it:**
    ```
    dotnet run --project src/Web/Api/Api.csproj

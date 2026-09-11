@@ -27,16 +27,34 @@ public interface IUnitAvailabilityLookup
     ///     Bulk counterpart to GetActiveHoldRangesAsync - every unit id,
     ///     platform-wide, with an active hold/booking overlapping
     ///     [<paramref name="checkIn"/>, <paramref name="checkOut"/>). Lets
-    ///     GetPropertiesHandler filter search results down to units
-    ///     genuinely free for the requested stay, without joining against
-    ///     Availability's table directly and without first materializing a
-    ///     candidate unit id list on Catalog's side to narrow it - the
-    ///     result is exactly as large as this window's actual bookings/holds,
-    ///     not the whole unit table, and
-    ///     <see cref="StaySearchPolicyOptions.MaxStayNights"/> bounds the
-    ///     window's width so this can't grow past "every unit ever booked" on
-    ///     a wide-open search. Width specifically - how far out the window
-    ///     sits has no bearing on how many bookings are inside it.
+    ///     GetPropertiesHandler filter search results down to units genuinely
+    ///     free for the requested stay, without joining against Bookings'
+    ///     table directly and without first materializing a candidate unit id
+    ///     list on Catalog's side to narrow it.
+    ///     <para>
+    ///         <b>This is a known scale boundary, not a bounded read.</b> The
+    ///         result is as large as the number of distinct units booked or
+    ///         held across the requested window, platform-wide - which grows
+    ///         with the platform, not with the request.
+    ///     </para>
+    ///     <para>
+    ///         This used to claim the set scaled with the window's width "and
+    ///         nothing else", on the reasoning that
+    ///         <see cref="StaySearchPolicyOptions.MaxStayNights"/> caps that
+    ///         width. It does, and that bounds *time*, not *cardinality*: a
+    ///         one-night search on a large platform can still return millions
+    ///         of unit ids, every one of them materialized into a HashSet in
+    ///         this process to filter a single page of results. A comment
+    ///         overstating a bound is worse than no comment, because it stops
+    ///         the next person looking.
+    ///     </para>
+    ///     <para>
+    ///         The real answer is a denormalized availability read model, so
+    ///         the filter happens in the database against the candidate page
+    ///         rather than in memory against the platform. Tracked, not
+    ///         started - see docs/adr/0026, which records what triggers it and
+    ///         which cheaper-looking fixes are the wrong axis.
+    ///     </para>
     /// </summary>
     Task<IReadOnlySet<Guid>> GetBlockedUnitIdsAsync(
         DateOnly checkIn, DateOnly checkOut, DateTimeOffset now, CancellationToken cancellationToken);
