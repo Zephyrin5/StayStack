@@ -374,8 +374,14 @@ public class ConfirmBookingHandler(
             // guest stranded by the mechanism meant to rescue them.
             if (idempotencyRecord is not null)
             {
+                // CompletedAt only. The plaintext management token used to be
+                // written here too, which undid the whole point of storing
+                // only SecureToken.Hash in booking_management_tokens: one
+                // table read yielded live bearer credentials for every guest
+                // checkout inside the replay window. A leaked URL exposes one
+                // booking; a leaked backup exposed all of them. Replay mints a
+                // fresh token instead - see ReplayAsync.
                 idempotencyRecord.CompletedAt = timeProvider.GetUtcNow();
-                idempotencyRecord.ManagementToken = managementToken;
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -807,15 +813,50 @@ public class ConfirmBookingHandler(
                 "The booking this Idempotency-Key refers to no longer exists. Please start over.");
         }
 
-        // Re-read rather than stored. Strict idempotency would replay the
-        // original response verbatim, but the only field that cannot be
-        // recovered from committed state is the management token, and
-        // everything else can go stale: a booking cancelled between the
-        // original request and the replay would otherwise be reported as
-        // Pending, and the client would act on it. Reporting settled state is
-        // the same choice CancelBookingHandler's recancel branch makes, and it
-        // keeps one secret in the table instead of a copy of the response.
-        return BuildResponse(booking, record.ManagementToken);
+        // A new token, minted now, rather than one that was stored.
+        //
+        // Storing the plaintext was the only way to hand back the *same*
+        // credential, and it cost the property that makes these tokens safe at
+        // rest: booking_management_tokens deliberately holds nothing but
+        // SecureToken.Hash, so the database cannot produce a working
+        // credential. Keeping a plaintext copy for the replay window undid
+        // that for every guest checkout in it.
+        //
+        // Nothing requires the replayed token to be the same one. Nothing
+        // caps tokens per booking, BookingAccessChecker matches on hash so
+        // several valid tokens work unchanged, and replay is rare enough that
+        // the extra row is immaterial. No key management, no rotation story,
+        // no decrypt path - the alternative, encrypting at rest, buys
+        // identical semantics and costs shared key storage plus rotation for a
+        // multi-instance deployment.
+        //
+        // Null for an authenticated caller, decided from the booking rather
+        // than from a stored flag: they were never issued one, because their
+        // account is what proves ownership.
+        string? managementToken = null;
+
+        if (booking.CustomerId is null)
+        {
+            managementToken = SecureToken.Generate();
+
+            dbContext.BookingManagementTokens.Add(new BookingManagementToken
+            {
+                Id = Guid.CreateVersion7(),
+                BookingId = booking.Id,
+                TokenHash = SecureToken.Hash(managementToken),
+                CreatedAt = timeProvider.GetUtcNow()
+            });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        // The booking itself is re-read rather than stored. Strict idempotency
+        // would replay the original response verbatim, but everything in it
+        // can go stale: a booking cancelled between the original request and
+        // the replay would otherwise be reported as Pending, and the client
+        // would act on it. Reporting settled state is the same choice
+        // CancelBookingHandler's recancel branch makes.
+        return BuildResponse(booking, managementToken);
     }
 
     private static ConfirmBookingResponse BuildResponse(Booking booking, string? managementToken) =>

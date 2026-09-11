@@ -34,9 +34,5 @@ public class CheckoutIdempotencyRecordConfiguration : IEntityTypeConfiguration<C
         // and a length that stops matching is a bug worth failing on.
         builder.Property(r => r.KeyHash).IsRequired().HasMaxLength(44);
         builder.Property(r => r.RequestFingerprint).IsRequired().HasMaxLength(44);
-
-        // Base64Url of 64 random bytes - 86 characters, no padding. See
-        // SecureToken.Generate.
-        builder.Property(r => r.ManagementToken).HasMaxLength(86);
     }
 }

@@ -10,13 +10,25 @@ public class BookingManagementTokenConfiguration : IEntityTypeConfiguration<Book
 
         builder.Property(t => t.TokenHash).IsRequired();
 
-        // At most one token per booking - a second ConfirmBookingHandler
-        // call for the same booking can never happen (Booking.Create is
-        // called once, per hold, per booking id), but the constraint
-        // documents the invariant rather than relying on call-site
-        // discipline alone. Named explicitly per ADR-0011's gotcha.
+        // Several tokens per booking are legitimate, so this is no longer
+        // unique.
+        //
+        // It was, and the reasoning held at the time: a second
+        // ConfirmBookingHandler call for one booking could not happen, since
+        // Booking.Create runs once per hold per booking id. Replaying a
+        // checkout is that second issuance. It mints a fresh token rather than
+        // returning a stored one, because storing the plaintext is what let a
+        // single table read produce working credentials for every guest
+        // checkout in the replay window.
+        //
+        // Deliberately additive rather than a rotation: a guest who did
+        // receive the first response must not be locked out by their own
+        // client's retry, and the tokens are equivalent in power and scope -
+        // all of them name one booking and expire on that booking's own
+        // clock. Kept as a plain index because it still narrows
+        // BookingAccessChecker's (booking_id, token_hash) predicate. Named
+        // explicitly per ADR-0011's gotcha.
         builder.HasIndex(t => t.BookingId, "ix_booking_management_tokens_booking_id")
-            .IsUnique()
             .HasDatabaseName("ix_booking_management_tokens_booking_id");
 
         // What BookingAccessChecker.ResolveAsync's token path actually

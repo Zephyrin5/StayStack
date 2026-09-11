@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Bookings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using NpgsqlTypes;
 namespace Bookings.Migrations
 {
     [DbContext(typeof(AppBookingsDbContext))]
-    partial class AppBookingsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260911140557_DropStoredManagementTokenFromCheckoutIdempotency")]
+    partial class DropStoredManagementTokenFromCheckoutIdempotency
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -176,6 +179,7 @@ namespace Bookings.Migrations
                         .HasName("pk_booking_management_tokens");
 
                     b.HasIndex(new[] { "BookingId" }, "ix_booking_management_tokens_booking_id")
+                        .IsUnique()
                         .HasDatabaseName("ix_booking_management_tokens_booking_id");
 
                     b.HasIndex(new[] { "TokenHash" }, "ix_booking_management_tokens_token_hash")

@@ -28,6 +28,12 @@ namespace Bookings.Entities;
 ///         exists nowhere else once the response is lost.
 ///     </para>
 ///     <para>
+///         It stores no credential. Replay mints a fresh management token and
+///         persists only its hash, exactly as the original checkout did, so
+///         this table cannot produce a working one - see
+///         ConfirmBookingHandler.ReplayAsync.
+///     </para>
+///     <para>
 ///         How long it stays replayable is
 ///         BookingLifecyclePolicyOptions.CheckoutReplayWindowHours, not a
 ///         constant here. The request path enforces it and
@@ -82,26 +88,4 @@ public sealed class CheckoutIdempotencyRecord
     /// </summary>
     public DateTimeOffset? CompletedAt { get; set; }
 
-    /// <summary>
-    ///     The plaintext management token handed to an anonymous guest, and
-    ///     the only field here that is not recoverable from committed state.
-    ///     <para>
-    ///         Storing it is a deliberate, bounded reversal of the
-    ///         hash-only rule that governs
-    ///         <see cref="BookingManagementToken"/>, and it is the entire cost
-    ///         of this feature. The alternative - replay the booking but not
-    ///         the token - leaves the guest exactly as locked out as before,
-    ///         which is to say it does not implement the feature for the only
-    ///         people who need it. The exposure is bounded by
-    ///         the configured replay window, is confined to one column, and
-    ///         covers a value the client already holds in plaintext anyway.
-    ///     </para>
-    ///     <para>
-    ///         Null for an authenticated caller: they get no management token
-    ///         to begin with, because their booking is reachable through their
-    ///         account. Nothing about the replay path changes for them, so
-    ///         there is nothing to store.
-    ///     </para>
-    /// </summary>
-    public string? ManagementToken { get; set; }
 }

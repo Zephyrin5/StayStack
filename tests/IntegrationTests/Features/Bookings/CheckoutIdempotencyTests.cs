@@ -1,6 +1,7 @@
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
+using Bookings.Features.CreateBookingSession;
 using Bookings.Features.HoldAvailability;
 using Catalog;
 using Catalog.Entities;
@@ -119,7 +120,38 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
         ConfirmBookingResponse replayed = await ReadAsync(second);
         Assert.Equal(original.BookingId, replayed.BookingId);
-        Assert.Equal(original.ManagementToken, replayed.ManagementToken);
+
+        // A *different* token, and that is the design rather than a
+        // concession. Handing back the same one required storing the
+        // plaintext, which undid the reason booking_management_tokens keeps
+        // only a hash. What the guest needs is a working credential, not that
+        // particular string - so this asserts the one property that actually
+        // matters about it.
+        Assert.NotNull(replayed.ManagementToken);
+        Assert.NotEqual(original.ManagementToken, replayed.ManagementToken);
+
+        HttpResponseMessage exchange = await _client.PostAsJsonAsync(
+            $"/api/bookings/{replayed.BookingId}/manage/session",
+            new CreateBookingSessionRequest
+            {
+                BookingId = replayed.BookingId,
+                ManagementToken = replayed.ManagementToken
+            }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, exchange.StatusCode);
+
+        // And the original still works: nothing was rotated or revoked, so a
+        // guest who did receive the first response is not locked out by
+        // somebody else's retry.
+        HttpResponseMessage originalStillWorks = await _client.PostAsJsonAsync(
+            $"/api/bookings/{original.BookingId}/manage/session",
+            new CreateBookingSessionRequest
+            {
+                BookingId = original.BookingId,
+                ManagementToken = original.ManagementToken!
+            }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, originalStillWorks.StatusCode);
 
         // And the retry created nothing. Without the key this second call
         // returns 404 on the consumed hold; the failure mode being fixed is
@@ -241,10 +273,19 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
             .SingleAsync(r => r.BookingId == created.BookingId, TestContext.Current.CancellationToken);
 
         Assert.NotNull(record.CompletedAt);
-        Assert.Equal(created.ManagementToken, record.ManagementToken);
 
-        // The key itself is never stored - only its hash - so a database
-        // reader cannot replay other people's checkouts.
+        // The record carries no credential at all now. A database read must
+        // not be able to produce a working management token, which is the
+        // property booking_management_tokens has always had and this table
+        // briefly took away.
+        Assert.DoesNotContain(
+            nameof(CheckoutIdempotencyRecord.BookingId) + "|" + created.ManagementToken,
+            string.Join("|", typeof(CheckoutIdempotencyRecord).GetProperties().Select(property =>
+                property.GetValue(record)?.ToString() ?? string.Empty)),
+            StringComparison.Ordinal);
+
+        // Neither is the key itself - only its hash - so a database reader
+        // cannot replay other people's checkouts either.
         Assert.DoesNotContain(key, record.KeyHash, StringComparison.Ordinal);
 
         // And the intent is gone, as it always was: the two rows have
