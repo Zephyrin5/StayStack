@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using System.Data.Common;
 using Microsoft.Extensions.Logging;
+using Transactions.Contracts;
 using TickerQ.Utilities.Base;
 using TickerQ.Utilities.Models;
 namespace Bookings.Jobs;
@@ -46,6 +47,7 @@ namespace Bookings.Jobs;
 public partial class ExpireUnpaidBookingsJob(
     AppBookingsDbContext dbContext,
     IHoldConfirmation holdConfirmation,
+    ITransactionLookup transactionLookup,
     BookingsOutboxDispatcher dispatcher,
     TimeProvider timeProvider,
     ILogger<ExpireUnpaidBookingsJob> logger)
@@ -200,6 +202,44 @@ public partial class ExpireUnpaidBookingsJob(
                 return false;
             }
 
+            // The one question this module cannot answer from its own state,
+            // and the only thing standing between a successful payment and
+            // being expired out from under it.
+            //
+            // Everything above is Bookings-side, and Bookings learns about a
+            // payment through an outbox message. MarkTransactionSucceededHandler
+            // commits Succeeded and that message together and then dispatches
+            // it inline as a best effort; when that best effort fails, the row
+            // waits for OutboxRelayJob's cron. Through that whole window a paid
+            // booking is Pending with a lapsed PaymentDueAt, which is precisely
+            // what the scan and the re-check above look for. The re-check does
+            // not help: it re-reads the same rows.
+            //
+            // What followed was not merely a lost booking. The expiry releases
+            // the hold and cancels, the confirmation finally arrives,
+            // ConfirmPaymentAsync sees Cancelled and returns false, and
+            // TransactionsOutboxDispatcher refunds a payment that had
+            // succeeded minutes earlier - a guest who paid on time losing both
+            // the stay and, if the range was re-sold in between, any chance of
+            // getting it back.
+            //
+            // Read last, immediately before the cancellation commits, so the
+            // guarantee is as strong as one read can make it: no payment that
+            // committed Succeeded before this line can be expired. What remains
+            // is a genuine tie - a payment committing between this read and the
+            // commit below, microseconds wide - and it is not closable from
+            // here without one module locking the other's rows. At that point
+            // the payment really did land as the claim lapsed, and the existing
+            // refund is a defensible answer to it. That is a different thing
+            // from refunding payments that beat the deadline by minutes, which
+            // is what this closes.
+            if (await transactionLookup.HasSucceededPaymentAsync(booking.Id, cancellationToken))
+            {
+                LogPaidButUnconfirmed(logger, booking.Id);
+                await transaction.RollbackAsync(cancellationToken);
+                return false;
+            }
+
             // Idempotent, and still worth being: a no-op unless the hold is
             // 'pending_payment' or 'booked', so a retried attempt costs
             // nothing.
@@ -239,6 +279,10 @@ public partial class ExpireUnpaidBookingsJob(
     [LoggerMessage(LogLevel.Information,
         "Expired unpaid booking {BookingId}; its hold was released and any promo redemption reversed")]
     private static partial void LogExpired(ILogger logger, Guid bookingId);
+
+    [LoggerMessage(LogLevel.Warning,
+        "Booking {BookingId} is past its payment deadline but has a succeeded payment, so it was left alone. Its confirmation is still on the outbox - if this repeats for the same booking, that message is stuck")]
+    private static partial void LogPaidButUnconfirmed(ILogger logger, Guid bookingId);
 
     [LoggerMessage(LogLevel.Error,
         "Failed to expire unpaid booking {BookingId}; the batch continued and the next run will retry it. A row failing every run is holding inventory and needs a look")]

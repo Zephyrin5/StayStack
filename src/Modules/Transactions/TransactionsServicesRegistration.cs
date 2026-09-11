@@ -40,6 +40,7 @@ public static class TransactionsServicesRegistration
         });
 
         services.AddScoped<ITransactionReversal, TransactionReversal>();
+        services.AddScoped<ITransactionLookup, TransactionLookup>();
         services.AddScoped<TransactionsOutboxDispatcher>();
 
         return services;

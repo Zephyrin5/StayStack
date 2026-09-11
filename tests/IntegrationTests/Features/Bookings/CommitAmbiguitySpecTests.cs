@@ -297,6 +297,7 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
         ExpireUnpaidBookingsJob job = new ExpireUnpaidBookingsJob(
             scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
             new ReleaseHoldThenFail(scope.ServiceProvider.GetRequiredService<IHoldConfirmation>()),
+            scope.ServiceProvider.GetRequiredService<global::Transactions.Contracts.ITransactionLookup>(),
             scope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>(),
             timeProvider,
             NullLogger<ExpireUnpaidBookingsJob>.Instance);
