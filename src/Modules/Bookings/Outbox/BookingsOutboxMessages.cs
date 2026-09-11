@@ -1,3 +1,4 @@
+using Outbox;
 using SeedWork.Enums;
 namespace Bookings.Outbox;
 
@@ -5,9 +6,25 @@ namespace Bookings.Outbox;
 // cancel) and ConfirmBookingHandler (ReleaseHold/ReverseRedemption only, as
 // the compensation when its own booking-save or promo-redemption fails) -
 // see docs/adr/0003.
+//
+// Each TypeName below is persisted into rows that outlive the deployment that
+// wrote them. Renaming one of these records is free; changing its TypeName
+// strands every undelivered row of that type. See IOutboxMessage.
 
-public record ReleaseHoldOutboxMessage(Guid HoldId);
+public record ReleaseHoldOutboxMessage(Guid HoldId) : IOutboxMessage
+{
+    public const string TypeName = "bookings.release-hold.v1";
+    static string IOutboxMessage.OutboxType => TypeName;
+}
 
-public record ReverseTransactionOutboxMessage(Guid BookingId, decimal RefundAmount, Currency Currency);
+public record ReverseTransactionOutboxMessage(Guid BookingId, decimal RefundAmount, Currency Currency) : IOutboxMessage
+{
+    public const string TypeName = "bookings.reverse-transaction.v1";
+    static string IOutboxMessage.OutboxType => TypeName;
+}
 
-public record ReverseRedemptionOutboxMessage(Guid BookingId);
+public record ReverseRedemptionOutboxMessage(Guid BookingId) : IOutboxMessage
+{
+    public const string TypeName = "bookings.reverse-promotion-redemption.v1";
+    static string IOutboxMessage.OutboxType => TypeName;
+}

@@ -78,7 +78,7 @@ public class TransactionsOutboxDispatcherTests : IDisposable
         OutboxMessage message = new OutboxMessage
         {
             Id = Guid.CreateVersion7(),
-            Type = nameof(ConfirmBookingPaymentOutboxMessage),
+            Type = ConfirmBookingPaymentOutboxMessage.TypeName,
             Payload = JsonSerializer.Serialize(
                 new ConfirmBookingPaymentOutboxMessage(transaction.Id, transaction.BookingId),
                 TransactionsJsonSerializerContext.Default.ConfirmBookingPaymentOutboxMessage),

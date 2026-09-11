@@ -11,9 +11,14 @@ public class OutboxMessage
 {
     public Guid Id { get; init; }
 
-    // The message's own CLR type name (e.g. "ReleaseHoldOutboxMessage") -
+    // The message's stable identifier (e.g. "bookings.release-hold.v1") -
     // each module's dispatcher switches on this to know which JsonTypeInfo
     // to deserialize Payload with and which Contracts call to make.
+    //
+    // It used to be the CLR type name, which made an IDE rename a silent
+    // data migration: rows already written go on carrying the old name and
+    // stop routing. See IOutboxMessage for where these come from and what
+    // the .vN suffix is for.
     public required string Type { get; init; }
 
     public required string Payload { get; init; }

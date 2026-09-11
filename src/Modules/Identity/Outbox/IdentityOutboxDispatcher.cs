@@ -18,7 +18,7 @@ public class IdentityOutboxDispatcher(
     {
         switch (message.Type)
         {
-            case nameof(DeleteHostOutboxMessage):
+            case DeleteHostOutboxMessage.TypeName:
             {
                 DeleteHostOutboxMessage payload = JsonSerializer.Deserialize(
                                                        message.Payload, IdentityJsonSerializerContext.Default.DeleteHostOutboxMessage)

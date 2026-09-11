@@ -21,7 +21,7 @@ public partial class TransactionsOutboxDispatcher(
     {
         switch (message.Type)
         {
-            case nameof(ConfirmBookingPaymentOutboxMessage):
+            case ConfirmBookingPaymentOutboxMessage.TypeName:
             {
                 ConfirmBookingPaymentOutboxMessage payload = DeserializeConfirmBookingPayment(message);
 
@@ -69,7 +69,7 @@ public partial class TransactionsOutboxDispatcher(
     /// </summary>
     protected override async Task OnDeadLetteredAsync(OutboxMessage message, CancellationToken cancellationToken)
     {
-        if (message.Type != nameof(ConfirmBookingPaymentOutboxMessage))
+        if (message.Type != ConfirmBookingPaymentOutboxMessage.TypeName)
         {
             return;
         }

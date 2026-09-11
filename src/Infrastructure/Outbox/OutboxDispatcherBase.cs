@@ -96,13 +96,18 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
     ///     dispatch it inline once that save commits.
     /// </summary>
     public OutboxMessage Enqueue<TMessage>(TMessage message, JsonTypeInfo<TMessage> typeInfo)
+        where TMessage : IOutboxMessage
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
 
         OutboxMessage row = new OutboxMessage
         {
             Id = Guid.CreateVersion7(),
-            Type = typeof(TMessage).Name,
+            // TMessage.OutboxType, never typeof(TMessage).Name: this string is
+            // persisted and routed on long after the deployment that wrote it,
+            // so a CLR type name would make an IDE rename a silent data
+            // migration. See IOutboxMessage.
+            Type = TMessage.OutboxType,
             Payload = JsonSerializer.Serialize(message, typeInfo),
             CreatedAt = now,
             NextAttemptAt = now

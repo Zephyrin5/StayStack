@@ -23,7 +23,7 @@ public class BookingsOutboxDispatcher(
     {
         switch (message.Type)
         {
-            case nameof(ReleaseHoldOutboxMessage):
+            case ReleaseHoldOutboxMessage.TypeName:
             {
                 ReleaseHoldOutboxMessage payload = JsonSerializer.Deserialize(
                                                         message.Payload, BookingsJsonSerializerContext.Default.ReleaseHoldOutboxMessage)
@@ -34,7 +34,7 @@ public class BookingsOutboxDispatcher(
                 break;
             }
 
-            case nameof(ReverseTransactionOutboxMessage):
+            case ReverseTransactionOutboxMessage.TypeName:
             {
                 ReverseTransactionOutboxMessage payload = JsonSerializer.Deserialize(
                                                                message.Payload, BookingsJsonSerializerContext.Default.ReverseTransactionOutboxMessage)
@@ -48,7 +48,7 @@ public class BookingsOutboxDispatcher(
                 break;
             }
 
-            case nameof(ReverseRedemptionOutboxMessage):
+            case ReverseRedemptionOutboxMessage.TypeName:
             {
                 ReverseRedemptionOutboxMessage payload = JsonSerializer.Deserialize(
                                                               message.Payload, BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage)

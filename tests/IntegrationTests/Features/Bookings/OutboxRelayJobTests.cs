@@ -61,7 +61,7 @@ public class OutboxRelayJobTests(IntegrationTestWebApplicationFactory factory)
         OutboxMessage message = new OutboxMessage
         {
             Id = Guid.CreateVersion7(),
-            Type = nameof(ReleaseHoldOutboxMessage),
+            Type = ReleaseHoldOutboxMessage.TypeName,
             Payload = JsonSerializer.Serialize(
                 new ReleaseHoldOutboxMessage(holdId), BookingsJsonSerializerContext.Default.ReleaseHoldOutboxMessage),
             CreatedAt = DateTimeOffset.UtcNow,
@@ -81,7 +81,7 @@ public class OutboxRelayJobTests(IntegrationTestWebApplicationFactory factory)
         OutboxMessage message = new OutboxMessage
         {
             Id = Guid.CreateVersion7(),
-            Type = nameof(ReleaseHoldOutboxMessage),
+            Type = ReleaseHoldOutboxMessage.TypeName,
             Payload = JsonSerializer.Serialize(
                 new ReleaseHoldOutboxMessage(holdId), BookingsJsonSerializerContext.Default.ReleaseHoldOutboxMessage),
             CreatedAt = deadLetteredAt.AddHours(-1),

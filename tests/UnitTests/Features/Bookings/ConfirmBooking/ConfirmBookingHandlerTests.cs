@@ -181,7 +181,7 @@ public class ConfirmBookingHandlerTests : IDisposable
         // The release attempt was made and failed, but is still there,
         // durably queued for OutboxRelayJob to pick up.
         OutboxMessage queuedMessage = await _dbContext.Set<OutboxMessage>().SingleAsync();
-        Assert.Equal(nameof(ReleaseHoldOutboxMessage), queuedMessage.Type);
+        Assert.Equal(ReleaseHoldOutboxMessage.TypeName, queuedMessage.Type);
         Assert.Null(queuedMessage.ProcessedAt);
         Assert.Equal(1, queuedMessage.Attempts);
         Assert.Equal(releaseFailure.Message, queuedMessage.LastError);

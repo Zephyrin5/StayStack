@@ -385,13 +385,13 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
         {
             AppTransactionsDbContext arrangeDb = arrangeScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
             await arrangeDb.Database.ExecuteSqlRawAsync(
-                """
+                $"""
                 UPDATE "transactions_outbox_messages"
                 -- An hour in the past, not now(): the dispatcher compares
                 -- against its own TimeProvider, and "exactly now" by
                 -- Postgres' clock is not reliably <= "now" by the app's.
                 SET attempts = 9, next_attempt_at = now() - interval '1 hour'
-                WHERE type = 'ConfirmBookingPaymentOutboxMessage'
+                WHERE type = '{ConfirmBookingPaymentOutboxMessage.TypeName}'
                   AND processed_at IS NULL AND dead_lettered_at IS NULL
                 """,
                 TestContext.Current.CancellationToken);
@@ -410,7 +410,7 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
 
         AppTransactionsDbContext transactionsDb = assertScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
         var confirmationMessages = await transactionsDb.TransactionsOutboxMessages.AsNoTracking()
-            .Where(m => m.Type == "ConfirmBookingPaymentOutboxMessage")
+            .Where(m => m.Type == ConfirmBookingPaymentOutboxMessage.TypeName)
             .Select(m => new { m.Attempts, m.ProcessedAt, m.DeadLetteredAt })
             .ToListAsync(TestContext.Current.CancellationToken);
 
