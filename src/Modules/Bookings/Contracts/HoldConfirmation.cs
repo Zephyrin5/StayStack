@@ -36,11 +36,45 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
     ///         avoidable rather than inherent.
     ///     </para>
     ///     <para>
-    ///         Null when the caller has no transaction open, which leaves
-    ///         every existing call site behaving exactly as before.
+    ///         Null when the caller has no transaction open. Every read here
+    ///         is fine with that. Every <em>write</em> is not, which is why
+    ///         they go through <see cref="RequiredTransaction"/> instead.
     ///     </para>
     /// </summary>
     private DbTransaction? AmbientTransaction => dbContext.Database.CurrentTransaction?.GetDbTransaction();
+
+    /// <summary>
+    ///     The caller's transaction, required.
+    ///     <para>
+    ///         The three statements that change a hold's status are each half
+    ///         of a decision whose other half lives in a Bookings row: the
+    ///         transition and the intent, the payment and the confirmation,
+    ///         the release and the cancellation. Every one of them has already
+    ///         been the subject of a defect where the two halves committed
+    ///         independently, and the whole point of holds living in this
+    ///         module is that they no longer have to.
+    ///     </para>
+    ///     <para>
+    ///         Without this, the difference between "participates in your
+    ///         transaction" and "commits immediately, whatever you do next" is
+    ///         invisible at the call site and decided by whoever opened a
+    ///         transaction several frames up. Every caller today is correct;
+    ///         the next one has nothing to tell it what it owes, and the way it
+    ///         would find out is a hold released beneath a cancellation that
+    ///         rolled back.
+    ///     </para>
+    ///     <para>
+    ///         A throw rather than opening one here. Opening a transaction on
+    ///         the caller's behalf would make each of these atomic with
+    ///         nothing but itself, which is exactly the shape that reads as
+    ///         safe and is not.
+    ///     </para>
+    /// </summary>
+    private DbTransaction RequiredTransaction([System.Runtime.CompilerServices.CallerMemberName] string? caller = null) =>
+        AmbientTransaction ?? throw new InvalidOperationException(
+            $"{nameof(HoldConfirmation)}.{caller} must be called inside a transaction. It changes a hold's status, and " +
+            "that transition is always half of a decision whose other half is a Bookings row - committing it on its own " +
+            "is how a hold ends up released beneath a cancellation that never landed.");
 
     // Raw shape of the RETURNING row, materialized first and assembled into
     // Money afterward - the same materialize-first-map-after shape as
@@ -132,7 +166,7 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
 
         ConfirmedHoldRow? row = await connection.QuerySingleOrDefaultAsync<ConfirmedHoldRow>(
             new CommandDefinition(sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() },
-                AmbientTransaction, cancellationToken: cancellationToken));
+                RequiredTransaction(), cancellationToken: cancellationToken));
 
         if (row is null)
         {
@@ -255,7 +289,7 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
         {
             int rowsAffected = await connection.ExecuteAsync(new CommandDefinition(
                 sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() },
-                AmbientTransaction, cancellationToken: cancellationToken));
+                RequiredTransaction(), cancellationToken: cancellationToken));
 
             return rowsAffected > 0;
         }
@@ -310,7 +344,7 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
         {
             await connection.ExecuteAsync(new CommandDefinition(
                 sql, new { HoldId = holdId, Now = timeProvider.GetUtcNow() },
-                AmbientTransaction, cancellationToken: cancellationToken));
+                RequiredTransaction(), cancellationToken: cancellationToken));
         }
         finally
         {

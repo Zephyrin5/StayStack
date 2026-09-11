@@ -8,6 +8,7 @@ using Catalog;
 using Catalog.Contracts;
 using Catalog.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -606,7 +607,17 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
 
             // Checkout submitted, nothing paid. Under the old cap this line
             // is what made the loop unbounded.
-            await holdConfirmation.ConfirmHoldAsync(held.HoldId, CancellationToken.None);
+            //
+            // In a transaction because HoldConfirmation now insists on one for
+            // every status transition: each is half of a decision whose other
+            // half is a Bookings row, and this test is standing in for the
+            // handler that would own both.
+            await using (IDbContextTransaction checkout =
+                         await context.Database.BeginTransactionAsync(CancellationToken.None))
+            {
+                await holdConfirmation.ConfirmHoldAsync(held.HoldId, CancellationToken.None);
+                await checkout.CommitAsync(CancellationToken.None);
+            }
         }
 
         HoldAvailabilityRequest sixthRequest = new HoldAvailabilityRequest

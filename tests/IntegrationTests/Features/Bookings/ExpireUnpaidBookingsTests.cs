@@ -113,6 +113,11 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         return timeProvider;
     }
 
+    // The same DbContext instance HoldConfirmation resolved from this scope -
+    // an advisory transaction is only ambient to the context that opened it.
+    private static AppBookingsDbContext ContextIn(IServiceScope scope) =>
+        scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+
     private async Task<string> GetHoldStatusAsync(Guid holdId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
@@ -364,8 +369,16 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         using IServiceScope scope = factory.Services.CreateScope();
         IHoldConfirmation holdConfirmation = scope.ServiceProvider.GetRequiredService<IHoldConfirmation>();
 
-        // Act
-        await holdConfirmation.ReleaseHoldAsync(holdId, TestContext.Current.CancellationToken);
+        // Act - in a transaction, because HoldConfirmation now requires one
+        // for every status transition. See RequiredTransaction: the release is
+        // always half of a decision whose other half is a Bookings row, and a
+        // caller without a transaction is one that cannot keep them together.
+        await using (IDbContextTransaction release = await ContextIn(scope)
+                         .Database.BeginTransactionAsync(TestContext.Current.CancellationToken))
+        {
+            await holdConfirmation.ReleaseHoldAsync(holdId, TestContext.Current.CancellationToken);
+            await release.CommitAsync(TestContext.Current.CancellationToken);
+        }
 
         // Assert
         Assert.Equal("held", await GetHoldStatusAsync(holdId));
@@ -434,6 +447,8 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
 
         // Now expiry finishes its work while still holding the lock, exactly
         // as the job does: hand the hold back, then cancel the booking.
+        // Already inside expiryTransaction on this same context, which is what
+        // HoldConfirmation requires - and what the job it stands in for does.
         await expiryScope.ServiceProvider.GetRequiredService<IHoldConfirmation>()
             .ReleaseHoldAsync(holdId, TestContext.Current.CancellationToken);
 
@@ -483,9 +498,24 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         using IServiceScope scope = factory.Services.CreateScope();
         IHoldConfirmation holdConfirmation = scope.ServiceProvider.GetRequiredService<IHoldConfirmation>();
 
-        // Act
-        bool first = await holdConfirmation.MarkHoldPaidAsync(holdId, TestContext.Current.CancellationToken);
-        bool second = await holdConfirmation.MarkHoldPaidAsync(holdId, TestContext.Current.CancellationToken);
+        // Act - one transaction per call, mirroring the two separate attempts
+        // this is standing in for. Both are transitions, so both need one.
+        bool first;
+        bool second;
+
+        await using (IDbContextTransaction attempt = await ContextIn(scope)
+                         .Database.BeginTransactionAsync(TestContext.Current.CancellationToken))
+        {
+            first = await holdConfirmation.MarkHoldPaidAsync(holdId, TestContext.Current.CancellationToken);
+            await attempt.CommitAsync(TestContext.Current.CancellationToken);
+        }
+
+        await using (IDbContextTransaction retry = await ContextIn(scope)
+                         .Database.BeginTransactionAsync(TestContext.Current.CancellationToken))
+        {
+            second = await holdConfirmation.MarkHoldPaidAsync(holdId, TestContext.Current.CancellationToken);
+            await retry.CommitAsync(TestContext.Current.CancellationToken);
+        }
 
         // Assert
         Assert.True(first);
@@ -511,7 +541,14 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         IHoldConfirmation holdConfirmation = scope.ServiceProvider.GetRequiredService<IHoldConfirmation>();
 
         // Act
-        bool marked = await holdConfirmation.MarkHoldPaidAsync(holdId, TestContext.Current.CancellationToken);
+        bool marked;
+
+        await using (IDbContextTransaction attempt = await ContextIn(scope)
+                         .Database.BeginTransactionAsync(TestContext.Current.CancellationToken))
+        {
+            marked = await holdConfirmation.MarkHoldPaidAsync(holdId, TestContext.Current.CancellationToken);
+            await attempt.CommitAsync(TestContext.Current.CancellationToken);
+        }
 
         // Assert
         Assert.False(marked);
