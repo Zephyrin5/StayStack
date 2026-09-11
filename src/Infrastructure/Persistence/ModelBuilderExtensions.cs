@@ -4,7 +4,6 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SeedWork.Abstractions;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 namespace Persistence;
 
@@ -30,13 +29,6 @@ public static class ModelBuilderExtensions
     ///         true, so the divergence is caught rather than discovered.
     ///     </para>
     /// </summary>
-    [UnconditionalSuppressMessage(
-        "Trimming",
-        "IL2026:Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code",
-        Justification = "<Pending>")]
-    [UnconditionalSuppressMessage("AOT",
-        "IL3050:Calling members annotated with 'RequiresDynamicCodeAttribute' may break functionality when AOT compiling.",
-        Justification = "<Pending>")]
     public static void ApplySoftDeleteQueryFilter(this ModelBuilder modelBuilder)
     {
         foreach (IMutableEntityType entityType in modelBuilder.Model.GetEntityTypes())

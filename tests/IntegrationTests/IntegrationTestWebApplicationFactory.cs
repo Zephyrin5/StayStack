@@ -177,10 +177,6 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
 
             services.RemoveAll<DbContextOptions<AppBookingsDbContext>>();
             services.AddDbContext<AppBookingsDbContext>(options =>
-                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "availability", false));
-
-            services.RemoveAll<DbContextOptions<AppBookingsDbContext>>();
-            services.AddDbContext<AppBookingsDbContext>(options =>
                 options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "bookings", false));
 
             services.RemoveAll<DbContextOptions<AppTransactionsDbContext>>();

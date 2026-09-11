@@ -4,9 +4,12 @@ using Identity.Exceptions;
 using Identity.Features.Common;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 namespace Identity.Features.SignUp;
 
 public class SignUpHandler(
+    AppIdentityDbContext dbContext,
     UserManager<ApplicationUser> userManager,
     IAuthTokenProvider authTokenProvider) : IRequestHandler<SignUpRequest, SignUpResponse>
 {
@@ -30,6 +33,51 @@ public class SignUpHandler(
             Email = request.Email
         };
 
+        // One transaction, replacing a compensating delete. All three writes -
+        // the user, the role assignment, the refresh token - land in
+        // AppIdentityDbContext, on the connection this transaction owns, so
+        // there is nothing here that cannot be rolled back.
+        //
+        // The delete was copied from BecomeHostHandler, where it is correct:
+        // that handler's first write goes to another module's database, which
+        // no local transaction can reach, so compensation is the only option
+        // (docs/adr/0003). Nothing about that applies here, and the copy was
+        // strictly worse than the transaction it stood in for - DeleteAsync's
+        // own result was discarded, so a failed compensation left exactly the
+        // roleless account it was written to prevent, silently.
+        //
+        // It also covered less than it appeared to. A failure in
+        // GenerateRefreshToken below was not compensated at all, leaving a
+        // registered account whose caller was told registration failed.
+        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
+
+        SignUpResponse response = await strategy.ExecuteAsync(async () =>
+        {
+            dbContext.ChangeTracker.Clear();
+
+            await using IDbContextTransaction transaction =
+                await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+            SignUpResponse created = await RegisterAsync(user, request, cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+            return created;
+        });
+
+        return response;
+    }
+
+    /// <summary>
+    ///     Everything registration writes, inside the caller's transaction.
+    ///     <para>
+    ///         UserManager saves through this same scoped
+    ///         AppIdentityDbContext, so its own SaveChanges calls enlist in
+    ///         that transaction rather than committing beside it.
+    ///     </para>
+    /// </summary>
+    private async Task<SignUpResponse> RegisterAsync(
+        ApplicationUser user, SignUpRequest request, CancellationToken cancellationToken)
+    {
         IdentityResult createResult = await userManager.CreateAsync(user, request.Password);
         if (!createResult.Succeeded)
         {
@@ -58,12 +106,10 @@ public class SignUpHandler(
 
         if (!roleResult.Succeeded)
         {
-            // Extremely unlikely with seed data in place, but if the
-            // Customer role is ever missing, fail loudly rather than leave a
-            // roleless account behind - matches BecomeHostHandler's
-            // identical compensating delete.
-            await userManager.DeleteAsync(user);
-
+            // Extremely unlikely with seed data in place, but if the Customer
+            // role is ever missing, fail loudly rather than leave a roleless
+            // account behind. The rollback is what removes the user now - no
+            // compensating delete whose own result could be ignored.
             throw new ValidationException(
                 "Role",
                 string.Join(" ", roleResult.Errors.Select(e => e.Description)));

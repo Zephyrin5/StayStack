@@ -2,6 +2,9 @@ using Bookings;
 using Catalog;
 using Hosts;
 using Identity;
+using Promotions;
+using Reviews;
+using Transactions;
 using Microsoft.EntityFrameworkCore;
 using Persistence;
 namespace UnitTests.Persistence;
@@ -53,6 +56,39 @@ public class ModelHasNoPendingChangesTests
         var builder = new DbContextOptionsBuilder<AppBookingsDbContext>();
         builder.ConfigureStayStackDefaults(UnusedConnectionString, "bookings", false);
         using AppBookingsDbContext context = new AppBookingsDbContext(builder.Options);
+
+        Assert.False(context.Database.HasPendingModelChanges());
+    }
+
+    // The three that had migration histories and no test. Nothing about them
+    // made the check less applicable - they were simply added later than the
+    // four above, which is exactly how this kind of coverage goes missing.
+    [Fact]
+    public void AppPromotionsDbContext_HasNoPendingModelChanges()
+    {
+        var builder = new DbContextOptionsBuilder<AppPromotionsDbContext>();
+        builder.ConfigureStayStackDefaults(UnusedConnectionString, "promotions", false);
+        using AppPromotionsDbContext context = new AppPromotionsDbContext(builder.Options);
+
+        Assert.False(context.Database.HasPendingModelChanges());
+    }
+
+    [Fact]
+    public void AppTransactionsDbContext_HasNoPendingModelChanges()
+    {
+        var builder = new DbContextOptionsBuilder<AppTransactionsDbContext>();
+        builder.ConfigureStayStackDefaults(UnusedConnectionString, "transactions", false);
+        using AppTransactionsDbContext context = new AppTransactionsDbContext(builder.Options);
+
+        Assert.False(context.Database.HasPendingModelChanges());
+    }
+
+    [Fact]
+    public void AppReviewsDbContext_HasNoPendingModelChanges()
+    {
+        var builder = new DbContextOptionsBuilder<AppReviewsDbContext>();
+        builder.ConfigureStayStackDefaults(UnusedConnectionString, "reviews", false);
+        using AppReviewsDbContext context = new AppReviewsDbContext(builder.Options);
 
         Assert.False(context.Database.HasPendingModelChanges());
     }

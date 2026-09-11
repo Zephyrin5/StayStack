@@ -26,7 +26,7 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 
 | # | Title | Status |
 |---|---|---|
-| [0001](0001-native-aot-compatibility.md) | Native AOT compatibility as a design constraint | Accepted |
+| [0001](0001-native-aot-compatibility.md) | Native AOT compatibility as a design constraint | Superseded (goal dropped, library choices kept) |
 | [0002](0002-tickerq-for-background-jobs.md) | TickerQ for background jobs | Accepted |
 | [0003](0003-compensating-actions-over-distributed-transactions.md) | Compensating actions and a transactional outbox for cross-module writes | Accepted; partially superseded by [0017](0017-durable-intent-records-for-cross-module-writes.md) |
 | [0004](0004-module-boundaries-via-contracts-projects.md) | Module boundaries via per-module Contracts projects | Accepted |

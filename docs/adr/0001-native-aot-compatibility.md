@@ -1,6 +1,6 @@
 # 0001 - Native AOT compatibility as a design constraint
 
-**Status:** Accepted
+**Status:** Superseded - the AOT *goal* is dropped; the library choices it produced are kept. See "Amendment" below.
 
 ## Context
 
@@ -30,3 +30,30 @@ This constraint directly shaped several other choices, each with its own smaller
 - **TickerQ** over **Hangfire** for background jobs - see [ADR-0002](0002-tickerq-for-background-jobs.md).
 
 None of these choices are free - they're all less "batteries-included" than their reflection-based alternatives, and some (TickerQ especially) are less mature as a result. That tradeoff is the point of this ADR: it's deliberate, not accidental, and it should keep being made deliberately for future dependencies rather than silently drifting once a popular reflection-heavy library looks convenient.
+
+## Amendment: the posture was declared and never actually taken
+
+The decision above was never carried out in the one way that would have made it real. There is no `PublishAot` anywhere, no AOT publish is produced, and nothing deploys one. What existed was the *declaration* - `IsAotCompatible=true` globally, plus an advisory CI step - and the declaration on its own produced two things:
+
+- **14 build warnings on every build**, mostly `IL2026` from EF Core's own reflection and from `ValidateDataAnnotations`, which are not closable from here.
+- **Suppressions that argued against the constraint that generated them.** `StayStackDbContext` carried an `IL3050` suppression justified, verbatim, as "Not utilizing Native AOT execution" - and two more on `ApplySoftDeleteQueryFilter` justified as `"<Pending>"`. A codebase that suppresses its own AOT diagnostics on the grounds that it does not use AOT is not holding a constraint; it is filing paperwork about one.
+
+Warnings nobody can act on are worse than no warnings, because they train everyone to skim the build output - which is where a real, actionable warning would have appeared.
+
+So `IsAotCompatible`, the four suppressions and the advisory CI step are removed.
+
+### What is kept, and why this is not a reversal of the consequences
+
+Every library choice the original decision produced stays, because each earns its place on a normal runtime independently of AOT:
+
+- **Mediator** over MediatR - source-generated dispatch is faster and its failures are compile-time.
+- **Dapper.AOT** over plain Dapper - the interceptors remain (`InterceptorsPreviewNamespaces` stays in `src/Directory.Build.props`).
+- **A `JsonSerializerContext` per module** - source-generated serialization is faster than the reflective resolver and keeps payload shapes explicit. The discipline it imposes is unchanged: a request or response type not registered in its module's context still fails at runtime.
+- **TickerQ** over Hangfire - see [ADR-0002](0002-tickerq-for-background-jobs.md), which stands on its own terms.
+- **`CreateSlimBuilder`** in `Program.cs`.
+
+What is dropped is the *goal*: new dependencies are no longer evaluated against AOT compatibility, and a reflection-using library is no longer excluded on that basis alone.
+
+### What it would take to revive this
+
+Not a revert of this amendment. AOT would need a deployment reason (cold start or image size actually mattering), a `PublishAot` target that is *built*, and CI that fails rather than advises - because the thing that failed here was not the trade-off, it was keeping a constraint alive with nothing enforcing it. The original ADR's own closing line named that risk as "silently drifting"; this is that drift, recorded rather than left in place.

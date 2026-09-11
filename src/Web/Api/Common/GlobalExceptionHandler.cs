@@ -133,14 +133,16 @@ public sealed partial class GlobalExceptionHandler(
         };
     }
 
-    private static ProblemDetails BuildProblem(int statusCode, string detail)
+    private ProblemDetails BuildProblem(int statusCode, string detail)
     {
+        (string title, string type) = DescribeStatus(statusCode);
+
         return new ProblemDetails
         {
             Status = statusCode,
-            Title = ReasonPhraseFor(statusCode),
+            Title = title,
             Detail = detail,
-            Type = $"https://tools.ietf.org/html/rfc9110#section-15.{StatusCategoryFragment(statusCode)}"
+            Type = type
         };
     }
 
@@ -160,31 +162,49 @@ public sealed partial class GlobalExceptionHandler(
         };
     }
 
-    private static string ReasonPhraseFor(int statusCode)
+    /// <summary>
+    ///     The title and RFC reference for one status code.
+    ///     <para>
+    ///         One switch rather than the two this used to be. They were keyed
+    ///         on the same value and had to agree, and they stopped agreeing
+    ///         the moment a code was added to neither:
+    ///         TooManyActiveHoldsException correctly carries 429 and got the
+    ///         title "An error occurred" from one fallback and the RFC section
+    ///         for 500 from the other - so the body said server error while the
+    ///         status line said the client should back off. Returning both
+    ///         together makes half-adding a code impossible.
+    ///     </para>
+    ///     <para>
+    ///         429's reference is RFC 6585, not RFC 9110 - 9110 §15.5
+    ///         enumerates 400-417, 421, 422 and 426 and does not define 429 at
+    ///         all. The old code built every URI from one rfc9110 template, so
+    ///         adding 429 to it would have produced a confidently wrong link
+    ///         rather than a vague one. Hence whole URIs here, not fragments.
+    ///     </para>
+    /// </summary>
+    private (string Title, string Type) DescribeStatus(int statusCode)
     {
         return statusCode switch
         {
-            StatusCodes.Status400BadRequest => "Bad request",
-            StatusCodes.Status401Unauthorized => "Unauthorized",
-            StatusCodes.Status403Forbidden => "Forbidden",
-            StatusCodes.Status404NotFound => "Not found",
-            StatusCodes.Status409Conflict => "Conflict",
-            _ => "An error occurred"
+            StatusCodes.Status400BadRequest => ("Bad request", Rfc9110("15.5.1")),
+            StatusCodes.Status401Unauthorized => ("Unauthorized", Rfc9110("15.5.2")),
+            StatusCodes.Status403Forbidden => ("Forbidden", Rfc9110("15.5.4")),
+            StatusCodes.Status404NotFound => ("Not found", Rfc9110("15.5.5")),
+            StatusCodes.Status409Conflict => ("Conflict", Rfc9110("15.5.10")),
+            StatusCodes.Status429TooManyRequests => ("Too many requests", "https://tools.ietf.org/html/rfc6585#section-4"),
+            // Loud in Development, generic everywhere else. An unmapped code
+            // is a bug in this switch rather than a runtime condition, and the
+            // only thing worse than an unhelpful response body is one nobody
+            // notices - which is what a silent fallback guarantees, since every
+            // unmapped code produces a plausible-looking 500-shaped answer.
+            _ when environment.IsDevelopment() => throw new InvalidOperationException(
+                $"Status code {statusCode} has no entry in {nameof(DescribeStatus)}. Add its title and RFC reference; " +
+                "the fallback would otherwise report it as a generic server error to clients."),
+            _ => ("An error occurred", Rfc9110("15.6.1"))
         };
     }
 
-    private static string StatusCategoryFragment(int statusCode)
-    {
-        return statusCode switch
-        {
-            StatusCodes.Status400BadRequest => "5.1",
-            StatusCodes.Status401Unauthorized => "5.2",
-            StatusCodes.Status403Forbidden => "5.4",
-            StatusCodes.Status404NotFound => "5.5",
-            StatusCodes.Status409Conflict => "5.10",
-            _ => "6.1"
-        };
-    }
+    private static string Rfc9110(string section) => $"https://tools.ietf.org/html/rfc9110#section-{section}";
 
     [LoggerMessage(LogLevel.Warning, "{ExceptionType} handled for {Path}: {Message}")]
     private static partial void LogHandledAppException(

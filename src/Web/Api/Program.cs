@@ -40,7 +40,21 @@ if (builder.Environment.IsDevelopment())
 }
 
 builder.Services.ConfigureIdentityServices(builder.Configuration, builder.Environment);
-// TODO: Disabled until Grafana is configured
+// TODO: Disabled until Grafana is configured.
+//
+// Before uncommenting: invert PayloadRedactor to an allow-list. It is a
+// deny-list today, so every public property of every request and response is
+// serialised verbatim into an Activity tag and into Information/Warning logs
+// unless somebody remembered [Sensitive]. Nothing leaks while this line is
+// commented out, which is exactly why the cost of a missing annotation is
+// invisible until the day it is paid - all at once, retroactively, across
+// whatever the log sink retains.
+//
+// A deny-list also cannot be audited. Reviewing what *is* annotated tells you
+// nothing; you would have to review every property that is not, in every
+// module, forever. An allow-list makes the same review finite and makes the
+// default outcome of forgetting "this field is missing from the trace" rather
+// than "this field is in the logs".
 //builder.Services.ConfigureObservabilityServices(builder.Configuration);
 builder.Services.ConfigurePersistenceServices();
 builder.Services.ConfigureApiServices(builder.Configuration);

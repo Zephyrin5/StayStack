@@ -1,3 +1,4 @@
+using BuildingBlocks.Observability;
 using FastEndpoints;
 using Mediator;
 using System.Text.Json.Serialization;
@@ -24,7 +25,16 @@ public record HoldAvailabilityRequest : IRequest<HoldAvailabilityResponse>
     // concurrent-hold cap counts by - so a caller who could set it from the
     // body would be back to choosing their own budget, which is exactly the
     // defect that moved the cap off the cookie in the first place.
+    //
+    // [Sensitive] because the other two attributes keep it out of the request
+    // and say nothing about the response side: PayloadRedactor is a deny-list,
+    // so every unmarked property is written verbatim into an Activity tag and
+    // into Information/Warning logs. This is a hashed network identifier -
+    // an IPv6 /64 - which is the caller's approximate location, retained for
+    // as long as the log sink keeps anything. Nothing needs it to be legible
+    // in a trace.
     [JsonIgnore]
     [DontBind(Source.QueryParam | Source.RouteParam | Source.FormField)]
+    [Sensitive]
     public string ClientKey { get; set; } = string.Empty;
 }

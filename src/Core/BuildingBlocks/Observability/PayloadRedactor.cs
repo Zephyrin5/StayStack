@@ -7,6 +7,15 @@ namespace BuildingBlocks.Observability;
 ///     Redacts [Sensitive]-marked properties from an object for logging and
 ///     tracing. The generic message type lets the trimmer preserve exactly
 ///     the public properties this diagnostic formatter inspects.
+///     <para>
+///         <b>This is a deny-list, and it should not stay one.</b> Every
+///         property without <c>[Sensitive]</c> is emitted verbatim, so the
+///         default for a field somebody forgot is to publish it. Inverting to
+///         an allow-list is a precondition for enabling telemetry, not a
+///         later improvement - see the note beside
+///         <c>ConfigureObservabilityServices</c> in Program.cs, which is where
+///         someone turning it on will be standing.
+///     </para>
 /// </summary>
 internal static class PayloadRedactor
 {
