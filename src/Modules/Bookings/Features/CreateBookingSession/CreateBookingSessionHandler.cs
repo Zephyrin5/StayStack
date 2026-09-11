@@ -35,16 +35,14 @@ public class CreateBookingSessionHandler(
         // booking" is how the two drift apart, and this is the copy that mints
         // credentials.
         //
-        // sessionBookingId is deliberately not passed. A session must not be
-        // able to mint another session: that would turn a 45-minute credential
-        // into an indefinitely renewable one, which is the property the short
-        // lifetime exists to deny. Re-exchanging needs the original token,
-        // which is exactly what the guest's link still carries.
-        BookingAccess access = await BookingAccessChecker.ResolveAsync(
-                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken,
-                              sessionBookingId: null, timeProvider,
-                              policy.Value.ManagementTokenLifetimeDaysAfterCheckOut, cancellationToken)
-                          ?? throw new NotFoundException(nameof(Booking), request.BookingId);
+        // The token-only path, which is what makes a session unable to mint
+        // another session: an indefinitely renewable 45-minute credential is
+        // exactly what the short lifetime exists to deny. Re-exchanging needs
+        // the original token, which the guest's link still carries.
+        BookingAccess access = await BookingAccessChecker.ResolveByManagementTokenAsync(
+                                   dbContext, request.BookingId, request.ManagementToken, timeProvider,
+                                   policy.Value.ManagementTokenLifetimeDaysAfterCheckOut, cancellationToken)
+                               ?? throw new NotFoundException(nameof(Booking), request.BookingId);
 
         Booking booking = access.Booking;
 

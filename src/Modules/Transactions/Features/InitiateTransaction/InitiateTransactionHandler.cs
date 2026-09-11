@@ -41,7 +41,6 @@ public class InitiateTransactionHandler(
         BookingAccessResult booking = await bookingLookup.VerifyBookingAccessAsync(
                                           request.BookingId,
                                           currentUserProvider.UserId,
-                                          request.ManagementToken,
                                           cancellationToken)
                                       ?? throw new NotFoundException("Booking", request.BookingId);
 

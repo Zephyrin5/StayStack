@@ -1,8 +1,6 @@
 using Bookings;
 using Bookings.Entities;
 using Bogus;
-using Bookings;
-using Bookings.Entities;
 using Catalog;
 using Catalog.Entities;
 using Catalog.Enums;

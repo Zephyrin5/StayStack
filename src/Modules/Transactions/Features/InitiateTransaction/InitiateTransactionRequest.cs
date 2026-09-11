@@ -20,5 +20,5 @@ public record InitiateTransactionRequest : IRequest<InitiateTransactionResponse>
     ///         withhold them from.
     ///     </para>
     /// </summary>
-    [Sensitive] public string? ManagementToken { get; init; }
+
 }

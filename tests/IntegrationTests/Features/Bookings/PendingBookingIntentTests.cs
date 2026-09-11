@@ -2,8 +2,6 @@ using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;
 using Bookings.Features.HoldAvailability;
-using Bookings;
-using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
 using Bookings.Jobs;
 using Catalog;

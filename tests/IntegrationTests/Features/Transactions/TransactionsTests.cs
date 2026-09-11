@@ -22,6 +22,7 @@ using Transactions.Entities;
 using Transactions.Features.GetTransactions;
 using Transactions.Features.InitiateTransaction;
 using Transactions.Features.MarkTransactionFailed;
+using Bookings.Features.CreateBookingSession;
 namespace IntegrationTests.Features.Transactions;
 
 // Exercises the full hold -> confirm -> initiate transaction -> succeed
@@ -30,6 +31,38 @@ namespace IntegrationTests.Features.Transactions;
 [Collection("Integration Tests")]
 public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
 {
+    // The management token buys a session now, and the session is what every
+    // management call carries - so a test that used to hand the raw token to
+    // an endpoint has to make the same round trip a real client makes. See
+    // docs/adr/0023.
+    private async Task<string> OpenSessionAsync(Guid bookingId, string managementToken)
+    {
+        HttpResponseMessage response = await _client.PostAsJsonAsync(
+            $"/api/bookings/{bookingId}/manage/session",
+            new CreateBookingSessionRequest { BookingId = bookingId, ManagementToken = managementToken },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        CreateBookingSessionResponse? session = await response.Content
+            .ReadFromJsonAsync<CreateBookingSessionResponse>(
+                TestJsonOptions.Default, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(session?.SessionToken);
+        return session.SessionToken;
+    }
+
+    private async Task<HttpResponseMessage> PostWithSessionAsync(string uri, object body, string sessionToken)
+    {
+        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, uri)
+        {
+            Content = JsonContent.Create(body)
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", sessionToken);
+
+        return await _client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
     // Properties for units built by CreateTestUnit below, flushed by the
     // seeder so a unit is never persisted without its owner - see
     // CatalogSeeding.
@@ -160,8 +193,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         string adminToken = await SignInAsAdministratorAsync();
 
         // Act - initiate
-        HttpResponseMessage initiateResponse = await _client.PostAsJsonAsync(
-            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId, ManagementToken = managementToken }, TestContext.Current.CancellationToken);
+        HttpResponseMessage initiateResponse = await PostWithSessionAsync("/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, await OpenSessionAsync(bookingId, managementToken));
 
         // Assert - initiate
         Assert.Equal(HttpStatusCode.OK, initiateResponse.StatusCode);
@@ -193,13 +225,11 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         await SeedCatalogAsync(unit);
         (Guid bookingId, string managementToken) = await HoldAndConfirmBookingAsync(unit.Id);
 
-        HttpResponseMessage firstResponse = await _client.PostAsJsonAsync(
-            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId, ManagementToken = managementToken }, TestContext.Current.CancellationToken);
+        HttpResponseMessage firstResponse = await PostWithSessionAsync("/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, await OpenSessionAsync(bookingId, managementToken));
         Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
 
         // Act
-        HttpResponseMessage secondResponse = await _client.PostAsJsonAsync(
-            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId, ManagementToken = managementToken }, TestContext.Current.CancellationToken);
+        HttpResponseMessage secondResponse = await PostWithSessionAsync("/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, await OpenSessionAsync(bookingId, managementToken));
 
         // Assert
         Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
@@ -221,9 +251,23 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
 
         // Act: fire concurrent InitiateTransaction requests for the same booking.
         const int concurrentRequests = 10;
+
+        // One session, shared by all ten. Exchanging per request would test
+        // the exchange's own concurrency instead of the thing under test here,
+        // and a session is reusable for its whole window by design.
+        string sessionToken = await OpenSessionAsync(bookingId, managementToken);
+
         Task<HttpResponseMessage>[] tasks = [.. Enumerable.Range(0, concurrentRequests)
-            .Select(_ => factory.CreateClient().PostAsJsonAsync(
-                "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId, ManagementToken = managementToken }, TestContext.Current.CancellationToken))];
+            .Select(_ =>
+            {
+                HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/transactions")
+                {
+                    Content = JsonContent.Create(new InitiateTransactionRequest { BookingId = bookingId })
+                };
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", sessionToken);
+
+                return factory.CreateClient().SendAsync(request, TestContext.Current.CancellationToken);
+            })];
 
         HttpResponseMessage[] responses = await Task.WhenAll(tasks);
 
@@ -255,8 +299,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         (Guid bookingId, string managementToken) = await HoldAndConfirmBookingAsync(unit.Id);
         string nonAdminToken = await SignInAsNonAdministratorAsync();
 
-        HttpResponseMessage initiateResponse = await _client.PostAsJsonAsync(
-            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId, ManagementToken = managementToken }, TestContext.Current.CancellationToken);
+        HttpResponseMessage initiateResponse = await PostWithSessionAsync("/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, await OpenSessionAsync(bookingId, managementToken));
         InitiateTransactionResponse? initiated =
             await initiateResponse.Content.ReadFromJsonAsync<InitiateTransactionResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(initiated);
@@ -279,8 +322,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         (Guid bookingId, string managementToken) = await HoldAndConfirmBookingAsync(unit.Id);
         string adminToken = await SignInAsAdministratorAsync();
 
-        HttpResponseMessage initiateResponse = await _client.PostAsJsonAsync(
-            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId, ManagementToken = managementToken }, TestContext.Current.CancellationToken);
+        HttpResponseMessage initiateResponse = await PostWithSessionAsync("/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, await OpenSessionAsync(bookingId, managementToken));
         InitiateTransactionResponse? initiated =
             await initiateResponse.Content.ReadFromJsonAsync<InitiateTransactionResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(initiated);
@@ -293,8 +335,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(HttpStatusCode.OK, failResponse.StatusCode);
 
         // Act - retry
-        HttpResponseMessage retryResponse = await _client.PostAsJsonAsync(
-            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId, ManagementToken = managementToken }, TestContext.Current.CancellationToken);
+        HttpResponseMessage retryResponse = await PostWithSessionAsync("/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, await OpenSessionAsync(bookingId, managementToken));
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, retryResponse.StatusCode);
@@ -314,8 +355,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         (Guid bookingId, string managementToken) = await HoldAndConfirmBookingAsync(unit.Id);
         string adminToken = await SignInAsAdministratorAsync();
 
-        HttpResponseMessage initiateResponse = await _client.PostAsJsonAsync(
-            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId, ManagementToken = managementToken }, TestContext.Current.CancellationToken);
+        HttpResponseMessage initiateResponse = await PostWithSessionAsync("/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, await OpenSessionAsync(bookingId, managementToken));
         InitiateTransactionResponse? initiated =
             await initiateResponse.Content.ReadFromJsonAsync<InitiateTransactionResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(initiated);
@@ -365,8 +405,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         await SeedCatalogAsync(unit);
         (Guid bookingId, string managementToken) = await HoldAndConfirmBookingAsync(unit.Id);
 
-        HttpResponseMessage initiateResponse = await _client.PostAsJsonAsync(
-            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId, ManagementToken = managementToken }, TestContext.Current.CancellationToken);
+        HttpResponseMessage initiateResponse = await PostWithSessionAsync("/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, await OpenSessionAsync(bookingId, managementToken));
         InitiateTransactionResponse? initiated =
             await initiateResponse.Content.ReadFromJsonAsync<InitiateTransactionResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(initiated);
@@ -515,9 +554,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         // The attempt left nothing behind, so the guest's own payment still
         // goes through rather than hitting "a transaction is already in
         // progress".
-        HttpResponseMessage withProof = await _client.PostAsJsonAsync(
-            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId, ManagementToken = managementToken },
-            TestContext.Current.CancellationToken);
+        HttpResponseMessage withProof = await PostWithSessionAsync("/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, await OpenSessionAsync(bookingId, managementToken));
 
         Assert.Equal(HttpStatusCode.OK, withProof.StatusCode);
     }
@@ -542,9 +579,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
             await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        HttpResponseMessage response = await _client.PostAsJsonAsync(
-            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId, ManagementToken = managementToken },
-            TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await PostWithSessionAsync("/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, await OpenSessionAsync(bookingId, managementToken));
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
@@ -589,8 +624,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         // The transaction has left the unique index's filter, so the index
         // alone would now permit a second one. The booking's own state is
         // what actually refuses it.
-        HttpResponseMessage secondInitiate = await _client.PostAsJsonAsync(
-            "/api/transactions", new InitiateTransactionRequest { BookingId = bookingId, ManagementToken = managementToken }, TestContext.Current.CancellationToken);
+        HttpResponseMessage secondInitiate = await PostWithSessionAsync("/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, await OpenSessionAsync(bookingId, managementToken));
         Assert.Equal(HttpStatusCode.Conflict, secondInitiate.StatusCode);
 
         // And both lookups still resolve rather than throwing on a second row.

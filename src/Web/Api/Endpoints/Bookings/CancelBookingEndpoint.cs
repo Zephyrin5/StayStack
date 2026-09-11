@@ -9,13 +9,20 @@ namespace Api.Endpoints.Bookings;
 
 public class CancelBookingEndpoint(IMediator mediator) : Endpoint<CancelBookingRequest, CancelBookingResponse>
 {
+    // Spelled out once per endpoint rather than four times: these four
+    // summaries described the old carrier in four slightly different ways,
+    // which is how three of them would have stayed accurate and one would
+    // not.
+    private const string SessionProof =
+        "a guest-checkout caller sending a booking session as `Authorization: Bearer <sessionToken>` (see POST /bookings/{bookingId}/manage/session, which is where the management link is exchanged for one)";
+
     public override void Configure()
     {
         Post("{BookingId}/cancel");
         AllowAnonymous();
         Group<BookingsGroup>();
 
-        // Same ManagementToken-is-a-bearer-credential reasoning as
+        // Same booking-session-is-a-bearer-credential reasoning as
         // GetBookingForManagementEndpoint - this one also mutates state
         // (cancels the booking), making it the more attractive of the two
         // to throttle.
@@ -25,9 +32,8 @@ public class CancelBookingEndpoint(IMediator mediator) : Endpoint<CancelBookingR
         {
             s.Summary = "Cancel the caller's own booking";
             s.Description = "Public - proves ownership one of two ways: an authenticated caller whose " +
-                            "CustomerId matches, or a guest-checkout caller holding the management link - either " +
-                            "the ManagementToken returned once at confirm time (see ConfirmBookingEndpoint) or a " +
-                            "session exchanged for it. **A link-based caller must also supply GuestEmail**, the " +
+                            "CustomerId matches, or " + SessionProof + ". **A session-based caller must also " +
+                            "supply GuestEmail**, the " +
                             "address the booking was made with: cancelling is destructive and a link can be " +
                             "forwarded or screenshotted, while the management view deliberately returns no email, " +
                             "so this is something only the booker knows. An authenticated caller does not need it. " +

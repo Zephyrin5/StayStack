@@ -1,9 +1,7 @@
 using Bookings;
 using Bookings.Entities;
 using Dapper;
-using Bookings;
 using Bookings.Contracts;
-using Bookings.Entities;
 using Bookings.Jobs;
 using Catalog;
 using Catalog.Entities;
@@ -16,7 +14,6 @@ using Microsoft.Extensions.Time.Testing;
 using NpgsqlTypes;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
-using Bookings.Contracts;
 using Bookings.Outbox;
 using Promotions.Contracts;
 namespace IntegrationTests.Features.Bookings;

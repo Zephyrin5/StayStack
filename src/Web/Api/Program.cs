@@ -4,7 +4,6 @@ using Api.Security;
 using Api.Serialization;
 using Bookings;
 using Bookings.Contracts;
-using Bookings;
 using BuildingBlocks.Configuration;
 using Catalog;
 using Catalog.Contracts;

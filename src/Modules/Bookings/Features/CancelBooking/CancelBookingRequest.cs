@@ -9,7 +9,6 @@ public record CancelBookingRequest : IRequest<CancelBookingResponse>
     // Only for a guest-checkout booking - see BookingAccessChecker. Never
     // read for an authenticated caller, whose CustomerId already proves
     // ownership.
-    [Sensitive] public string? ManagementToken { get; init; }
 
     /// <summary>
     ///     The guest email on the booking, required when the caller's proof of

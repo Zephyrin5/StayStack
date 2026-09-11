@@ -1,5 +1,4 @@
 using Bookings.Serialization;
-using Bookings.Serialization;
 using Catalog.Serialization;
 using Hosts.Serialization;
 using Identity.Serialization;

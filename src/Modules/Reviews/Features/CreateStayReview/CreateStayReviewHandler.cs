@@ -26,7 +26,7 @@ public class CreateStayReviewHandler(
         // management token - resolved cross-module without Reviews ever
         // seeing Booking or AppBookingsDbContext.
         BookingAccessResult access = await bookingLookup.VerifyBookingAccessAsync(
-                                          request.BookingId, currentUserProvider.UserId, request.ManagementToken, cancellationToken)
+                                          request.BookingId, currentUserProvider.UserId, cancellationToken)
                                       ?? throw new NotFoundException("Booking", request.BookingId);
 
         if (!access.IsConfirmed)

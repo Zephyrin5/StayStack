@@ -15,7 +15,6 @@ using Promotions.Contracts;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using Transactions.Contracts;
-using Bookings.Contracts;
 namespace UnitTests.Features.Bookings.CancelBooking;
 
 // Proves the fix for a response that couldn't distinguish "nothing to
@@ -95,8 +94,7 @@ public class CancelBookingHandlerTests : IDisposable
 
         CancelBookingHandler handler = new CancelBookingHandler(
             _dbContext, dispatcher, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
-            new Mock<IBookingSessions>().Object, TimeProvider.System,
-            Options.Create(new BookingLifecyclePolicyOptions()));
+            new Mock<IBookingSessions>().Object, TimeProvider.System);
 
         CancelBookingRequest request = new CancelBookingRequest { BookingId = booking.Id };
 
@@ -136,8 +134,7 @@ public class CancelBookingHandlerTests : IDisposable
 
         CancelBookingHandler handler = new CancelBookingHandler(
             _dbContext, dispatcher, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
-            new Mock<IBookingSessions>().Object, TimeProvider.System,
-            Options.Create(new BookingLifecyclePolicyOptions()));
+            new Mock<IBookingSessions>().Object, TimeProvider.System);
 
         CancelBookingRequest request = new CancelBookingRequest { BookingId = booking.Id };
 
@@ -179,8 +176,7 @@ public class CancelBookingHandlerTests : IDisposable
 
         CancelBookingHandler handler = new CancelBookingHandler(
             _dbContext, dispatcher, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
-            new Mock<IBookingSessions>().Object, TimeProvider.System,
-            Options.Create(new BookingLifecyclePolicyOptions()));
+            new Mock<IBookingSessions>().Object, TimeProvider.System);
 
         CancelBookingRequest request = new CancelBookingRequest { BookingId = booking.Id };
 
@@ -250,8 +246,7 @@ public class CancelBookingHandlerTests : IDisposable
 
         CancelBookingHandler handler = new CancelBookingHandler(
             dbContext, dispatcher, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
-            new Mock<IBookingSessions>().Object, timeProvider,
-            Options.Create(new BookingLifecyclePolicyOptions()));
+            new Mock<IBookingSessions>().Object, timeProvider);
 
         CancelBookingRequest request = new CancelBookingRequest { BookingId = booking.Id };
 
@@ -326,8 +321,7 @@ public class CancelBookingHandlerTests : IDisposable
 
         CancelBookingHandler handler = new CancelBookingHandler(
             dbContext, dispatcher, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
-            new Mock<IBookingSessions>().Object, timeProvider,
-            Options.Create(new BookingLifecyclePolicyOptions()));
+            new Mock<IBookingSessions>().Object, timeProvider);
 
         CancelBookingResponse response = await handler.Handle(
             new CancelBookingRequest { BookingId = booking.Id }, TestContext.Current.CancellationToken);
@@ -423,8 +417,7 @@ public class CancelBookingHandlerTests : IDisposable
 
         CancelBookingHandler handler = new CancelBookingHandler(
             _dbContext, dispatcher, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
-            new Mock<IBookingSessions>().Object, TimeProvider.System,
-            Options.Create(new BookingLifecyclePolicyOptions()));
+            new Mock<IBookingSessions>().Object, TimeProvider.System);
 
         return await handler.Handle(
             new CancelBookingRequest { BookingId = booking.Id }, TestContext.Current.CancellationToken);

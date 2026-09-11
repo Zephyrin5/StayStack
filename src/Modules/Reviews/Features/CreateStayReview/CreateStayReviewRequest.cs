@@ -10,7 +10,7 @@ namespace Reviews.Features.CreateStayReview;
 public record CreateStayReviewRequest : IRequest<CreateStayReviewResponse>
 {
     public Guid BookingId { get; init; }
-    [Sensitive] public string? ManagementToken { get; init; }
+
     public int CleanlinessRating { get; init; }
     public int CommunicationRating { get; init; }
     public int LocationRating { get; init; }

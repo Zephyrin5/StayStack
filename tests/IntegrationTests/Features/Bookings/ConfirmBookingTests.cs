@@ -2,8 +2,6 @@ using Bookings;
 using Bookings.Entities;
 using Bookings.Features.HoldAvailability;
 using Bogus;
-using Bookings;
-using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
 using Catalog;
 using Catalog.Entities;

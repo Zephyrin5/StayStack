@@ -19,9 +19,8 @@ public class GetBookingForManagementHandler(
         GetBookingForManagementRequest request, CancellationToken cancellationToken)
     {
         BookingAccess access = await BookingAccessChecker.ResolveAsync(
-                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken,
-                              await bookingSessions.GetSessionBookingIdAsync(cancellationToken), timeProvider,
-            policy.Value.ManagementTokenLifetimeDaysAfterCheckOut, cancellationToken)
+                              dbContext, request.BookingId, currentUserProvider.UserId,
+                              await bookingSessions.GetSessionBookingIdAsync(cancellationToken), cancellationToken)
                           ?? throw new NotFoundException(nameof(Booking), request.BookingId);
 
         Booking booking = access.Booking;

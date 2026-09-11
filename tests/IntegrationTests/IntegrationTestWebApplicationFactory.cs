@@ -1,5 +1,4 @@
 using Bookings;
-using Bookings;
 using Catalog;
 using Hosts;
 using Identity;

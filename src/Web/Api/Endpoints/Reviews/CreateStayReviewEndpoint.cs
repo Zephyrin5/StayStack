@@ -8,6 +8,13 @@ namespace Api.Endpoints.Reviews;
 
 public class CreateStayReviewEndpoint(IMediator mediator) : Endpoint<CreateStayReviewRequest, CreateStayReviewResponse>
 {
+    // Spelled out once per endpoint rather than four times: these four
+    // summaries described the old carrier in four slightly different ways,
+    // which is how three of them would have stayed accurate and one would
+    // not.
+    private const string SessionProof =
+        "a guest-checkout caller sending a booking session as `Authorization: Bearer <sessionToken>` (see POST /bookings/{bookingId}/manage/session, which is where the management link is exchanged for one)";
+
     public override void Configure()
     {
         Post("stays");
@@ -18,8 +25,8 @@ public class CreateStayReviewEndpoint(IMediator mediator) : Endpoint<CreateStayR
         {
             s.Summary = "Leave a review for a completed stay";
             s.Description = "Public - same two-path ownership proof as POST /bookings/{id}/cancel: an " +
-                            "authenticated caller whose CustomerId matches the booking, or a guest-checkout " +
-                            "caller supplying the ManagementToken returned once at confirm time. The booking " +
+                            "authenticated caller whose CustomerId matches the booking, or " +
+                            SessionProof + ". The booking " +
                             "must be Confirmed and checkout must have passed. One review per booking - a " +
                             "second attempt returns 409.";
             s.Response<CreateStayReviewResponse>(200, "Review created.");

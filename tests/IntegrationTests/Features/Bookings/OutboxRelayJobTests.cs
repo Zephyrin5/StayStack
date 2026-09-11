@@ -1,6 +1,5 @@
 using Bookings;
 using Bookings.Entities;
-using Bookings;
 using Bookings.Jobs;
 using Bookings.Outbox;
 using Bookings.Serialization;

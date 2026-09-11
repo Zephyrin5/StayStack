@@ -23,8 +23,10 @@ public class CancelBookingHandler(
     ITransactionReversal transactionReversal,
     ICurrentUserProvider currentUserProvider,
     IBookingSessions bookingSessions,
-    TimeProvider timeProvider,
-    IOptions<BookingLifecyclePolicyOptions> policy) : IRequestHandler<CancelBookingRequest, CancelBookingResponse>
+    // No BookingLifecyclePolicyOptions any more - the only thing it supplied
+    // here was the management token's lifetime, and cancelling no longer sees
+    // that token.
+    TimeProvider timeProvider) : IRequestHandler<CancelBookingRequest, CancelBookingResponse>
 {
     public async ValueTask<CancelBookingResponse> Handle(CancelBookingRequest request, CancellationToken cancellationToken)
     {
@@ -35,9 +37,8 @@ public class CancelBookingHandler(
         // management token (guest checkout) - see BookingAccessChecker's
         // own doc comment.
         BookingAccess access = await BookingAccessChecker.ResolveAsync(
-                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken,
-                              await bookingSessions.GetSessionBookingIdAsync(cancellationToken), timeProvider,
-            policy.Value.ManagementTokenLifetimeDaysAfterCheckOut, cancellationToken)
+                              dbContext, request.BookingId, currentUserProvider.UserId,
+                              await bookingSessions.GetSessionBookingIdAsync(cancellationToken), cancellationToken)
                           ?? throw new NotFoundException(nameof(Booking), request.BookingId);
 
         Booking booking = access.Booking;

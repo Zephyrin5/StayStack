@@ -11,5 +11,5 @@ namespace Bookings.Features.GetBookingForManagement;
 public record GetBookingForManagementRequest : IRequest<GetBookingForManagementResponse>
 {
     public Guid BookingId { get; init; }
-    [Sensitive] public string? ManagementToken { get; init; }
+
 }

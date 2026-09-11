@@ -14,7 +14,6 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using Outbox;
 using Promotions.Contracts;
-using Bookings.Contracts;
 using Microsoft.Extensions.Options;
 using SeedWork.ValueObjects;
 namespace Bookings.Features.ConfirmBooking;

@@ -17,26 +17,23 @@ internal static class BookingAccessChecker
 {
     /// <summary>
     ///     Resolves the booking if the caller owns it - via a matching
-    ///     CustomerId (authenticated), a booking session naming this same
-    ///     booking, or a matching, not-yet-expired BookingManagementToken hash
-    ///     (guest checkout) - null otherwise.
-    ///     Doesn't distinguish "doesn't exist" from "isn't yours" (nor from
-    ///     "token expired"), same reasoning as
-    ///     IHostAuthorization.RequireOwnership. A guest-checkout booking
-    ///     (CustomerId null) can only be resolved via the token path - no
-    ///     token, a mismatched id, and a correct-but-expired token all get
-    ///     null the same way. The authenticated-CustomerId path has no
-    ///     expiry of its own - account-based proof of ownership, not a
-    ///     bearer credential that could leak.
+    ///     CustomerId (authenticated) or a booking session naming this same
+    ///     booking (guest checkout) - null otherwise. The long-lived
+    ///     management token is no longer accepted here; it is exchanged for a
+    ///     session first, by the one caller below that still takes it.
+    ///     Doesn't distinguish "doesn't exist" from "isn't yours", same
+    ///     reasoning as IHostAuthorization.RequireOwnership: a missing
+    ///     session, one naming a different booking, and an expired one all get
+    ///     null the same way. Neither path here carries an expiry of its own -
+    ///     the session's was enforced by the authentication handler before
+    ///     this ran, and a CustomerId is account-based proof of ownership
+    ///     rather than a bearer credential that could leak.
     /// </summary>
     public static async Task<BookingAccess?> ResolveAsync(
         AppBookingsDbContext dbContext,
         Guid bookingId,
         Guid? customerId,
-        string? managementToken,
         Guid? sessionBookingId,
-        TimeProvider timeProvider,
-        int managementTokenLifetimeDaysAfterCheckOut,
         CancellationToken cancellationToken)
     {
         Booking? booking = await dbContext.Bookings
@@ -71,7 +68,38 @@ internal static class BookingAccessChecker
             return new BookingAccess(booking, BookingAccessKind.Link);
         }
 
-        if (string.IsNullOrEmpty(managementToken))
+        return null;
+    }
+
+    /// <summary>
+    ///     The management-token path, now reachable from exactly one caller:
+    ///     CreateBookingSessionHandler, which trades the token for a session.
+    ///     <para>
+    ///         Separated from <see cref="ResolveAsync"/> rather than left as
+    ///         an optional parameter on it, because a parameter every other
+    ///         caller passes null to is an invitation to start passing
+    ///         something. The long-lived credential is now validated in one
+    ///         place, and the type system says so.
+    ///     </para>
+    ///     <para>
+    ///         No authenticated-customer path either. A signed-in owner does
+    ///         not need a session - their access token already proves
+    ///         ownership everywhere a session would - so accepting one here
+    ///         would only mean minting a credential nobody uses.
+    ///     </para>
+    /// </summary>
+    public static async Task<BookingAccess?> ResolveByManagementTokenAsync(
+        AppBookingsDbContext dbContext,
+        Guid bookingId,
+        string managementToken,
+        TimeProvider timeProvider,
+        int managementTokenLifetimeDaysAfterCheckOut,
+        CancellationToken cancellationToken)
+    {
+        Booking? booking = await dbContext.Bookings
+            .SingleOrDefaultAsync(b => b.Id == bookingId, cancellationToken);
+
+        if (booking is null || string.IsNullOrEmpty(managementToken))
         {
             return null;
         }
@@ -88,13 +116,6 @@ internal static class BookingAccessChecker
         // (StaySearchPolicyOptions.MaxLeadTimeDays), so an issuance-anchored
         // TTL of a few months would kill the token of anyone booking a
         // holiday well in advance, before they ever arrived.
-        //
-        // This used to also be what bounded the review window - the comment
-        // here said so - which meant the review deadline applied to guest
-        // checkout only, and tightening this for security reasons would have
-        // silently shortened it. Reviews now has its own explicit window
-        // (BookingLifecyclePolicyOptions), so this is purely a question about
-        // how long a bearer link should live.
         if (today > booking.CheckOut.AddDays(managementTokenLifetimeDaysAfterCheckOut))
         {
             return null;

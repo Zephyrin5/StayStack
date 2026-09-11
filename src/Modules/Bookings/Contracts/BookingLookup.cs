@@ -7,8 +7,13 @@ namespace Bookings.Contracts;
 
 // internal, same reasoning as Catalog.Contracts.UnitLookup - Transactions/
 // Reviews should only ever reach this through IBookingLookup, resolved via DI.
-internal class BookingLookup(AppBookingsDbContext dbContext, TimeProvider timeProvider,
-    IOptions<BookingLifecyclePolicyOptions> policy, IBookingSessions bookingSessions) : IBookingLookup
+// TimeProvider and the lifecycle policy are gone from here: both existed
+// solely to bound the management token's own lifetime, and this type no longer
+// sees that token - it is exchanged for a session before anything reaches
+// here. See BookingAccessChecker.ResolveByManagementTokenAsync, which is now
+// the only place that reasoning lives.
+internal class BookingLookup(
+    AppBookingsDbContext dbContext, IBookingSessions bookingSessions) : IBookingLookup
 {
     public async Task<BookingSummary?> GetBookingAsync(Guid bookingId, CancellationToken cancellationToken)
     {
@@ -31,12 +36,11 @@ internal class BookingLookup(AppBookingsDbContext dbContext, TimeProvider timePr
     }
 
     public async Task<BookingAccessResult?> VerifyBookingAccessAsync(
-        Guid bookingId, Guid? customerId, string? managementToken, CancellationToken cancellationToken)
+        Guid bookingId, Guid? customerId, CancellationToken cancellationToken)
     {
         BookingAccess? access = await BookingAccessChecker.ResolveAsync(
-            dbContext, bookingId, customerId, managementToken,
-            await bookingSessions.GetSessionBookingIdAsync(cancellationToken), timeProvider,
-            policy.Value.ManagementTokenLifetimeDaysAfterCheckOut, cancellationToken);
+            dbContext, bookingId, customerId,
+            await bookingSessions.GetSessionBookingIdAsync(cancellationToken), cancellationToken);
 
         Booking? booking = access?.Booking;
 

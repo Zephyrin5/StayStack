@@ -1,6 +1,5 @@
 using Bookings.Contracts;
 using Bookings;
-using Bookings.Contracts;
 using Bookings.Features.ConfirmBooking;
 using Bookings.Outbox;
 using BuildingBlocks.Exceptions;

@@ -21,7 +21,7 @@ public interface IBookingLookup
     ///     look identical" reasoning as everywhere else this pattern is used.
     /// </summary>
     Task<BookingAccessResult?> VerifyBookingAccessAsync(
-        Guid bookingId, Guid? customerId, string? managementToken, CancellationToken cancellationToken);
+        Guid bookingId, Guid? customerId, CancellationToken cancellationToken);
 
     /// <summary>
     ///     Confirmed bookings for this customer whose checkout falls in

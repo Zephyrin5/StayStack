@@ -20,6 +20,7 @@ using System.Net.Http.Json;
 using Transactions;
 using Transactions.Entities;
 using Transactions.Features.InitiateTransaction;
+using Bookings.Features.CreateBookingSession;
 namespace IntegrationTests.Features.Bookings;
 
 // Exercises CancelBookingEndpoint end-to-end - same "seed a Unit directly"
@@ -28,6 +29,33 @@ namespace IntegrationTests.Features.Bookings;
 [Collection("Integration Tests")]
 public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
 {
+    // The management token buys a session now, and the session is what every
+    // management call carries - so a test that used to hand the raw token to
+    // an endpoint has to make the same round trip a real client makes. See
+    // docs/adr/0023.
+    private async Task<HttpResponseMessage> ExchangeAsync(Guid bookingId, string managementToken) =>
+        await _client.PostAsJsonAsync(
+            $"/api/bookings/{bookingId}/manage/session",
+            new CreateBookingSessionRequest { BookingId = bookingId, ManagementToken = managementToken },
+            TestContext.Current.CancellationToken);
+
+    private async Task<string> OpenSessionAsync(Guid bookingId, string managementToken)
+    {
+        HttpResponseMessage response = await _client.PostAsJsonAsync(
+            $"/api/bookings/{bookingId}/manage/session",
+            new CreateBookingSessionRequest { BookingId = bookingId, ManagementToken = managementToken },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        CreateBookingSessionResponse? session = await response.Content
+            .ReadFromJsonAsync<CreateBookingSessionResponse>(
+                TestJsonOptions.Default, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(session?.SessionToken);
+        return session.SessionToken;
+    }
+
     // Properties for units built by CreateTestUnit below, flushed by the
     // seeder so a unit is never persisted without its owner - see
     // CatalogSeeding.
@@ -196,19 +224,25 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
             // the endpoint expects a JSON body the same as any other POST
             // request with fields, matching how a real client (openapi-fetch)
             // always sends one.
-            // GuestEmail travels whenever a management token does: the two go
-            // together on the link path now, and an authenticated caller
-            // (managementToken null) still needs neither.
+            // GuestEmail travels whenever the caller is acting through a
+            // management link, and an authenticated caller needs neither it
+            // nor a session.
             Content = JsonContent.Create(new CancelBookingRequest
             {
                 BookingId = bookingId,
-                ManagementToken = managementToken,
                 GuestEmail = managementToken is null ? null : _lastGuestEmail
             })
         };
-        if (accessToken is not null)
+
+        // Exactly one Authorization header either way: an account's access
+        // token, or the booking session exchanged from the link. The endpoint
+        // no longer takes a credential anywhere else.
+        string? bearer = accessToken
+                         ?? (managementToken is null ? null : await OpenSessionAsync(bookingId, managementToken));
+
+        if (bearer is not null)
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
         }
 
         return await _client.SendAsync(request, TestContext.Current.CancellationToken);
@@ -557,20 +591,26 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
     }
 
     [Fact]
-    public async Task CancelBooking_ShouldReturn404_ForGuestCheckoutWithWrongManagementToken()
+    public async Task AWrongManagementToken_BuysNoSessionAndSoCancelsNothing()
     {
-        // Arrange
+        // Was asserted against the cancel endpoint, which no longer sees a
+        // management token. A wrong one is refused one step earlier now, so
+        // that is where this asserts - and the second half is what actually
+        // matters to this endpoint: with no session, cancelling is refused
+        // and the booking survives.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         DateOnly today = CatalogSeeding.Today();
         Guid holdId = await HoldUnitAsync(unit.Id, today, today.AddDays(3));
         ConfirmBookingResponse booking = await ConfirmBookingAsGuestAsync(holdId);
 
-        // Act
-        HttpResponseMessage response = await CancelBookingAsync(booking.BookingId, accessToken: null, managementToken: "not-the-real-token");
+        HttpResponseMessage exchange = await ExchangeAsync(booking.BookingId, "not-the-real-token");
+        Assert.Equal(HttpStatusCode.NotFound, exchange.StatusCode);
 
-        // Assert
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        HttpResponseMessage cancelled =
+            await CancelBookingAsync(booking.BookingId, accessToken: null, managementToken: null);
+
+        Assert.Equal(HttpStatusCode.NotFound, cancelled.StatusCode);
     }
 
     [Fact]
@@ -584,11 +624,12 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         Guid bookingId = await SeedBookingAsync(unit.Id, today.AddDays(-95), today.AddDays(-91));
         string managementToken = await SeedManagementTokenAsync(bookingId);
 
-        // Act
-        HttpResponseMessage response = await CancelBookingAsync(bookingId, accessToken: null, managementToken);
+        // The window is enforced where the token is now read - at the
+        // exchange - so an expired link buys no session, and without one
+        // there is nothing to cancel with.
+        HttpResponseMessage exchange = await ExchangeAsync(bookingId, managementToken);
 
-        // Assert
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, exchange.StatusCode);
     }
 
     [Fact]

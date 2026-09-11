@@ -27,6 +27,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Bookings.Contracts;
+using Bookings.Features.CreateBookingSession;
 namespace IntegrationTests.Features.Reviews;
 
 // Exercises the guest-facing stay-review slices end-to-end. A real
@@ -42,6 +43,27 @@ namespace IntegrationTests.Features.Reviews;
 [Collection("Integration Tests")]
 public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
 {
+    // The management token buys a session now, and the session is what every
+    // management call carries - so a test that used to hand the raw token to
+    // an endpoint has to make the same round trip a real client makes. See
+    // docs/adr/0023.
+    private async Task<string> OpenSessionAsync(Guid bookingId, string managementToken)
+    {
+        HttpResponseMessage response = await _client.PostAsJsonAsync(
+            $"/api/bookings/{bookingId}/manage/session",
+            new CreateBookingSessionRequest { BookingId = bookingId, ManagementToken = managementToken },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        CreateBookingSessionResponse? session = await response.Content
+            .ReadFromJsonAsync<CreateBookingSessionResponse>(
+                TestJsonOptions.Default, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(session?.SessionToken);
+        return session.SessionToken;
+    }
+
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();
 
@@ -390,11 +412,13 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         return rawToken;
     }
 
-    private static CreateStayReviewRequest CreateValidReviewRequest(Guid bookingId, string? managementToken = null) =>
+    // No managementToken parameter any more: a guest reviewer proves ownership
+    // with a booking session on the Authorization header, which the caller
+    // attaches - see OpenSessionAsync.
+    private static CreateStayReviewRequest CreateValidReviewRequest(Guid bookingId) =>
         new CreateStayReviewRequest
         {
             BookingId = bookingId,
-            ManagementToken = managementToken,
             CleanlinessRating = 5,
             CommunicationRating = 4,
             LocationRating = 3,
@@ -477,16 +501,22 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         string managementToken = await SeedManagementTokenAsync(bookingId);
 
         // Act
-        HttpResponseMessage response = await CreateStayReviewAsync(CreateValidReviewRequest(bookingId, managementToken));
+        HttpResponseMessage response = await CreateStayReviewAsync(
+            CreateValidReviewRequest(bookingId), await OpenSessionAsync(bookingId, managementToken));
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
-    public async Task CreateStayReview_ShouldReturn404_ForGuestCheckoutWithWrongManagementToken()
+    public async Task CreateStayReview_ShouldReturn404_ForGuestCheckoutWithNoSession()
     {
-        // Arrange
+        // Was "with the wrong management token". The endpoint no longer takes
+        // a management token at all, so a wrong one is now refused one step
+        // earlier, at the exchange - BookingSessionTests covers that. What
+        // this endpoint still owes is the other half: an anonymous caller who
+        // cannot prove ownership must not be able to review a stranger's stay,
+        // and must not be told whether the booking exists.
         string hostToken = await SeedHostUserAsync();
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
@@ -494,10 +524,8 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         Guid bookingId = await SeedBookingAsync(unitId, null, today.AddDays(-5), today.AddDays(-2));
         await SeedManagementTokenAsync(bookingId);
 
-        // Act
-        HttpResponseMessage response = await CreateStayReviewAsync(CreateValidReviewRequest(bookingId, "not-the-real-token"));
+        HttpResponseMessage response = await CreateStayReviewAsync(CreateValidReviewRequest(bookingId));
 
-        // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
