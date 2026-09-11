@@ -170,8 +170,18 @@ public static class ApiServicesRegistration
         // serialized length. That pairs with MaximumPayloadBytes below, which
         // bounds one entry, to bound the whole L1 as well - a limit on entry
         // size alone still admits unlimited entries. Nothing else in this
-        // application resolves IMemoryCache, so this budget is HybridCache's
-        // alone.
+        // application resolves IMemoryCache today, so this budget is
+        // HybridCache's alone.
+        //
+        // THE RULE THIS LINE CREATES (docs/adr/0024): with SizeLimit set,
+        // *every* entry must specify a Size, or MemoryCache throws "Cache
+        // entry must specify a value for Size when SizeLimit is set" - on the
+        // first request that writes the entry, not at startup. And Size must
+        // be a byte count, because HybridCache is already writing byte counts
+        // here and a budget counting two different units means nothing. A
+        // component that caches anything through IMemoryCache inherits both
+        // halves; MemoryCacheSizeRuleTests fails if one arrives without
+        // having read them.
         services.AddMemoryCache(options => options.SizeLimit = 64 * 1024 * 1024);
 
         services.AddHybridCache(options =>

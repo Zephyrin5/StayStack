@@ -49,3 +49,4 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 | [0021](0021-availability-is-part-of-bookings.md) | Availability is part of Bookings, not a module upstream of it | Accepted |
 | [0022](0022-checkout-idempotency-keys.md) | Checkout idempotency keys, and the one secret we store in plaintext | Accepted |
 | [0023](0023-booking-management-sessions.md) | The management token is exchanged once, not carried everywhere | Accepted |
+| [0024](0024-every-memory-cache-entry-declares-its-size.md) | Every IMemoryCache entry declares its size, in bytes | Accepted |
