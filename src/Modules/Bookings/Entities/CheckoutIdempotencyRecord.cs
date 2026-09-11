@@ -27,25 +27,18 @@ namespace Bookings.Entities;
 ///         This row has to survive, because it carries the one thing that
 ///         exists nowhere else once the response is lost.
 ///     </para>
+///     <para>
+///         How long it stays replayable is
+///         BookingLifecyclePolicyOptions.CheckoutReplayWindowHours, not a
+///         constant here. The request path enforces it and
+///         PurgeReplayedCheckoutsJob cleans up behind it, so a value two
+///         things must agree on belongs where both can read it and startup can
+///         validate it - the same drift the duplicated MaxLeadTimeDays
+///         constants had before StaySearchPolicyOptions consolidated them.
+///     </para>
 /// </summary>
 public sealed class CheckoutIdempotencyRecord
 {
-    /// <summary>
-    ///     How long a completed record is replayable. After this it is purged
-    ///     and a retry with the same key starts a fresh confirmation - which
-    ///     will fail on the consumed hold, correctly, because by then the
-    ///     booking is long settled and a client still retrying is not
-    ///     recovering from a dropped connection.
-    ///     <para>
-    ///         Short on purpose: <see cref="ManagementToken"/> is a live
-    ///         credential held in plaintext, so this window is the whole
-    ///         duration of that exposure. A day comfortably covers a client
-    ///         retrying across an outage, a backgrounded mobile app, or a
-    ///         person reloading a checkout tab, and covers nothing else.
-    ///     </para>
-    /// </summary>
-    public static readonly TimeSpan ReplayWindow = TimeSpan.FromHours(24);
-
     /// <summary>
     ///     The pre-generated booking id, exactly as
     ///     <see cref="PendingBookingIntent.Id"/> is - so the reconcile job and
@@ -100,7 +93,7 @@ public sealed class CheckoutIdempotencyRecord
     ///         the token - leaves the guest exactly as locked out as before,
     ///         which is to say it does not implement the feature for the only
     ///         people who need it. The exposure is bounded by
-    ///         <see cref="ReplayWindow"/>, is confined to one column, and
+    ///         the configured replay window, is confined to one column, and
     ///         covers a value the client already holds in plaintext anyway.
     ///     </para>
     ///     <para>

@@ -1,4 +1,6 @@
 using Bookings.Entities;
+using Microsoft.Extensions.Options;
+using Bookings.Contracts;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
 using System.Data;
@@ -9,14 +11,15 @@ namespace Bookings.Jobs;
 ///     Deletes checkout idempotency records once their replay window has
 ///     passed.
 ///     <para>
-///         This job is the enforcement half of
-///         <see cref="CheckoutIdempotencyRecord.ReplayWindow"/>, and unlike
-///         most retention sweeps it is not about table size. A completed
+///         Cleanup, not enforcement - ReplayAsync rejects an expired record
+///         on the request path, so a stopped or misconfigured job can no
+///         longer extend the window. What this removes is the stored
+///         credential itself, and unlike most retention sweeps that is not
+///         about table size. A completed
 ///         record holds a guest's management token in plaintext - the single
 ///         deliberate exception to the hash-only rule these tokens otherwise
-///         follow - so the window is only bounded if something actually
-///         enforces it. Without this job the exposure is permanent and the
-///         reasoning in that field's comment is simply false.
+///         follow - so rows left behind are live credentials readable long
+///         after anything can use them.
 ///     </para>
 ///     <para>
 ///         Incomplete records are left alone. Those belong to confirmations
@@ -29,7 +32,10 @@ namespace Bookings.Jobs;
 ///         free a key that request is still using.
 ///     </para>
 /// </summary>
-public class PurgeReplayedCheckoutsJob(AppBookingsDbContext dbContext, TimeProvider timeProvider)
+public class PurgeReplayedCheckoutsJob(
+    AppBookingsDbContext dbContext,
+    TimeProvider timeProvider,
+    IOptions<BookingLifecyclePolicyOptions> policy)
 {
     private const string PurgeSql = """
                                     DELETE FROM checkout_idempotency_records
@@ -47,7 +53,7 @@ public class PurgeReplayedCheckoutsJob(AppBookingsDbContext dbContext, TimeProvi
 
         await connection.ExecuteAsync(new CommandDefinition(
             PurgeSql,
-            new { Cutoff = timeProvider.GetUtcNow() - CheckoutIdempotencyRecord.ReplayWindow },
+            new { Cutoff = timeProvider.GetUtcNow() - TimeSpan.FromHours(policy.Value.CheckoutReplayWindowHours) },
             cancellationToken: cancellationToken));
     }
 }

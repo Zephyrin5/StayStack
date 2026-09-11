@@ -772,6 +772,19 @@ public class ConfirmBookingHandler(
                 "This Idempotency-Key was already used for a different request. Use a new key, or resend the original request unchanged.");
         }
 
+        // The window, enforced on the path that actually hands the credential
+        // back. It used to live only in PurgeReplayedCheckoutsJob's DELETE,
+        // which means a window that existed only as a background job's
+        // behaviour: stop that job, break its cron, or let it fail quietly,
+        // and replay kept working indefinitely, returning a management token
+        // of unbounded age. A window nothing checks is not a window - the
+        // purge is cleanup now, not enforcement.
+        if (timeProvider.GetUtcNow() - record.CreatedAt > TimeSpan.FromHours(bookingLifecycle.Value.CheckoutReplayWindowHours))
+        {
+            throw new ConflictException(
+                "This Idempotency-Key has expired. Please start over.");
+        }
+
         if (record.CompletedAt is null)
         {
             // The first attempt is still running, or died mid-flight. Either

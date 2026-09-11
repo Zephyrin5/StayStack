@@ -254,6 +254,43 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
     }
 
     [Fact]
+    public async Task AnExpiredRecord_IsRefusedEvenIfThePurgeNeverRan()
+    {
+        // The window used to live only in PurgeReplayedCheckoutsJob's DELETE,
+        // which makes it a property of a background job rather than of the
+        // system: stop that job, break its cron, or let it fail quietly, and
+        // replay kept working forever, handing back a management token of
+        // unbounded age. This ages the record in place, deliberately without
+        // running the purge, so it fails if enforcement ever moves back out of
+        // the request path.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        Guid holdId = await HoldUnitAsync(unit.Id);
+        string key = Guid.NewGuid().ToString();
+
+        ConfirmBookingResponse created = await ReadAsync(await ConfirmAsync(holdId, key));
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+
+            await context.CheckoutIdempotencyRecords
+                .Where(r => r.BookingId == created.BookingId)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(r => r.CreatedAt, DateTimeOffset.UtcNow.AddDays(-8)),
+                    TestContext.Current.CancellationToken);
+        }
+
+        HttpResponseMessage replayed = await ConfirmAsync(holdId, key);
+
+        Assert.Equal(HttpStatusCode.Conflict, replayed.StatusCode);
+
+        // And it says nothing about the booking it declined to replay.
+        string body = await replayed.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.DoesNotContain("managementToken", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task AShortKey_IsRejectedAtTheBoundary()
     {
         // A caller sending a counter has misunderstood what the key is for,

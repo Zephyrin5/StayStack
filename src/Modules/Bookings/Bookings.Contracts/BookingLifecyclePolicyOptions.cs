@@ -100,4 +100,27 @@ public class BookingLifecyclePolicyOptions
     /// </summary>
     [Range(1, 1440)]
     public int PaymentWindowMinutes { get; set; } = 30;
+
+    /// <summary>
+    ///     How long a completed checkout stays replayable through its
+    ///     Idempotency-Key.
+    ///     <para>
+    ///         Here rather than as a <c>static readonly TimeSpan</c> on
+    ///         CheckoutIdempotencyRecord, because it has to agree with
+    ///         PurgeReplayedCheckoutsJob's cron and with the request path that
+    ///         enforces it - and a constant that two other things must agree
+    ///         with is the same drift the duplicated MaxLeadTimeDays constants
+    ///         had before StaySearchPolicyOptions consolidated them. Every
+    ///         other tunable here is [Range]-validated at startup; this one was
+    ///         not validated at all.
+    ///     </para>
+    ///     <para>
+    ///         Short because the record holds a live management token: this
+    ///         window is the whole duration of that exposure. A day covers a
+    ///         client retrying across an outage, a backgrounded mobile app, or
+    ///         a reloaded checkout tab, and covers nothing else.
+    ///     </para>
+    /// </summary>
+    [Range(1, 168)]
+    public int CheckoutReplayWindowHours { get; set; } = 24;
 }
