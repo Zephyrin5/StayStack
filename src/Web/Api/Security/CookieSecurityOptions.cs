@@ -8,7 +8,7 @@ namespace Api.Security;
 ///         <c>HttpContext.Request.IsHttps</c>, which reads correctly only when
 ///         <c>UseForwardedHeaders</c> has actually applied the proxy's
 ///         X-Forwarded-Proto. That in turn requires the proxy to be trusted,
-///         and <c>ForwardedHeaders:KnownProxies</c> ships empty - leaving only
+///         and <c>ForwardedHeaders:KnownProxies</c> shipped empty - leaving only
 ///         the framework's loopback defaults. A TLS-terminating proxy at any
 ///         non-loopback address is therefore untrusted, its headers are
 ///         dropped, <c>IsHttps</c> is false, and the refresh-token cookie went

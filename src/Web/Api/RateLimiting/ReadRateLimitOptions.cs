@@ -26,12 +26,22 @@ public class ReadRateLimitOptions
     ///     deliberately, because the failure modes are not symmetric.
     ///     <para>
     ///         The partition is the caller's IP, so everyone behind one NAT
-    ///         or corporate proxy shares a budget - and with
-    ///         ForwardedHeaders.KnownProxies unset, everyone behind the
-    ///         deployment's own proxy shares a single one. Tripping this
-    ///         breaks browsing for real guests who have done nothing wrong,
-    ///         which is a worse outcome than the abuse it prevents, and it
-    ///         breaks it invisibly from their side.
+    ///         or corporate proxy shares a budget. Tripping this breaks
+    ///         browsing for real guests who have done nothing wrong, which is
+    ///         a worse outcome than the abuse it prevents, and it breaks it
+    ///         invisibly from their side.
+    ///     </para>
+    ///     <para>
+    ///         This used to carry a second reason - that an unset
+    ///         ForwardedHeaders:KnownProxies put every caller behind the
+    ///         deployment's own proxy into a single partition, so the limit
+    ///         had to be loose enough to survive that. It no longer can:
+    ///         Program.cs refuses to start outside Development unless the
+    ///         deployment declares its proxies, its trusted networks, or that
+    ///         it has none. The value below has not been retightened on the
+    ///         strength of that, since the NAT argument above stands on its
+    ///         own - but the worst case it is sized against is now one shared
+    ///         office, not the entire internet.
     ///     </para>
     ///     <para>
     ///         So it is set where no plausible human browsing session reaches

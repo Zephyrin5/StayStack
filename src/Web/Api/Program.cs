@@ -155,10 +155,11 @@ builder.Services.AddRateLimiter(options =>
     // calendar's date bounds, MaxOffset, the HybridCache limits); nothing
     // bounded how many of them a caller could issue.
     //
-    // Same IP partition as the other two, and the same caveat that makes
-    // this limit deliberately loose: with ForwardedHeaders.KnownProxies
-    // unset every caller shares the proxy's address, so a tight limit here
-    // would stop real guests browsing rather than stop abuse. See
+    // Same IP partition as the other two. The limit is deliberately loose
+    // because everyone behind one NAT shares a budget and tripping it breaks
+    // browsing for people who have done nothing wrong - not, any longer,
+    // because the partition might have collapsed to a single bucket: the
+    // startup check further down refuses that configuration. See
     // ReadRateLimitOptions.
     options.AddPolicy(ApiServicesRegistration.ReadRateLimitPolicy, httpContext =>
     {
@@ -264,9 +265,30 @@ ForwardedHeadersOptions forwardedHeadersOptions = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
 };
-foreach (string proxy in app.Configuration.AppSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [])
+
+// Counted from configuration, not from the options object. ForwardedHeaders-
+// Options seeds KnownProxies with ::1 and KnownIPNetworks with 127.0.0.0/8, so
+// `KnownProxies.Count == 0` is false on a completely unconfigured app - which
+// is exactly the case worth catching, and is why the check that used to ask
+// that question never once fired.
+string[] configuredProxies = app.Configuration.AppSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [];
+string[] configuredNetworks = app.Configuration.AppSection("ForwardedHeaders:KnownNetworks").Get<string[]>() ?? [];
+
+foreach (string proxy in configuredProxies)
 {
     forwardedHeadersOptions.KnownProxies.Add(IPAddress.Parse(proxy));
+}
+
+// Networks as well as addresses, because a managed load balancer does not
+// have a listable address. AWS/GCP front ends move within a published CIDR,
+// so a deployment there can only ever answer this question with a range - and
+// without somewhere to put one, the check below would push every cloud
+// deployment straight to the escape hatch and prove nothing.
+foreach (string network in configuredNetworks)
+{
+    // Fully qualified: Microsoft.AspNetCore.HttpOverrides also defines an
+    // IPNetwork, and that one is the obsolete type KnownNetworks used to take.
+    forwardedHeadersOptions.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network));
 }
 // A throw for the same reason as the SameSite check below: this misconfiguration
 // produces a silently wrong product rule rather than a visible failure. A
@@ -351,19 +373,40 @@ if (corsOrigins.Length > 0 && cookieSecurity.SameSite == SameSiteMode.Lax)
     }
 }
 
-if (!app.Environment.IsDevelopment() && forwardedHeadersOptions.KnownProxies.Count == 0)
+// A throw now, not a warning, and the escalation is about blast radius rather
+// than about anyone being more careful. When the only things keyed on the
+// caller's address were the auth/hold limiters and the concurrent-hold cap, a
+// collapsed partition weakened controls: abuse got easier and a few real
+// callers hit spurious 429s. Four anonymous read endpoints - GetProperties,
+// GetPropertyById, GetPriceCalendar, GetPropertyReviews - are now keyed on it
+// too, and those are the site. Collapsed, every visitor on earth shares one
+// 300-per-minute budget, so the deployment serves 429s to everyone and reads
+// as an outage with nothing wrong in any log.
+//
+// It is also the check that never fired, so nobody has been relying on the
+// warning to tell them: every proxied deployment until now was silently
+// running on one partition.
+//
+// ExposedDirectly is the escape hatch, and it is the reason this can be a
+// throw at all. An app terminating its own TLS has no proxy to list, which is
+// a legitimate deployment that must still be able to start. Turning "silently
+// wrong" into "cannot deploy" would just move the pain; what the pair of
+// settings buys is that somebody chose - either these are the proxies, or
+// there are none.
+bool exposedDirectly = app.Configuration.AppSection("ForwardedHeaders:ExposedDirectly").Get<bool>();
+
+if (!app.Environment.IsDevelopment()
+    && configuredProxies.Length == 0
+    && configuredNetworks.Length == 0
+    && !exposedDirectly)
 {
-    // A warning, not a throw: an app exposed directly with its own TLS has
-    // no proxy to list, and that is a legitimate deployment. But it is far
-    // more often an oversight, and the symptom - every caller sharing one
-    // rate-limit and hold-cap partition - reads as mysterious 429s rather
-    // than as a configuration problem, so it is worth saying plainly once
-    // at startup.
-    app.Logger.LogWarning(
-        "App:ForwardedHeaders:KnownProxies is empty outside Development. Only loopback proxies are trusted, " +
-        "so behind a proxy at any other address X-Forwarded-For/-Proto are ignored: every caller will share " +
-        "one rate-limit and concurrent-hold partition keyed on the proxy's address. List the proxy addresses " +
-        "if this app is deployed behind one.");
+    throw new InvalidOperationException(
+        "App:ForwardedHeaders:KnownProxies and :KnownNetworks are both empty outside Development. Only " +
+        "loopback is trusted, so behind a proxy at any other address X-Forwarded-For/-Proto are dropped and " +
+        "every caller shares one rate-limit partition keyed on the proxy's address - including the anonymous " +
+        "read endpoints, which would serve 429s to every visitor at once. List the proxy addresses, or a CIDR " +
+        "range for a managed load balancer, or set App:ForwardedHeaders:ExposedDirectly to true if this app " +
+        "really does terminate its own TLS with nothing in front of it.");
 }
 
 app.UseForwardedHeaders(forwardedHeadersOptions);

@@ -28,7 +28,7 @@ public static class AuthCookies
                 // Declared by configuration, not derived from
                 // Request.IsHttps. IsHttps only reports the proxy's scheme
                 // once UseForwardedHeaders has trusted that proxy, and
-                // ForwardedHeaders:KnownProxies ships empty - so behind a
+                // ForwardedHeaders:KnownProxies shipped empty - so behind a
                 // TLS-terminating proxy on any non-loopback address this
                 // silently evaluated false and shipped the refresh token
                 // without Secure. See CookieSecurityOptions for why the
