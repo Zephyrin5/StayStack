@@ -1,6 +1,7 @@
 ﻿using Api.Common;
 using Api.Localization;
 using Api.Security;
+using Bookings.Contracts;
 using Api.Serialization;
 using BuildingBlocks.Configuration;
 using BuildingBlocks.Identity;
@@ -128,6 +129,7 @@ public static class ApiServicesRegistration
             o.SerializerOptions.TypeInfoResolver = ApiJsonTypeInfoResolver.Combined);
 
         services.AddScoped<ICurrentUserProvider, HttpContextCurrentUserProvider>();
+        services.AddScoped<IBookingSessions, BookingSessions>();
         services.AddExceptionHandler<GlobalExceptionHandler>();
         // Every module with its own Endpoint/Validator types needs its
         // source-generated DiscoveredTypes list passed explicitly - once

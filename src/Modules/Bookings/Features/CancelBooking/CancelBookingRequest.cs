@@ -1,3 +1,4 @@
+using BuildingBlocks.Observability;
 using Mediator;
 namespace Bookings.Features.CancelBooking;
 
@@ -8,5 +9,5 @@ public record CancelBookingRequest : IRequest<CancelBookingResponse>
     // Only for a guest-checkout booking - see BookingAccessChecker. Never
     // read for an authenticated caller, whose CustomerId already proves
     // ownership.
-    public string? ManagementToken { get; init; }
+    [Sensitive] public string? ManagementToken { get; init; }
 }

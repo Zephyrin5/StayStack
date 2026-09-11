@@ -39,4 +39,43 @@ public class AuthTokenConfiguration
     public double AccessTokenLifespanInMinutes { get; set; }
     [Range(1, 3650)]
     public double RefreshTokenLifespanInDays { get; set; }
+
+    /// <summary>
+    ///     How long a booking-management session lasts once a guest exchanges
+    ///     their management token for one.
+    ///     <para>
+    ///         Short because it carries no revocation. A booking session is a
+    ///         signed claim, not a row, so nothing can retract one inside its
+    ///         window - the same trade the access token already makes, and
+    ///         acceptable for the same reason: the window is short enough that
+    ///         waiting it out is the remedy. The long-lived management token
+    ///         behind it stays revocable in the only way it ever was, by
+    ///         deleting its row.
+    ///     </para>
+    /// </summary>
+    [Range(5, 240)]
+    public double BookingSessionLifetimeInMinutes { get; set; } = 45;
+
+    /// <summary>
+    ///     The audience stamped on booking-session tokens, and the reason one
+    ///     can never be used as an access token.
+    ///     <para>
+    ///         This is the actual security boundary between the two, and it is
+    ///         deliberately not a claim the application checks. Both tokens are
+    ///         signed with the same key by the same issuer, so a
+    ///         <c>scope</c> claim would only be enforced where somebody
+    ///         remembered to look - and the default bearer scheme, which every
+    ///         <c>[Authorize]</c> endpoint runs through, would have validated
+    ///         the signature and built an authenticated principal long before
+    ///         any handler got the chance. Audience validation happens inside
+    ///         that scheme: a booking session presented to a normal endpoint
+    ///         fails <c>ValidAudience</c> and never becomes a principal at all.
+    ///     </para>
+    ///     <para>
+    ///         Derived from <see cref="Audience"/> rather than configured
+    ///         separately, so the two cannot be set equal by accident - which
+    ///         would silently collapse the boundary.
+    ///     </para>
+    /// </summary>
+    public string BookingSessionAudience => $"{Audience}/booking-session";
 }

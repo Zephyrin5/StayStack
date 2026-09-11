@@ -1,5 +1,6 @@
 ﻿using BuildingBlocks.Identity;
 using BuildingBlocks.Configuration;
+using BuildingBlocks.Security;
 using Identity.Configurations;
 using Identity.Entities;
 using Identity.Features.Common;
@@ -120,6 +121,33 @@ public static class IdentityServicesRegistration
                     ClockSkew = TimeSpan.Zero,
                     ValidIssuer = authTokenSettings.Issuer,
                     ValidAudience = authTokenSettings.Audience,
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(authTokenSettings.Key))
+                };
+            });
+
+        // A second bearer scheme for booking-management sessions, differing
+        // from the one above in exactly one parameter: the audience it
+        // accepts. That single difference is what keeps a booking session from
+        // ever authenticating a user - it fails the default scheme's audience
+        // check, so HttpContext.User stays anonymous on every ordinary
+        // endpoint no matter what that endpoint's authorization says.
+        //
+        // Everything else is deliberately identical, including
+        // ValidateLifetime: expiry is enforced here, by the handler, not by
+        // handler code that might forget.
+        services.AddAuthentication()
+            .AddJwtBearer(AuthenticationSchemes.BookingSession, options =>
+            {
+                options.MapInboundClaims = false;
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuerSigningKey = true,
+                    ValidateIssuer = true,
+                    ValidateAudience = true,
+                    ValidateLifetime = true,
+                    ClockSkew = TimeSpan.Zero,
+                    ValidIssuer = authTokenSettings.Issuer,
+                    ValidAudience = authTokenSettings.BookingSessionAudience,
                     IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(authTokenSettings.Key))
                 };
             });

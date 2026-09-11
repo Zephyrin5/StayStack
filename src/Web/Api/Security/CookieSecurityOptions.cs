@@ -35,6 +35,26 @@ public class CookieSecurityOptions
     public bool RequireSecure { get; set; } = true;
 
     /// <summary>
+    ///     This API's own public origin (scheme + host), used at startup to
+    ///     check the configured CORS origins against
+    ///     <see cref="SameSite"/> - see SameSiteOriginCheck.
+    ///     <para>
+    ///         Declared rather than discovered, for the same reason
+    ///         <see cref="RequireSecure"/> is. Behind a TLS-terminating proxy
+    ///         the app's bound addresses are the proxy's, not the ones a
+    ///         browser sees, so anything derived at runtime describes the wrong
+    ///         side of the hop - which is precisely the mistake that shipped
+    ///         refresh tokens without Secure.
+    ///     </para>
+    ///     <para>
+    ///         Optional. Left empty, the startup check cannot run and says so
+    ///         once, rather than guessing. It is a diagnostic, not a security
+    ///         control: nothing in the request path reads it.
+    ///     </para>
+    /// </summary>
+    public string? ApiOrigin { get; set; }
+
+    /// <summary>
     ///     SameSite policy for cookies this API sets. Lax by default, which is
     ///     correct for every deployment where the SPA and the API share a
     ///     registrable domain - including a cross-origin one, since a site is

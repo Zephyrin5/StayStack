@@ -1,3 +1,4 @@
+using BuildingBlocks.Observability;
 using Mediator;
 namespace Bookings.Features.GetBookingForManagement;
 
@@ -10,5 +11,5 @@ namespace Bookings.Features.GetBookingForManagement;
 public record GetBookingForManagementRequest : IRequest<GetBookingForManagementResponse>
 {
     public Guid BookingId { get; init; }
-    public string? ManagementToken { get; init; }
+    [Sensitive] public string? ManagementToken { get; init; }
 }

@@ -1,9 +1,24 @@
 ﻿using Identity.Entities;
+using System.Security.Claims;
 namespace Identity.Features.Common;
 
 public interface IAuthTokenProvider
 {
     string GenerateJwtToken(ApplicationUser user, IList<string> roles);
+
+    /// <summary>
+    ///     Signs a token that is deliberately not a user identity - no
+    ///     <c>sub</c>, no roles, a caller-supplied audience and a short
+    ///     lifetime. Used for booking-management sessions.
+    ///     <para>
+    ///         Generic rather than a GenerateBookingSessionToken: Identity has
+    ///         no business knowing what a booking is, and the only thing it
+    ///         contributes here is signing. The caller owns the claims and the
+    ///         audience; this owns the key, the issuer and the algorithm, so
+    ///         there stays exactly one place in the app that signs a JWT.
+    ///     </para>
+    /// </summary>
+    string GenerateScopedToken(string audience, IEnumerable<Claim> claims, TimeSpan lifetime);
 
     /// <summary>
     ///     Atomically consumes the token (flips IsRevoked in a single

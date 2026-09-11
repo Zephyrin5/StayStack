@@ -22,6 +22,7 @@ public class CancelBookingHandler(
     IHoldConfirmation holdConfirmation,
     ITransactionReversal transactionReversal,
     ICurrentUserProvider currentUserProvider,
+    IBookingSessions bookingSessions,
     TimeProvider timeProvider,
     IOptions<BookingLifecyclePolicyOptions> policy) : IRequestHandler<CancelBookingRequest, CancelBookingResponse>
 {
@@ -34,7 +35,8 @@ public class CancelBookingHandler(
         // management token (guest checkout) - see BookingAccessChecker's
         // own doc comment.
         Booking booking = await BookingAccessChecker.ResolveAsync(
-                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken, timeProvider,
+                              dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken,
+                              await bookingSessions.GetSessionBookingIdAsync(cancellationToken), timeProvider,
             policy.Value.ManagementTokenLifetimeDaysAfterCheckOut, cancellationToken)
                           ?? throw new NotFoundException(nameof(Booking), request.BookingId);
 

@@ -1,3 +1,4 @@
+using BuildingBlocks.Observability;
 using Mediator;
 namespace Transactions.Features.InitiateTransaction;
 
@@ -19,5 +20,5 @@ public record InitiateTransactionRequest : IRequest<InitiateTransactionResponse>
     ///         withhold them from.
     ///     </para>
     /// </summary>
-    public string? ManagementToken { get; init; }
+    [Sensitive] public string? ManagementToken { get; init; }
 }

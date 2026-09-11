@@ -1,5 +1,6 @@
 using Bookings.Features.CancelBooking;
 using Bookings.Features.ConfirmBooking;
+using Bookings.Features.CreateBookingSession;
 using Bookings.Features.HoldAvailability;
 using Bookings.Features.GetBookingForManagement;
 using Bookings.Features.GetBookingsForHost;
@@ -20,6 +21,8 @@ namespace Bookings.Serialization;
 [JsonSerializable(typeof(HoldAvailabilityResponse))]
 [JsonSerializable(typeof(ConfirmBookingRequest))]
 [JsonSerializable(typeof(ConfirmBookingResponse))]
+[JsonSerializable(typeof(CreateBookingSessionRequest))]
+[JsonSerializable(typeof(CreateBookingSessionResponse))]
 [JsonSerializable(typeof(GetMyBookingsRequest))]
 [JsonSerializable(typeof(PagedResponse<BookingSummary>))]
 [JsonSerializable(typeof(GetHostBookingsRequest))]

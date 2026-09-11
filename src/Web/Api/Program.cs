@@ -295,6 +295,55 @@ if (cookieSecurity.SameSite == SameSiteMode.None && !cookieSecurity.RequireSecur
         "SPA needs both; a same-site one should leave SameSite at Lax.");
 }
 
+// The other half of the SameSite/CORS pair, and the half that fails quietly.
+// The check above catches a combination browsers reject outright; this one
+// catches a combination they accept and then ignore - CORS allows the origin,
+// the preflight passes, and the cookie is simply never attached, so cookie-mode
+// auth 401s with nothing wrong in any log.
+//
+// A throw outside Development, matching the checks above: a deployment that
+// listed a cross-site origin *and* left SameSite at Lax has asked for two
+// things that cannot both be true, and serving sessions that silently do not
+// work is worse than refusing to start. Development is exempt because the
+// localhost:3000 -> localhost:5277 split is same-site anyway and would never
+// trip this.
+string[] corsOrigins = app.Configuration.AppSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+
+if (corsOrigins.Length > 0 && cookieSecurity.SameSite == SameSiteMode.Lax)
+{
+    if (string.IsNullOrWhiteSpace(cookieSecurity.ApiOrigin))
+    {
+        // Cannot verify rather than verified-fine, and said out loud once.
+        // Staying silent here would read as "checked, all good".
+        app.Logger.LogWarning(
+            "{Section}:ApiOrigin is not set, so the CORS/SameSite consistency check cannot run. If any origin in " +
+            "{CorsSection}:AllowedOrigins is on a different registrable domain or scheme than this API, the " +
+            "SameSite=Lax cookies it sets will never be attached to that origin's requests and cookie-mode auth " +
+            "will fail with no visible error. Bearer tokens are unaffected.",
+            CookieSecurityOptions.SectionName, "Cors");
+    }
+    else
+    {
+        string[] crossSite =
+        [
+            .. corsOrigins.Where(origin => !SameSiteOriginCheck.IsSameSite(origin, cookieSecurity.ApiOrigin))
+        ];
+
+        if (crossSite.Length > 0 && !app.Environment.IsDevelopment())
+        {
+            throw new InvalidOperationException(
+                $"{CookieSecurityOptions.SectionName}:SameSite is Lax, but these allowed CORS origins are " +
+                $"cross-site with {CookieSecurityOptions.SectionName}:ApiOrigin " +
+                $"({cookieSecurity.ApiOrigin}): {string.Join(", ", crossSite)}. A browser will not attach a Lax " +
+                "cookie to their requests, so cookie-mode auth cannot work for them and refresh would fail with " +
+                "no error visible anywhere. Either serve the SPA same-site with the API, or leave those clients " +
+                "on bearer tokens (the default - omit ?useCookies=true), or set SameSite to None with " +
+                "RequireSecure and accept that you now own CSRF protection on every cookie-authenticated " +
+                "endpoint.");
+        }
+    }
+}
+
 if (!app.Environment.IsDevelopment() && forwardedHeadersOptions.KnownProxies.Count == 0)
 {
     // A warning, not a throw: an app exposed directly with its own TLS has

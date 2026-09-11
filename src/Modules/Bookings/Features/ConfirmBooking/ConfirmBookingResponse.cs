@@ -1,5 +1,6 @@
 using Bookings.Entities;
 using SeedWork.Enums;
+using BuildingBlocks.Observability;
 namespace Bookings.Features.ConfirmBooking;
 
 public record ConfirmBookingResponse
@@ -16,5 +17,5 @@ public record ConfirmBookingResponse
     // the client build a "manage your booking" link (view/cancel, and once
     // eligible, leave a review) with no account required. Null for an
     // authenticated caller, whose own session already proves ownership.
-    public string? ManagementToken { get; init; }
+    [Sensitive] public string? ManagementToken { get; init; }
 }

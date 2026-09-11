@@ -58,6 +58,26 @@ public class AuthTokenProvider(
         return handler.CreateToken(tokenDescriptor);
     }
 
+    public string GenerateScopedToken(string audience, IEnumerable<Claim> claims, TimeSpan lifetime)
+    {
+        SymmetricSecurityKey key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_authTokenSettings.Key));
+
+        SecurityTokenDescriptor tokenDescriptor = new SecurityTokenDescriptor
+        {
+            // No Sub and no roles, by construction rather than by omission: a
+            // caller cannot add them, because it supplies only the claims it
+            // is handed here and the audience below is what stops this token
+            // being accepted where a user identity is expected.
+            Subject = new ClaimsIdentity([.. claims, new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())]),
+            Expires = timeProvider.GetUtcNow().UtcDateTime.Add(lifetime),
+            SigningCredentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256),
+            Issuer = _authTokenSettings.Issuer,
+            Audience = audience
+        };
+
+        return new JsonWebTokenHandler().CreateToken(tokenDescriptor);
+    }
+
     public async Task<string> GenerateRefreshToken(Guid userId, Guid? familyId, Guid? parentTokenId, CancellationToken cancellationToken)
     {
         string newRefreshTokenPlain = SecureToken.Generate();
