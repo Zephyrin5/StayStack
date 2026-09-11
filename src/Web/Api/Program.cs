@@ -15,6 +15,8 @@ using Jobs;
 using Promotions;
 using Reviews;
 using TickerQ.DependencyInjection;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using BuildingBlocks.Observability;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -68,7 +70,13 @@ builder.Services.AddOptions<StaySearchPolicyOptions>()
     .ValidateOnStart();
 
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddHealthChecks();
+// A bare AddHealthChecks() registers nothing, and an endpoint with no checks
+// reports Healthy unconditionally - so /health answered "yes" with the
+// database unreachable, which is worse than having no probe at all: an
+// orchestrator keeps routing traffic to a node that cannot serve a single
+// request, and a deploy that cannot reach its database rolls out green.
+builder.Services.AddHealthChecks()
+    .AddCheck<PostgresHealthCheck>("postgres", tags: [HealthCheckTags.Ready]);
 
 // Fixed-window, keyed by caller IP - auth and payment-initiation endpoints
 // are the obvious credential-stuffing/abuse targets and had no
@@ -407,11 +415,30 @@ app.UseRateLimiter();
 
 app.UseTickerQ();
 
-// Outside the /api scoping above and unauthenticated on purpose - this is
-// for a load balancer/orchestrator to poll, not an API consumer, so it
+// Outside the /api scoping above and unauthenticated on purpose - these are
+// for a load balancer/orchestrator to poll, not an API consumer, so they
 // shouldn't inherit either the ProblemDetails error shaping or any auth
 // requirement those routes carry.
-app.MapHealthChecks("/health");
+//
+// Split in two because the two questions have opposite remedies. Liveness
+// asks "is this process wedged", and the answer to no is to restart the
+// container. Readiness asks "can this node serve a request", and the answer
+// to no is to stop routing to it until it can. Pointing a liveness probe at a
+// dependency check is the classic way to turn a database blip into a
+// cluster-wide restart storm, so liveness deliberately runs no checks at all:
+// reaching this handler is itself the proof that the process is up and
+// serving.
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
+app.MapHealthChecks("/health/ready",
+    new HealthCheckOptions { Predicate = check => check.Tags.Contains(HealthCheckTags.Ready) });
+
+// Kept, and mapped to readiness rather than removed. It is the address in the
+// README and in whatever external monitor someone has already pointed at it,
+// and "can it serve" is the question a human typing /health means. Nothing in
+// this repo polls it as a liveness probe - if something outside does, it
+// wants /health/live now.
+app.MapHealthChecks("/health",
+    new HealthCheckOptions { Predicate = check => check.Tags.Contains(HealthCheckTags.Ready) });
 
 app.UseFastEndpoints(options =>
 {
