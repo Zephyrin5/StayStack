@@ -2,6 +2,8 @@ using Microsoft.Extensions.Options;
 using Bookings.Entities;
 using Bookings.Features.Common;
 using Bookings.Outbox;
+using Dapper;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Bookings.Serialization;
@@ -77,6 +79,11 @@ public class CancelBookingHandler(
         // that rounds on every operation.
         (Money Amount, decimal Percent) ComputeRefund(DateOnly asOf)
         {
+            // Reads CheckIn/TotalPrice/CancellationPolicy only, none of which
+            // Cancel() touches, so the pre-lock snapshot is as good as the
+            // locked one here. Deliberately not moved inside the delegate:
+            // recomputing a refund figure per attempt would let two attempts
+            // disagree if the clock crossed a tier boundary between them.
             int daysBeforeCheckIn = Math.Max(booking.CheckIn.DayNumber - asOf.DayNumber, 0);
             decimal percent = cancellationPolicy.ResolveRefundPercent(daysBeforeCheckIn);
             return (booking.TotalPrice * (percent / 100m), percent);
@@ -132,58 +139,141 @@ public class CancelBookingHandler(
             // caller could already read.
             RequireGuestEmailForLinkAccess(access, request.GuestEmail);
 
-            booking.Cancel();
-
             (Money refundAmount, decimal refundPercent) = ComputeRefund(today);
 
-            // Two messages now, not three. The hold release used to be one of
-            // them because the hold lived in another module and another
-            // DbContext, so an outbox row was the only way to make "cancel the
-            // booking" and "release its inventory" eventually agree. They are
-            // now the same DbContext, and a plain call inside the transaction
-            // below makes them agree immediately instead of eventually -
-            // no row, no dispatch, no relay, no window in which a Cancelled
-            // booking still blocks its range.
+            // Everything that must survive a retry is built INSIDE the
+            // delegate, and that placement is the whole point rather than a
+            // style choice.
             //
-            // The other two stay on the outbox because they genuinely cross a
-            // module boundary (Transactions, Promotions) and cannot join this
-            // transaction. Each is independent: ReverseRedemptionAsync is a
-            // no-op when there is nothing to reverse, and
-            // ReverseTransactionAsync's own no-op case (nothing Succeeded to
-            // reverse) is exactly as safe, and simpler, to let it discover on
-            // its own than to skip enqueueing it here.
+            // SaveChangesAsync defaults to acceptAllChangesOnSuccess, so the
+            // moment it returns, the mutated Booking and both enqueued
+            // OutboxMessages are Unchanged - accepted, even though the
+            // transaction has not committed. Built outside, a transient
+            // failure on CommitAsync then retried a delegate with nothing left
+            // to save: the hold release ran again (it is a statement, not
+            // tracked state), the save wrote nothing, the commit succeeded,
+            // and the handler returned a cheerful Cancelled response over a
+            // database holding a Confirmed booking, a released hold and zero
+            // compensating rows. Silent, and it loses a refund.
             //
-            // Enqueued before the strategy delegate rather than inside it. A
-            // retried attempt re-runs the release and the save - both
-            // idempotent, the release because a rolled-back transaction undid
-            // it - but re-running Enqueue would add a second copy of each row
-            // to the tracker, and the rows are still Added from the failed
-            // attempt.
-            OutboxMessage reverseTransactionRow = dispatcher.Enqueue(
-                new ReverseTransactionOutboxMessage(booking.Id, refundAmount.Amount, refundAmount.Currency),
-                BookingsJsonSerializerContext.Default.ReverseTransactionOutboxMessage);
-            OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
-                new ReverseRedemptionOutboxMessage(booking.Id), BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
-
+            // ConfirmBookingHandler has the same outer shape and is safe
+            // because its Add/Remove calls sit inside its delegate. This is
+            // that shape, applied.
             IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
-            await strategy.ExecuteAsync(async () =>
+            CancelOutcome outcome = await strategy.ExecuteAsync(async () =>
             {
+                // Nothing inherited from a previous attempt. Without this, a
+                // second attempt starts holding the first attempt's accepted
+                // entities and reproduces the same bug in a new shape.
+                dbContext.ChangeTracker.Clear();
+
                 await using IDbContextTransaction transaction =
                     await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
+                // The booking lock is taken FIRST, before the hold is touched.
+                // BookingPaymentConfirmation locks the booking and then marks
+                // the hold paid; taking them in the other order here let a
+                // concurrent cancel and payment deadlock. Postgres detects it
+                // and 40P01 is retriable, so it self-heals - but it self-heals
+                // by retrying a whole transaction under contention, which is a
+                // cost with no benefit. One order, everywhere: booking, then
+                // hold.
+                // The id alone, through Dapper, then the entity through EF -
+                // not one FromSqlRaw doing both. Booking carries Money as a
+                // complex property and EF composes its own projection over a
+                // raw query, asking for a "TotalPrice_Amount" column the
+                // snake_case convention never produced; `SELECT *` returns the
+                // real columns and the composed projection then fails on one
+                // that does not exist. ExpireUnpaidBookingsJob and
+                // BookingPaymentConfirmation both claim their row this way for
+                // exactly this reason. The lock belongs to the transaction
+                // either way, so the entity can be read back normally after.
+                //
+                // FOR UPDATE, not SKIP LOCKED: a cancellation has a caller
+                // waiting and must see the committed outcome, where a sweep
+                // should step over a contended row and revisit it.
+                if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
+                {
+                    DbConnection connection = dbContext.Database.GetDbConnection();
+
+                    await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
+                        """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE""",
+                        new { request.BookingId },
+                        transaction.GetDbTransaction(),
+                        cancellationToken: cancellationToken));
+                }
+
+                Booking? locked = await dbContext.Bookings
+                    .SingleOrDefaultAsync(b => b.Id == request.BookingId, cancellationToken);
+
+                // Re-read under the lock rather than reusing the instance
+                // BookingAccessChecker returned. That one was read before the
+                // transaction existed, so it is stale by the time this runs -
+                // and definitely stale on a retry, where it may describe a
+                // world the previous attempt already changed.
+                if (locked is null)
+                {
+                    throw new NotFoundException(nameof(Booking), request.BookingId);
+                }
+
+                // The ambiguous commit, answered from persisted state rather
+                // than inferred. A previous attempt may have committed and
+                // lost its acknowledgement, in which case the cancellation
+                // already happened and its compensations are already durable -
+                // so this is success, not a conflict. Same verify-before-
+                // compensate reasoning as ConfirmBookingHandler and
+                // OnDeadLetteredAsync (docs/adr/0017).
+                if (locked.BookingStatus == BookingStatus.Cancelled)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return new CancelOutcome(locked, null, null);
+                }
+
+                // Re-checked under the lock for the same reason the re-read
+                // exists: eligibility was decided against a stale snapshot.
+                if (!locked.CanBeCancelledOn(today))
+                {
+                    throw new BookingNotCancellableException(locked.Id);
+                }
+
+                locked.Cancel();
+
+                // Enqueued here, per attempt. These are the rows whose absence
+                // made the old failure silent: the response promises a pending
+                // refund on the strength of them existing, and the relay
+                // backstop can only deliver rows that were written.
+                OutboxMessage reverseTransactionRow = dispatcher.Enqueue(
+                    new ReverseTransactionOutboxMessage(locked.Id, refundAmount.Amount, refundAmount.Currency),
+                    BookingsJsonSerializerContext.Default.ReverseTransactionOutboxMessage);
+                OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
+                    new ReverseRedemptionOutboxMessage(locked.Id),
+                    BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
+
                 // Joins the transaction rather than autocommitting - see
-                // HoldConfirmation.AmbientTransaction. Ordering within it no
-                // longer matters, which is the point: either both the
-                // cancellation and the release land or neither does.
-                await holdConfirmation.ReleaseHoldAsync(booking.HoldId, cancellationToken);
+                // HoldConfirmation.AmbientTransaction. After the booking lock,
+                // never before it.
+                await holdConfirmation.ReleaseHoldAsync(locked.HoldId, cancellationToken);
 
                 await dbContext.SaveChangesAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
+
+                return new CancelOutcome(locked, reverseTransactionRow, reverseRedemptionRow);
             });
 
-            await dispatcher.TryDispatchAsync(reverseTransactionRow, cancellationToken);
-            await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
+            // Dispatched after the commit, and only for an attempt that
+            // actually enqueued. A recovered ambiguous commit has rows from
+            // its own earlier attempt, already dispatched or waiting for the
+            // relay.
+            if (outcome.ReverseTransactionRow is not null)
+            {
+                await dispatcher.TryDispatchAsync(outcome.ReverseTransactionRow, cancellationToken);
+            }
+
+            if (outcome.ReverseRedemptionRow is not null)
+            {
+                await dispatcher.TryDispatchAsync(outcome.ReverseRedemptionRow, cancellationToken);
+            }
 
             // Always pending on a fresh cancel, whatever the inline dispatch
             // just did. The durable outbox row is the guarantee; dispatching
@@ -192,9 +282,13 @@ public class CancelBookingHandler(
             // A caller now has exactly one path here: a figure and
             // RefundPending: true, or no refund at all. What actually landed
             // is reported by a later re-cancel, off settled state.
+            // Built from the booking the delegate committed, never the one
+            // read before the transaction opened - reporting a cancellation
+            // off an entity nothing verified is how the old failure managed
+            // to look like success.
             return refundOwed
-                ? BuildResponse(booking, refundAmount.Amount, refundAmount.Currency, refundPercent, refundPending: true)
-                : BuildResponse(booking, refundAmount: null, currency: null, refundPercent: null, refundPending: false);
+                ? BuildResponse(outcome.Booking, refundAmount.Amount, refundAmount.Currency, refundPercent, refundPending: true)
+                : BuildResponse(outcome.Booking, refundAmount: null, currency: null, refundPercent: null, refundPending: false);
         }
 
         // Everything below serves the idempotent re-cancel only, so these are
@@ -275,6 +369,15 @@ public class CancelBookingHandler(
         return BuildResponse(
             booking, pendingRefundAmount.Amount, pendingRefundAmount.Currency, pendingRefundPercent, refundPending: true);
     }
+
+    /// <summary>
+    ///     What the retried delegate produced: the booking as actually
+    ///     committed, and the compensating rows to dispatch - null when this
+    ///     attempt recovered an earlier one's commit rather than making its
+    ///     own, since those rows already exist and are already in flight.
+    /// </summary>
+    private sealed record CancelOutcome(
+        Booking Booking, OutboxMessage? ReverseTransactionRow, OutboxMessage? ReverseRedemptionRow);
 
     /// <summary>
     ///     The second factor on the destructive action - see
