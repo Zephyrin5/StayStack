@@ -40,11 +40,13 @@ public class CreateBookingSessionHandler(
         // into an indefinitely renewable one, which is the property the short
         // lifetime exists to deny. Re-exchanging needs the original token,
         // which is exactly what the guest's link still carries.
-        Booking booking = await BookingAccessChecker.ResolveAsync(
+        BookingAccess access = await BookingAccessChecker.ResolveAsync(
                               dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken,
                               sessionBookingId: null, timeProvider,
                               policy.Value.ManagementTokenLifetimeDaysAfterCheckOut, cancellationToken)
                           ?? throw new NotFoundException(nameof(Booking), request.BookingId);
+
+        Booking booking = access.Booking;
 
         BookingSession session = bookingSessions.Issue(booking.Id);
 

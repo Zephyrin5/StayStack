@@ -5,6 +5,8 @@ using Bookings.Features.CreateBookingSession;
 using Bookings.Features.HoldAvailability;
 using Catalog;
 using Catalog.Entities;
+using Microsoft.EntityFrameworkCore;
+using SeedWork.Enums;
 using Microsoft.Extensions.DependencyInjection;
 using SeedWork.ValueObjects;
 using System.Net;
@@ -205,8 +207,21 @@ public class BookingSessionTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotEmpty(second);
     }
 
+    private async Task<HttpResponseMessage> CancelWithSessionAsync(
+        Guid bookingId, string sessionToken, string? guestEmail)
+    {
+        HttpRequestMessage request =
+            new HttpRequestMessage(HttpMethod.Post, $"/api/bookings/{bookingId}/cancel")
+            {
+                Content = JsonContent.Create(new { bookingId, guestEmail })
+            };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", sessionToken);
+
+        return await _client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
     [Fact]
-    public async Task ASession_CanCancelTheBooking()
+    public async Task ASession_CanCancelTheBooking_WithTheGuestEmail()
     {
         // Cancel takes the management token in its body today. The session has
         // to work there too, or the exchange only covers the read path and the
@@ -214,14 +229,63 @@ public class BookingSessionTests(IntegrationTestWebApplicationFactory factory)
         (Guid bookingId, string managementToken) = await CreateGuestBookingAsync();
         string sessionToken = await SessionFor(bookingId, managementToken);
 
-        HttpRequestMessage request =
-            new HttpRequestMessage(HttpMethod.Post, $"/api/bookings/{bookingId}/cancel")
-            {
-                Content = JsonContent.Create(new { bookingId })
-            };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", sessionToken);
+        HttpResponseMessage response = await CancelWithSessionAsync(bookingId, sessionToken, "jane@example.com");
 
-        HttpResponseMessage response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ALinkAlone_CannotCancel()
+    {
+        // The point of the second factor. Whoever forwarded, screenshotted or
+        // shoulder-surfed the link can read the itinerary and no more.
+        (Guid bookingId, string managementToken) = await CreateGuestBookingAsync();
+        string sessionToken = await SessionFor(bookingId, managementToken);
+
+        // Reading works.
+        Assert.Equal(HttpStatusCode.OK, (await GetWithSessionAsync(bookingId, sessionToken)).StatusCode);
+
+        HttpResponseMessage noEmail = await CancelWithSessionAsync(bookingId, sessionToken, guestEmail: null);
+        HttpResponseMessage wrongEmail =
+            await CancelWithSessionAsync(bookingId, sessionToken, "attacker@example.com");
+
+        Assert.Equal(HttpStatusCode.BadRequest, noEmail.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, wrongEmail.StatusCode);
+
+        // And nothing was cancelled by the attempt.
+        using IServiceScope scope = factory.Services.CreateScope();
+        Booking booking = await scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+            .Bookings.AsNoTracking()
+            .SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
+        Assert.NotEqual(BookingStatus.Cancelled, booking.BookingStatus);
+    }
+
+    [Fact]
+    public async Task TheManagementViewStillRefusesToNameTheEmail()
+    {
+        // The whole second factor rests on this. If the management response
+        // ever starts carrying the guest email, a link holder can read it and
+        // cancel, and the field becomes theatre - so this asserts the
+        // dependency rather than trusting it to stay true.
+        (Guid bookingId, string managementToken) = await CreateGuestBookingAsync();
+        string sessionToken = await SessionFor(bookingId, managementToken);
+
+        HttpResponseMessage viewed = await GetWithSessionAsync(bookingId, sessionToken);
+        string body = await viewed.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("jane@example.com", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TheEmailCheck_AcceptsADifferentCase()
+    {
+        // A confirmation step that rejects the right answer typed in the wrong
+        // case teaches people the field is broken, not that it matters.
+        (Guid bookingId, string managementToken) = await CreateGuestBookingAsync();
+        string sessionToken = await SessionFor(bookingId, managementToken);
+
+        HttpResponseMessage response =
+            await CancelWithSessionAsync(bookingId, sessionToken, "  Jane@Example.COM  ");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }

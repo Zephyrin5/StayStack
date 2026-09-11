@@ -25,8 +25,13 @@ public class CancelBookingEndpoint(IMediator mediator) : Endpoint<CancelBookingR
         {
             s.Summary = "Cancel the caller's own booking";
             s.Description = "Public - proves ownership one of two ways: an authenticated caller whose " +
-                            "CustomerId matches, or a guest-checkout caller supplying the ManagementToken " +
-                            "returned once at confirm time (see ConfirmBookingEndpoint). A booking that " +
+                            "CustomerId matches, or a guest-checkout caller holding the management link - either " +
+                            "the ManagementToken returned once at confirm time (see ConfirmBookingEndpoint) or a " +
+                            "session exchanged for it. **A link-based caller must also supply GuestEmail**, the " +
+                            "address the booking was made with: cancelling is destructive and a link can be " +
+                            "forwarded or screenshotted, while the management view deliberately returns no email, " +
+                            "so this is something only the booker knows. An authenticated caller does not need it. " +
+                            "A booking that " +
                             "belongs to someone else, or a missing/wrong token, returns 404, not 403 or 401, " +
                             "same as every other ownership check in this API - existence and ownership " +
                             "mismatches must look identical from the outside. Idempotent: cancelling an " +
@@ -36,7 +41,8 @@ public class CancelBookingEndpoint(IMediator mediator) : Endpoint<CancelBookingR
                             "yet - see POST /transactions/{id}/succeed for how a late success against an " +
                             "already-cancelled booking is handled.";
             s.Response<CancelBookingResponse>(200, "Booking cancelled.");
-            s.Response<ValidationProblemDetails>(400, "Validation failed.");
+            s.Response<ValidationProblemDetails>(400,
+                "Validation failed, or GuestEmail was missing/wrong on a link-based cancellation.");
             s.Response<ProblemDetails>(404, "Booking not found, belongs to someone else, or the token is missing/wrong.");
         });
     }

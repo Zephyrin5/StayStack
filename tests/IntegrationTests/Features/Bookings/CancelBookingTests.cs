@@ -67,9 +67,14 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
     // established for the same reason.
     private async Task<Guid> SeedBookingAsync(Guid unitId, DateOnly checkIn, DateOnly checkOut)
     {
+        // Recorded for the same reason ConfirmBookingAsGuestAsync records it:
+        // a link-based cancel has to confirm the address, and a Faker value
+        // generated inline is unrecoverable afterwards.
+        _lastGuestEmail = _faker.Internet.Email();
+
         Booking booking = Booking.Create(
             Guid.CreateVersion7(), unitId, Guid.NewGuid(), null,
-            _faker.Name.FullName(), _faker.Internet.Email(), null, checkIn, checkOut, 2, Money.Of(300m, Currency.KWD), Money.Of(300m, Currency.KWD),
+            _faker.Name.FullName(), _lastGuestEmail, null, checkIn, checkOut, 2, Money.Of(300m, Currency.KWD), Money.Of(300m, Currency.KWD),
             CancellationPolicy.CreateDefault(), "Asia/Kuwait", DateTimeOffset.UtcNow.AddMinutes(30));
         booking.Confirm();
 
@@ -157,15 +162,23 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         return result.BookingId;
     }
 
+    // The address the most recent guest checkout used. Cancelling through a
+    // management link now has to confirm it - see
+    // CancelBookingRequest.GuestEmail - so these tests have to know what the
+    // guest typed, which a random Faker address inside the helper threw away.
+    private string _lastGuestEmail = string.Empty;
+
     private async Task<ConfirmBookingResponse> ConfirmBookingAsGuestAsync(Guid holdId)
     {
+        _lastGuestEmail = _faker.Internet.Email();
+
         // No Authorization header - guest checkout, the only path that
         // gets a ManagementToken back.
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/bookings", new ConfirmBookingRequest
         {
             HoldId = holdId,
             GuestName = _faker.Name.FullName(),
-            GuestEmail = _faker.Internet.Email()
+            GuestEmail = _lastGuestEmail
         }, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -183,7 +196,15 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
             // the endpoint expects a JSON body the same as any other POST
             // request with fields, matching how a real client (openapi-fetch)
             // always sends one.
-            Content = JsonContent.Create(new CancelBookingRequest { BookingId = bookingId, ManagementToken = managementToken })
+            // GuestEmail travels whenever a management token does: the two go
+            // together on the link path now, and an authenticated caller
+            // (managementToken null) still needs neither.
+            Content = JsonContent.Create(new CancelBookingRequest
+            {
+                BookingId = bookingId,
+                ManagementToken = managementToken,
+                GuestEmail = managementToken is null ? null : _lastGuestEmail
+            })
         };
         if (accessToken is not null)
         {

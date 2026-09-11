@@ -29,7 +29,7 @@ internal static class BookingAccessChecker
     ///     expiry of its own - account-based proof of ownership, not a
     ///     bearer credential that could leak.
     /// </summary>
-    public static async Task<Booking?> ResolveAsync(
+    public static async Task<BookingAccess?> ResolveAsync(
         AppBookingsDbContext dbContext,
         Guid bookingId,
         Guid? customerId,
@@ -49,7 +49,7 @@ internal static class BookingAccessChecker
 
         if (customerId is not null && booking.CustomerId == customerId)
         {
-            return booking;
+            return new BookingAccess(booking, BookingAccessKind.Account);
         }
 
         // A booking session, exchanged for a management token earlier. The
@@ -68,7 +68,7 @@ internal static class BookingAccessChecker
         // credential again, which is the entire point of exchanging it.
         if (sessionBookingId == bookingId)
         {
-            return booking;
+            return new BookingAccess(booking, BookingAccessKind.Link);
         }
 
         if (string.IsNullOrEmpty(managementToken))
@@ -104,6 +104,33 @@ internal static class BookingAccessChecker
         bool tokenMatches = await dbContext.BookingManagementTokens
             .AnyAsync(t => t.BookingId == bookingId && t.TokenHash == tokenHash, cancellationToken);
 
-        return tokenMatches ? booking : null;
+        return tokenMatches ? new BookingAccess(booking, BookingAccessKind.Link) : null;
     }
+}
+
+/// <summary>
+///     A resolved booking together with <em>how</em> the caller proved they
+///     owned it. The second half is not bookkeeping: a destructive action can
+///     reasonably ask more of a caller holding a link than of one holding an
+///     account, and it cannot make that distinction unless the check that
+///     resolved the booking reports it.
+/// </summary>
+internal sealed record BookingAccess(Booking Booking, BookingAccessKind Kind);
+
+internal enum BookingAccessKind
+{
+    /// <summary>
+    ///     A matching CustomerId. Proof of ownership that cannot be forwarded,
+    ///     screenshotted or read out of a URL.
+    /// </summary>
+    Account,
+
+    /// <summary>
+    ///     A management token, or a session exchanged for one. Both descend
+    ///     from the same link, so they are one kind rather than two -
+    ///     otherwise exchanging the token for a session would launder away
+    ///     whatever extra proof the link path is asked for, which is precisely
+    ///     the hole a second factor exists to close.
+    /// </summary>
+    Link
 }

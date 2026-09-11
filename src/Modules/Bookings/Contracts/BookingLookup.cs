@@ -33,10 +33,12 @@ internal class BookingLookup(AppBookingsDbContext dbContext, TimeProvider timePr
     public async Task<BookingAccessResult?> VerifyBookingAccessAsync(
         Guid bookingId, Guid? customerId, string? managementToken, CancellationToken cancellationToken)
     {
-        Booking? booking = await BookingAccessChecker.ResolveAsync(
+        BookingAccess? access = await BookingAccessChecker.ResolveAsync(
             dbContext, bookingId, customerId, managementToken,
             await bookingSessions.GetSessionBookingIdAsync(cancellationToken), timeProvider,
             policy.Value.ManagementTokenLifetimeDaysAfterCheckOut, cancellationToken);
+
+        Booking? booking = access?.Booking;
 
         return booking is null
             ? null

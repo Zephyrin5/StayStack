@@ -61,7 +61,24 @@ Two more limits follow from the same reasoning:
 - **New request/response types must be registered in the module's `JsonSerializerContext`.** Native AOT source generation ([ADR-0001](0001-native-aot-compatibility.md)) means an unregistered type fails at runtime with a 500, not at compile time - the exchange endpoint did exactly that on first run.
 - **Link delivery is not built.** There is no email infrastructure; the management link is rendered in the checkout receipt. The fragment-based hand-off (`/bookings/manage/{id}#t=<token>`, read once, exchanged, then `history.replaceState`) is implemented on the client because it is worth having whether the link arrives by email or by copy-paste - a fragment is never sent to any server, so it appears in no access log and no `Referer`. Mobile deep links are moot until there is an app.
 
+## Cancelling asks for the guest email
+
+Anyone who saw the link could cancel a stay. They now have to confirm the address the booking was made with, and the check sits on the **destructive branch only** - after the eligibility check, inside the fresh-cancel path.
+
+Ordering is the whole of it. Ahead of eligibility, a guest would type their address and still be told 409 for a stay that cannot be cancelled at all. Ahead of the idempotent branch, a re-cancel that changes nothing would be refused. Neither is destructive, so neither is what this guards. Checking eligibility first leaks nothing either: `CheckIn`, `CheckOut` and `CanCancel` are already in the management response.
+
+What makes one form field worth anything is that `GetBookingForManagementResponse` carries **no guest email**, so a link holder cannot read the answer back out of the API. That dependency is load-bearing and now has its own test - if the field is ever added to that response, the confirmation becomes theatre, and the test says so.
+
+An authenticated customer is not asked. A matching `CustomerId` cannot be forwarded or screenshotted, and `BookingAccessChecker` now reports *how* ownership was proven (`Account` or `Link`) so the handler can tell them apart. A session counts as `Link`, deliberately - otherwise exchanging the token would launder away the requirement, which is exactly the hole a second factor exists to close.
+
+## The link hand-off, client side
+
+The management page reads the token from `#t=`, exchanges it for a session, and `replaceState`s it out of the address bar. `?managementToken=` is still read, because links already handed out use it - reading it is what upgrades them to the safer shape on first use - and `Referrer-Policy: no-referrer` covers the window before it is stripped.
+
+The session lives in module state, not `localStorage` or `sessionStorage`. It is a live bearer credential for someone else's stay, and persisting it would outlive the tab, the reload and the person at the keyboard. Losing it on reload is the intended cost, and is why the management token is deliberately not rotated or consumed by the exchange: the guest re-opens their link.
+
+The URL is read during render and stripped in an effect, as two functions rather than one. Deriving state inside an effect costs a second render pass and the lint rules reject it; rewriting history during render is a side effect that must not happen there. The two halves genuinely belong to different phases.
+
 ## Still open
 
-- **Cancel and view carry equal weight.** Anyone who sees the link can cancel a stay. Requiring the booking's guest email to confirm a cancellation turns a leaked link from "cancel someone's holiday" into "read their itinerary" - one form field, and a larger real-world improvement than any transport change here.
-- **There is no way to revoke a management token.** One row per booking, no expiry column, no revocation. With a link UX the token lives in inboxes indefinitely, and the ability to invalidate one matters more than it did when the token was only ever held by an active session.
+- **There is no way to revoke a management token.** One row per booking, no expiry column, no revocation. Deferred rather than dismissed: with no email infrastructure a rotated link has nowhere to be delivered - the guest would have to copy it off the page in the moment, which is a worse experience than the problem it solves. The cancel confirmation above also lowers the stakes of a leak from "cancel someone's holiday" to "read their itinerary". Worth building the day a delivery channel exists, and worth doing then as rotate-and-revoke from an open session rather than as an admin-only switch.

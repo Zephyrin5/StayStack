@@ -34,11 +34,13 @@ public class CancelBookingHandler(
         // CustomerId (authenticated) or a matching, not-yet-expired
         // management token (guest checkout) - see BookingAccessChecker's
         // own doc comment.
-        Booking booking = await BookingAccessChecker.ResolveAsync(
+        BookingAccess access = await BookingAccessChecker.ResolveAsync(
                               dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken,
                               await bookingSessions.GetSessionBookingIdAsync(cancellationToken), timeProvider,
             policy.Value.ManagementTokenLifetimeDaysAfterCheckOut, cancellationToken)
                           ?? throw new NotFoundException(nameof(Booking), request.BookingId);
+
+        Booking booking = access.Booking;
 
         // Resolved after the booking loads, from its own snapshotted zone -
         // the refund tier is measured against CheckIn, a property-local date,
@@ -114,6 +116,20 @@ public class CancelBookingHandler(
             // or true, depending on a race the caller can't see or control.
             bool refundOwed =
                 await transactionReversal.GetSucceededTransactionAmountAsync(booking.Id, cancellationToken) is not null;
+
+            // Last, and only on the branch that actually cancels something.
+            //
+            // Ordering is the whole of it. Ahead of the eligibility check it
+            // would demand a confirmation for a stay that cannot be cancelled
+            // at all - the guest types their address and is told 409 anyway.
+            // Ahead of the idempotent branch it would refuse a re-cancel that
+            // changes nothing. Neither of those is destructive, so neither is
+            // what this guards.
+            //
+            // Nothing is leaked by checking eligibility first: CheckIn,
+            // CheckOut and CanCancel are all in the management response the
+            // caller could already read.
+            RequireGuestEmailForLinkAccess(access, request.GuestEmail);
 
             booking.Cancel();
 
@@ -257,6 +273,46 @@ public class CancelBookingHandler(
 
         return BuildResponse(
             booking, pendingRefundAmount.Amount, pendingRefundAmount.Currency, pendingRefundPercent, refundPending: true);
+    }
+
+    /// <summary>
+    ///     The second factor on the destructive action - see
+    ///     CancelBookingRequest.GuestEmail for why it exists and why it does
+    ///     not apply to account holders.
+    /// </summary>
+    private static void RequireGuestEmailForLinkAccess(BookingAccess access, string? supplied)
+    {
+        if (access.Kind != BookingAccessKind.Link)
+        {
+            return;
+        }
+
+        // Case-insensitive and trimmed. Domains are case-insensitive by
+        // definition and no mail provider in practice treats the local part
+        // otherwise, so rejecting "Jane@Example.com" would be refusing the
+        // right answer typed in the wrong case - a false negative on a
+        // confirmation step, which teaches people the field is broken rather
+        // than teaching them to check it.
+        //
+        // An ordinary comparison rather than a fixed-time one, deliberately.
+        // This is a confirmation that the caller already knows the booking,
+        // not a secret being verified: the link they hold is the credential,
+        // and the endpoint's rate limit is what bounds guessing at the
+        // address. A fixed-time compare would imply a threat model this field
+        // does not have, while still leaking length.
+        if (!string.IsNullOrWhiteSpace(supplied)
+            && string.Equals(supplied.Trim(), access.Booking.GuestEmail?.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        // Keyed to the field so a client can show it against the input, the
+        // same shape ConfirmBookingHandler uses for a rejected promo code.
+        // Says only that it did not match: a caller who guessed wrong learns
+        // nothing about the real address.
+        throw new ValidationException(
+            nameof(CancelBookingRequest.GuestEmail),
+            "Enter the email address this booking was made with to confirm the cancellation.");
     }
 
     private static CancelBookingResponse BuildResponse(

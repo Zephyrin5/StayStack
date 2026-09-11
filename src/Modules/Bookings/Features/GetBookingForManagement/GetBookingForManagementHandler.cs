@@ -18,11 +18,13 @@ public class GetBookingForManagementHandler(
     public async ValueTask<GetBookingForManagementResponse> Handle(
         GetBookingForManagementRequest request, CancellationToken cancellationToken)
     {
-        Booking booking = await BookingAccessChecker.ResolveAsync(
+        BookingAccess access = await BookingAccessChecker.ResolveAsync(
                               dbContext, request.BookingId, currentUserProvider.UserId, request.ManagementToken,
                               await bookingSessions.GetSessionBookingIdAsync(cancellationToken), timeProvider,
             policy.Value.ManagementTokenLifetimeDaysAfterCheckOut, cancellationToken)
                           ?? throw new NotFoundException(nameof(Booking), request.BookingId);
+
+        Booking booking = access.Booking;
 
         DateOnly today = PropertyTimeZone.Today(timeProvider, booking.TimeZoneId);
 
