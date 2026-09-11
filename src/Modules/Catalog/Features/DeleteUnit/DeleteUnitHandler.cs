@@ -6,6 +6,9 @@ using Catalog.Entities;
 using Catalog.Exceptions;
 using Hosts.Contracts;
 using Mediator;
+using BuildingBlocks.Persistence;
+using Dapper;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore;
 using Unit = Catalog.Entities.Unit;
 namespace Catalog.Features.DeleteUnit;
@@ -41,12 +44,41 @@ public class DeleteUnitHandler(
             hostAuthorization.RequireOwnership(property.HostId, nameof(Property), property.Id);
         }
 
-        await EnsureNoActiveBookingsOrHoldsAsync(
-            unit.Id, property.TimeZoneId, timeProvider, unitArchivalGuard, availabilityLookup, cancellationToken);
+        // The guard and the archive have to be one atomic decision, and they
+        // were two. Nothing spanned them, so a hold could be inserted between
+        // "no active holds" and the archive landing - leaving a unit archived
+        // with live inventory against it. A second unlocked check just before
+        // SaveChanges would narrow that window without closing it.
+        //
+        // Exclusive, against the shared lock HoldAvailabilityHandler takes:
+        // this waits for holds already in flight and excludes new ones until
+        // the archive commits.
+        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
-        unit.Archive(timeProvider.GetUtcNow(), currentUserProvider.UserId);
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using IDbContextTransaction transaction =
+                await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+            if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
+            {
+                await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
+                    UnitAvailabilityLock.AcquireExclusiveSql,
+                    new { LockKey = UnitAvailabilityLock.KeyFor(unit.Id) },
+                    transaction.GetDbTransaction(),
+                    cancellationToken: cancellationToken));
+            }
+
+            // Re-checked under the lock, which is the only version of this
+            // check that means anything.
+            await EnsureNoActiveBookingsOrHoldsAsync(
+                unit.Id, property.TimeZoneId, timeProvider, unitArchivalGuard, availabilityLookup, cancellationToken);
+
+            unit.Archive(timeProvider.GetUtcNow(), currentUserProvider.UserId);
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
 
         return new DeleteUnitResponse { UnitId = unit.Id };
     }

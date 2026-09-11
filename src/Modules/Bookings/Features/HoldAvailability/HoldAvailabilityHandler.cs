@@ -1,6 +1,7 @@
 using Bookings.Entities;
 using Bookings.Exceptions;
 using BuildingBlocks.Exceptions;
+using BuildingBlocks.Persistence;
 using BuildingBlocks.Time;
 using Catalog.Contracts;
 using Dapper;
@@ -131,6 +132,32 @@ public class HoldAvailabilityHandler(
             IDbConnection connection = dbContext.Database.GetDbConnection();
 
             DateTimeOffset now = timeProvider.GetUtcNow();
+
+            // Shared, so concurrent holds on one unit still run in parallel -
+            // they arbitrate through the exclusion constraint below, and
+            // queueing them would slow the hottest write in the system to
+            // defend against an operation a host performs by hand. What it
+            // does block is archival, which takes the same lock exclusively:
+            // without it, DeleteUnitHandler can check "no active holds", this
+            // handler can insert one, and the unit is archived with live
+            // inventory against it. See BuildingBlocks.UnitAvailabilityLock.
+            await connection.ExecuteAsync(new CommandDefinition(
+                UnitAvailabilityLock.AcquireSharedSql,
+                new { LockKey = UnitAvailabilityLock.KeyFor(request.UnitId) },
+                transaction.GetDbTransaction(),
+                cancellationToken: cancellationToken));
+
+            // Re-read under the lock, and this is what makes the lock worth
+            // anything. The pricing lookup above runs before this transaction
+            // opens, so it saw the unit while it still existed; without this,
+            // archival can win the lock, archive, and commit, and this handler
+            // then inserts a hold against a unit that is gone. Taking the lock
+            // only orders the two - it does not tell either of them what the
+            // other did.
+            if (await unitLookup.GetUnitAsync(request.UnitId, cancellationToken) is null)
+            {
+                throw new NotFoundException("Unit", request.UnitId);
+            }
 
             // Stale holds from abandoned checkouts otherwise sit in 'held'
             // forever, permanently occupying their slot in the exclusion
