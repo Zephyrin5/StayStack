@@ -426,11 +426,55 @@ public class ConfirmBookingHandler(
 
             if (ex is DbUpdateConcurrencyException)
             {
-                // The intent was gone and no Booking exists: the reconcile
-                // job resolved this while the request was in flight. It has
-                // already released the hold and reversed any redemption, so
-                // compensating again is skipped deliberately - this reads
-                // like a missing compensation otherwise.
+                // The intent was gone and no Booking exists: the reconcile job
+                // resolved this while the request was in flight.
+                //
+                // This used to compensate nothing, on the reasoning - recorded
+                // in docs/adr/0017 and repeated in review - that by
+                // construction the reconciler had already released the hold
+                // and reversed the redemption. The hold half is true. The
+                // redemption half is not, and the "by construction" is what
+                // made it hard to see:
+                //
+                //   reconciler:  claims the intent, releases the hold, deletes
+                //                the intent, commits, then dispatches its
+                //                ReverseRedemptionOutboxMessage - which finds
+                //                no redemption yet, no-ops, and is marked
+                //                processed, so nothing ever retries it
+                //   this request: RedeemAsync finally commits -> the promotion
+                //                is consumed
+                //                the tracked intent delete affects 0 rows ->
+                //                DbUpdateConcurrencyException
+                //
+                // End state without this call: no booking, and a single-use
+                // code burned with redemption_count permanently incremented.
+                // Reachable whenever a confirmation stalls inside RedeemAsync
+                // for longer than PendingBookingIntent.ReconcileGrace.
+                //
+                // Re-releasing the hold is safe, and NOT because "compensations
+                // are idempotent" - that is precisely the reasoning that just
+                // failed above. It is safe because this hold id can never be
+                // in a releasable state again:
+                //
+                //   - ReleaseHoldAsync matches status IN ('pending_payment',
+                //     'booked'). The reconciler already set it to 'held', so
+                //     the UPDATE matches zero rows on status alone.
+                //   - It cannot get back out of 'held' either. That release
+                //     also set hold_expires_at = now, and ConfirmHoldAsync
+                //     requires hold_expires_at > now, a condition time only
+                //     moves further away from. So no later confirmation can
+                //     re-claim this row.
+                //   - The only thing that can still happen to it is deletion by
+                //     HoldAvailabilityHandler's per-unit cleanup of expired
+                //     'held' rows, and ids are never reused - so the row a
+                //     stranger holds the range with is a different row.
+                //
+                // That is a guarantee about this specific row, not a property
+                // of the operation. If ReleaseHoldAsync ever widened its WHERE
+                // to include 'held', or a hold id became reusable, this call
+                // would start releasing somebody else's inventory.
+                await CompensateAsync(reverseRedemption: redeemedDiscountAmount is not null);
+
                 throw new ConflictException(
                     "This booking confirmation timed out and was rolled back. Please start over.");
             }

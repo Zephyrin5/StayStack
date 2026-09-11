@@ -16,6 +16,9 @@ using Promotions.Entities;
 using Promotions.Enums;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
+using Bookings.Features.ConfirmBooking;
+using System.Net;
+using System.Net.Http.Json;
 namespace IntegrationTests.Features.Bookings;
 
 // A reconciler must not commit a cross-module compensation before the local
@@ -149,5 +152,161 @@ public class ReconcilerOrderingTests(IntegrationTestWebApplicationFactory factor
         AppBookingsDbContext bookingsDb = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
         Assert.True(await bookingsDb.PendingBookingIntents.AsNoTracking()
             .AnyAsync(i => i.Id == bookingId, TestContext.Current.CancellationToken));
+    }
+
+    // Holds RedeemAsync open until the test says go, so the redemption commits
+    // *after* the reconciler has already been and gone. Everything else passes
+    // straight through - this is the one call whose commit point matters.
+    private sealed class RedeemOnCue(IPromotionRedemption inner, TaskCompletionSource gate, TaskCompletionSource reached)
+        : IPromotionRedemption
+    {
+        public async Task<PromotionRedemptionResult> RedeemAsync(
+            string code, Guid unitId, string guestEmail, Money subtotal, Guid bookingId,
+            CancellationToken cancellationToken)
+        {
+            reached.TrySetResult();
+            await gate.Task;
+            return await inner.RedeemAsync(code, unitId, guestEmail, subtotal, bookingId, cancellationToken);
+        }
+
+        public Task ReverseRedemptionAsync(Guid bookingId, CancellationToken cancellationToken) =>
+            inner.ReverseRedemptionAsync(bookingId, cancellationToken);
+    }
+
+    [Fact]
+    public async Task AConfirmationReconciledWhileItsRedemptionWasStillCommitting_DoesNotBurnTheCode()
+    {
+        // The mirror image of the test above, and the one the outbox rewrite
+        // did not fix. There the reconciler reversed too early and the request
+        // succeeded; here the reconciler reverses too early against a
+        // redemption that does not exist yet, so the reversal no-ops and is
+        // marked processed - and then the request's RedeemAsync commits.
+        //
+        //   reconciler:   releases the hold, deletes the intent, commits
+        //                 dispatches its reversal -> nothing to reverse -> no-op
+        //   this request: RedeemAsync commits -> the promotion is consumed
+        //                 the tracked intent delete affects 0 rows
+        //                   -> DbUpdateConcurrencyException
+        //
+        // That branch used to compensate nothing, on the reasoning that the
+        // reconciler had already done it. End state: no booking, and a code
+        // burned for good.
+        //
+        // Running the reconciler twice proves nothing about this. Its second
+        // run is a no-op, and the no-op is the defect.
+        Unit unit = CreateTestUnit();
+        Guid holdId = Guid.CreateVersion7();
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(52);
+        string promoCode = $"BURN{Guid.CreateVersion7():N}"[..12];
+        Guid promotionId;
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            catalog.AddRange(_pendingProperties);
+            catalog.Add(unit);
+            await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+            AppPromotionsDbContext promotions = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+            Promotion seeded = Promotion.CreatePlatformPromotion(
+                promoCode, PromotionDiscountType.Percentage, 10m,
+                currency: null, expiresAt: DateTimeOffset.UtcNow.AddDays(30), maxRedemptions: null, hostId: null);
+            promotions.Promotions.Add(seeded);
+            await promotions.SaveChangesAsync(TestContext.Current.CancellationToken);
+            promotionId = seeded.Id;
+
+            // A real claimable hold: ConfirmHoldAsync matches status = 'held'
+            // AND hold_expires_at > now, so the expiry has to be in the future
+            // or the handler never gets as far as the redemption.
+            AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            bookings.UnitAvailabilityHolds.Add(new UnitAvailabilityHold
+            {
+                Id = holdId,
+                UnitId = unit.Id,
+                StayRange = new NpgsqlRange<DateOnly>(checkIn, true, checkIn.AddDays(2), false),
+                Status = "held",
+                GuestCount = 2,
+                CreatedAt = DateTimeOffset.UtcNow,
+                HoldExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+                TotalPrice = Money.Of(200m, Currency.KWD),
+                Subtotal = 200m
+            });
+            await bookings.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        TaskCompletionSource gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource reachedRedeem = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        HttpClient client = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                ServiceDescriptor original = services.Single(d => d.ServiceType == typeof(IPromotionRedemption));
+                services.Remove(original);
+                services.AddScoped<IPromotionRedemption>(sp => new RedeemOnCue(
+                    (IPromotionRedemption)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!),
+                    gate, reachedRedeem));
+            })).CreateClient();
+
+        // Act - the confirmation runs as far as RedeemAsync and stops there,
+        // with its intent already committed.
+        Task<HttpResponseMessage> confirmation = client.PostAsJsonAsync("/api/bookings", new ConfirmBookingRequest
+        {
+            HoldId = holdId,
+            GuestName = "Jane Guest",
+            GuestEmail = "jane@example.com",
+            PromoCode = promoCode
+        }, TestContext.Current.CancellationToken);
+
+        await reachedRedeem.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // The reconciler, run against a clock far enough forward that this
+        // intent is past its grace period. Everything it does commits while
+        // the request is still parked inside RedeemAsync.
+        using (IServiceScope reconcileScope = factory.Services.CreateScope())
+        {
+            FakeTimeProvider timeProvider = new FakeTimeProvider();
+            timeProvider.SetUtcNow(DateTimeOffset.UtcNow + PendingBookingIntent.ReconcileGrace + TimeSpan.FromMinutes(1));
+
+            ReconcileOrphanedBookingIntentsJob job = new ReconcileOrphanedBookingIntentsJob(
+                reconcileScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
+                reconcileScope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
+                reconcileScope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>(),
+                timeProvider,
+                NullLogger<ReconcileOrphanedBookingIntentsJob>.Instance);
+
+            await job.ReconcileAsync(null!, TestContext.Current.CancellationToken);
+        }
+
+        // Now let the redemption land, behind the reversal that was supposed
+        // to cover it.
+        gate.SetResult();
+
+        HttpResponseMessage response = await confirmation;
+
+        // Assert - the request is correctly refused. That part always worked;
+        // it is what it left behind that did not.
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        using IServiceScope assertScope = factory.Services.CreateScope();
+        AppPromotionsDbContext promotionsDb = assertScope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+
+        Promotion promotion = await promotionsDb.Promotions.AsNoTracking()
+            .SingleAsync(p => p.Id == promotionId, TestContext.Current.CancellationToken);
+
+        // ReversedAt rather than row existence, for the same reason the test
+        // above spells out: reversal is an UPDATE, never a DELETE.
+        List<PromotionRedemption> redemptions = await promotionsDb.PromotionRedemptions.AsNoTracking()
+            .Where(r => r.PromotionId == promotion.Id)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        // The redemption did happen - if it had not, this test would be
+        // asserting nothing at all, since "no active redemption" is trivially
+        // true when no redemption was ever written.
+        Assert.NotEmpty(redemptions);
+        Assert.All(redemptions, redemption => Assert.NotNull(redemption.ReversedAt));
+
+        // And the counter is back where it started, which is what decides
+        // whether the next guest can still use the code.
+        Assert.Equal(0, promotion.RedemptionCount);
     }
 }

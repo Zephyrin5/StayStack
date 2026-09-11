@@ -63,6 +63,33 @@ The same hazard sits on the intent insert itself, and is resolved by the same pr
 
 **Generalized: every save under a retrying execution strategy needs this.** Pre-generate the identity, and on failure ask the database what actually happened. "Compensations are idempotent, so running them twice is safe" holds only when the forward work genuinely didn't happen.
 
+#### Amendment: "the reconciler already compensated" was never true of the redemption
+
+The sentence above ("only then does compensation run") described the intent. The code did something else: the `DbUpdateConcurrencyException` branch compensated *nothing*, with a comment arguing that by construction the reconcile job had already released the hold and reversed the redemption.
+
+The hold half is true. The redemption half is not, and the ordering that breaks it is ordinary rather than exotic:
+
+```
+reconciler:   claims the intent, releases the hold, deletes the intent, commits
+              dispatches ReverseRedemptionOutboxMessage -> no redemption
+              exists yet -> no-op -> marked processed, never retried
+request:      RedeemAsync commits -> the promotion is consumed
+              the tracked intent delete affects 0 rows
+                -> DbUpdateConcurrencyException -> compensates nothing
+```
+
+A single-use code burned with `redemption_count` permanently incremented, and no booking. Reached by nothing more than a confirmation stalling inside `RedeemAsync` for longer than `PendingBookingIntent.ReconcileGrace`.
+
+Note what did *not* save it. Moving the reversal onto the outbox (ADR-0025) fixed a different failure in the same area - a reversal committing before the decision authorising it - and this one survived the move untouched, because the outbox row is dispatched at a moment when there is still nothing to reverse. Nor does idempotency: the reversal's no-op *is* the bug here, not a protection against it.
+
+The branch now compensates. **The licence for re-releasing the hold is a property of that specific row, not of the operation**, and the distinction is the point:
+
+- `ReleaseHoldAsync` matches `status IN ('pending_payment', 'booked')`. The reconciler already set this row to `'held'`, so the second release matches zero rows on status alone.
+- The row cannot leave `'held'` either: that release set `hold_expires_at = now`, and `ConfirmHoldAsync` requires `hold_expires_at > now` - a condition time only moves further away from. No later confirmation can re-claim it.
+- The only thing left that can happen to it is deletion by `HoldAvailabilityHandler`'s per-unit cleanup of expired `'held'` rows, and ids are never reused, so a stranger's hold on the same range is a different row.
+
+Widen `ReleaseHoldAsync`'s `WHERE` to include `'held'`, or make hold ids reusable, and this call starts releasing inventory that belongs to somebody else. That is the thing to check before changing either.
+
 One EF subtlety this depends on: when the request carries on after its own committed insert, the tracked instance is still `Added`, and `Remove` on an `Added` entity transitions it to `Detached` rather than `Deleted` - emitting no `DELETE` at all. That would silently disable the success-path assertion *and* leave the row alive behind a confirmed booking. The handler therefore detaches the stale instance and attaches the fetched row as `Unchanged` before continuing.
 
 ### Refuse a concurrent confirmation rather than adopting its intent
