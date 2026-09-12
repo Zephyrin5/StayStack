@@ -140,7 +140,7 @@ public class BookingTests
     {
         Booking booking = CreateValidBooking();
 
-        booking.Cancel();
+        booking.Cancel(DateTimeOffset.UtcNow);
 
         Assert.Equal(BookingStatus.Cancelled, booking.BookingStatus);
     }
@@ -150,8 +150,8 @@ public class BookingTests
     {
         Booking booking = CreateValidBooking();
 
-        booking.Cancel();
-        Exception? exception = Record.Exception(booking.Cancel);
+        booking.Cancel(DateTimeOffset.UtcNow);
+        Exception? exception = Record.Exception(() => booking.Cancel(DateTimeOffset.UtcNow));
 
         Assert.Null(exception);
         Assert.Equal(BookingStatus.Cancelled, booking.BookingStatus);
@@ -183,7 +183,7 @@ public class BookingTests
     public void Confirm_ShouldThrow_WhenBookingIsCancelled()
     {
         Booking booking = CreateValidBooking();
-        booking.Cancel();
+        booking.Cancel(DateTimeOffset.UtcNow);
 
         Assert.Throws<BookingNotPayableException>(booking.Confirm);
     }

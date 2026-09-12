@@ -237,14 +237,20 @@ public class CancelBookingHandler(
                     throw new BookingNotCancellableException(locked.Id);
                 }
 
-                locked.Cancel();
+                DateTimeOffset cancelledAt = timeProvider.GetUtcNow();
+                locked.Cancel(cancelledAt);
 
                 // Enqueued here, per attempt. These are the rows whose absence
                 // made the old failure silent: the response promises a pending
                 // refund on the strength of them existing, and the relay
                 // backstop can only deliver rows that were written.
                 OutboxMessage reverseTransactionRow = dispatcher.Enqueue(
-                    new ReverseTransactionOutboxMessage(locked.Id, refundAmount.Amount, refundAmount.Currency),
+                    // The cancellation moment travels with the message, so the
+                    // reversal can tell a payment that preceded this
+                    // cancellation from one that followed it. Without it the
+                    // amount was decided by whichever dispatch ran first.
+                    new ReverseTransactionOutboxMessage(
+                        locked.Id, refundAmount.Amount, refundAmount.Currency, cancelledAt),
                     BookingsJsonSerializerContext.Default.ReverseTransactionOutboxMessage);
                 OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
                     new ReverseRedemptionOutboxMessage(locked.Id),
@@ -286,9 +292,44 @@ public class CancelBookingHandler(
             // read before the transaction opened - reporting a cancellation
             // off an entity nothing verified is how the old failure managed
             // to look like success.
-            return refundOwed
-                ? BuildResponse(outcome.Booking, refundAmount.Amount, refundAmount.Currency, refundPercent, refundPending: true)
-                : BuildResponse(outcome.Booking, refundAmount: null, currency: null, refundPercent: null, refundPending: false);
+            if (!refundOwed)
+            {
+                return BuildResponse(
+                    outcome.Booking, refundAmount: null, currency: null, refundPercent: null, refundPending: false);
+            }
+
+            // The persisted figure when there is one, the computed one only as
+            // a fallback - because this handler's policy percentage is no
+            // longer guaranteed to be what gets refunded.
+            //
+            // A payment that succeeded *after* this cancellation bought
+            // nothing, so the whole amount goes back and the reversal above
+            // declines in favour of the confirmation path (see
+            // Transaction.RefundOwedIsThisPathsToWrite). Reporting the policy
+            // percentage there would hand the guest a number the database is
+            // about to contradict.
+            //
+            // Read after the dispatch, unlike refundOwed above, and for the
+            // opposite reason: refundOwed must not depend on whether the inline
+            // attempt won, whereas this is precisely "what did it decide". A
+            // miss is the ordinary "not settled yet" case - the durable outbox
+            // row is the guarantee and the relay will deliver it - so the
+            // computed figure stands in, still flagged RefundPending.
+            TransactionRefundSnapshot? settled =
+                await transactionReversal.GetRefundSnapshotAsync(outcome.Booking.Id, cancellationToken);
+
+            if (settled is not null)
+            {
+                return BuildResponse(
+                    outcome.Booking,
+                    settled.RefundAmount.Amount,
+                    settled.RefundAmount.Currency,
+                    settled.Amount.Amount == 0m ? null : settled.RefundAmount.Amount / settled.Amount.Amount * 100m,
+                    refundPending: settled.RefundPending);
+            }
+
+            return BuildResponse(
+                outcome.Booking, refundAmount.Amount, refundAmount.Currency, refundPercent, refundPending: true);
         }
 
         // Everything below serves the idempotent re-cancel only, so these are

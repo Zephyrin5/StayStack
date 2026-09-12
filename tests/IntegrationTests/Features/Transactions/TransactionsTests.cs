@@ -425,7 +425,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         using IServiceScope scope = factory.Services.CreateScope();
         AppBookingsDbContext bookingsDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
         Booking booking = await bookingsDb.Bookings.SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
-        booking.Cancel();
+        booking.Cancel(DateTimeOffset.UtcNow);
         await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         // Drives the same reversal CancelBookingEndpoint would - seeded
@@ -434,7 +434,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         // already covers that path end-to-end.
         AppTransactionsDbContext transactionsDb = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
         Transaction transaction = await transactionsDb.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
-        transaction.MarkRefundPending(transaction.Amount);
+        transaction.MarkRefundPending(transaction.Amount, RefundCause.GuestCancellation);
         await transactionsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         return transactionId;
@@ -575,7 +575,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         {
             AppBookingsDbContext bookingsDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
             Booking booking = await bookingsDb.Bookings.SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
-            booking.Cancel();
+            booking.Cancel(DateTimeOffset.UtcNow);
             await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
@@ -612,12 +612,12 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         {
             AppBookingsDbContext bookingsDb = setupScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
             Booking booking = await bookingsDb.Bookings.SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
-            booking.Cancel();
+            booking.Cancel(DateTimeOffset.UtcNow);
             await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
 
             AppTransactionsDbContext transactionsDb = setupScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
             Transaction transaction = await transactionsDb.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
-            transaction.MarkRefundPending(transaction.Amount);
+            transaction.MarkRefundPending(transaction.Amount, RefundCause.GuestCancellation);
             await transactionsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 

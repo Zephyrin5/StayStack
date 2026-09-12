@@ -17,7 +17,12 @@ public record ReleaseHoldOutboxMessage(Guid HoldId) : IOutboxMessage
     static string IOutboxMessage.OutboxType => TypeName;
 }
 
-public record ReverseTransactionOutboxMessage(Guid BookingId, decimal RefundAmount, Currency Currency) : IOutboxMessage
+// CancelledAt is nullable and added without a version bump, which the
+// IOutboxMessage contract allows: an added optional field deserializes as null
+// on rows written by an older deployment, and the refund rule treats a null as
+// "the payment came first" - the behaviour those rows already had.
+public record ReverseTransactionOutboxMessage(
+    Guid BookingId, decimal RefundAmount, Currency Currency, DateTimeOffset? CancelledAt = null) : IOutboxMessage
 {
     public const string TypeName = "bookings.reverse-transaction.v1";
     static string IOutboxMessage.OutboxType => TypeName;

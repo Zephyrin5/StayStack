@@ -50,6 +50,33 @@ public sealed class Transaction : Entity, IAggregateRoot
     public TransactionStatus TransactionStatus { get; private set; }
     public string? FailureReason { get; private set; }
 
+    /// <summary>
+    ///     When this payment succeeded, as this system observed it.
+    ///     <para>
+    ///         Exists to order a payment against a cancellation, which is the
+    ///         only thing that can decide which of two refund amounts is owed -
+    ///         see <see cref="RefundOwedIsThisPathsToWrite"/>. It was
+    ///         deliberately left out when ITransactionLookup was added, on the
+    ///         grounds that nothing read it; something reads it now.
+    ///     </para>
+    ///     <para>
+    ///         Local observation time, not provider event time. Nothing
+    ///         supplies the latter yet. The distinction matters less here than
+    ///         it does for the expiry guard: both timestamps this is compared
+    ///         against are this system's own, so they are at least measured the
+    ///         same way.
+    ///     </para>
+    ///     <para>
+    ///         Null on rows written before this column existed.
+    ///     </para>
+    /// </summary>
+    public DateTimeOffset? SucceededAt { get; private set; }
+
+    /// <summary>
+    ///     Which path started the refund. Null until one does.
+    /// </summary>
+    public RefundCause? RefundCause { get; private set; }
+
     // Persisted as one nullable decimal column (the backing field, mapped in
     // TransactionConfiguration) but exposed as Money?, paired with the one
     // currency this transaction has.
@@ -91,7 +118,7 @@ public sealed class Transaction : Entity, IAggregateRoot
     // Unlike Cancel()'s idempotent no-op, re-finalizing is always a
     // genuine conflict worth surfacing - a retried webhook for an
     // already-succeeded transaction shouldn't be silently swallowed.
-    public void MarkSucceeded()
+    public void MarkSucceeded(DateTimeOffset succeededAt)
     {
         if (TransactionStatus != TransactionStatus.Pending)
         {
@@ -99,6 +126,7 @@ public sealed class Transaction : Entity, IAggregateRoot
         }
 
         TransactionStatus = TransactionStatus.Succeeded;
+        SucceededAt = succeededAt;
     }
 
     public void MarkFailed(string? reason)
@@ -117,8 +145,71 @@ public sealed class Transaction : Entity, IAggregateRoot
     // by CancelBookingHandler (via ITransactionReversal), and resolved by
     // the same admin stand-in endpoints MarkTransactionSucceeded/
     // MarkTransactionFailed use in place of a real gateway webhook.
-    public void MarkRefundPending(Money refundAmount)
+    /// <summary>
+    ///     Whether this path is the one that should write the refund, given when
+    ///     the payment succeeded relative to when the booking was cancelled.
+    ///     <para>
+    ///         Two paths reach MarkRefundPending for one transaction and they
+    ///         disagree about the amount: the cancellation path knows the policy
+    ///         figure, the delayed payment-confirmation path only ever refunds in
+    ///         full. Both were guarded on status alone, so whichever outbox
+    ///         dispatch happened to run first decided the money - identical
+    ///         business history producing 50% or 100% depending on scheduling,
+    ///         with the loser silently swallowing its own decision.
+    ///     </para>
+    ///     <para>
+    ///         The rule is ordering, not arrival. A payment that succeeded
+    ///         <em>before</em> the cancellation bought a stay the guest then
+    ///         cancelled, so the cancellation policy applies. One that succeeded
+    ///         <em>after</em> bought nothing, so the whole amount goes back. That
+    ///         is also what already happens whenever the two events are cleanly
+    ///         separated - a transaction still Pending at cancel time is left
+    ///         alone by the cancellation path, and the later confirmation refunds
+    ///         in full - so this makes the overlapping window agree with the rest
+    ///         rather than inventing a rule for it.
+    ///     </para>
+    ///     <para>
+    ///         The two callers pass complementary causes, so exactly one of them
+    ///         owns any given case and neither has to know the other's amount.
+    ///         That matters: the payment path cannot compute a policy refund, and
+    ///         does not have to, because whenever the policy figure is the right
+    ///         answer the cancellation path is guaranteed to have seen this
+    ///         transaction already Succeeded.
+    ///     </para>
+    ///     <para>
+    ///         A null <paramref name="cancelledAt"/> means no cancellation is in
+    ///         play - the payment failed to buy anything for some other reason,
+    ///         such as a hold released underneath it - and the full amount is
+    ///         owed. A null <see cref="SucceededAt"/> is a row from before that
+    ///         column existed; it is treated as having succeeded first, which
+    ///         hands the case to the cancellation path and preserves the
+    ///         pre-existing behaviour for old rows.
+    ///     </para>
+    /// </summary>
+    public bool RefundOwedIsThisPathsToWrite(RefundCause cause, DateTimeOffset? cancelledAt)
     {
+        bool paidAfterTheCancellation = cancelledAt is null
+                                        || (SucceededAt is { } succeeded && succeeded > cancelledAt.Value);
+
+        return cause == Entities.RefundCause.PaymentUnusable
+            ? paidAfterTheCancellation
+            : !paidAfterTheCancellation;
+    }
+
+    public void MarkRefundPending(Money refundAmount, RefundCause cause)
+    {
+        // First writer wins, and a second attempt is a no-op rather than an
+        // overwrite. The ordering rule above means the two paths should never
+        // both decide they own a case, so reaching here twice is a bug
+        // somewhere - but silently replacing a recorded refund amount is the one
+        // outcome that must not be possible, because nothing downstream would
+        // ever show that it happened.
+
+        if (_refundAmount is not null)
+        {
+            return;
+        }
+
         if (TransactionStatus != TransactionStatus.Succeeded)
         {
             throw new TransactionAlreadyFinalizedException(Id);
@@ -140,6 +231,7 @@ public sealed class Transaction : Entity, IAggregateRoot
 
         TransactionStatus = TransactionStatus.RefundPending;
         _refundAmount = refundAmount.Amount;
+        RefundCause = cause;
     }
 
     public void MarkRefunded()

@@ -44,7 +44,7 @@ public class TransactionTests
     {
         Transaction transaction = CreateValidTransaction();
 
-        transaction.MarkSucceeded();
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 
         Assert.Equal(TransactionStatus.Succeeded, transaction.TransactionStatus);
     }
@@ -53,9 +53,9 @@ public class TransactionTests
     public void MarkSucceeded_ShouldThrow_WhenAlreadySucceeded()
     {
         Transaction transaction = CreateValidTransaction();
-        transaction.MarkSucceeded();
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 
-        Assert.Throws<TransactionAlreadyFinalizedException>(transaction.MarkSucceeded);
+        Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkSucceeded(DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public class TransactionTests
         Transaction transaction = CreateValidTransaction();
         transaction.MarkFailed("Card declined");
 
-        Assert.Throws<TransactionAlreadyFinalizedException>(transaction.MarkSucceeded);
+        Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkSucceeded(DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public class TransactionTests
     public void MarkFailed_ShouldThrow_WhenAlreadySucceeded()
     {
         Transaction transaction = CreateValidTransaction();
-        transaction.MarkSucceeded();
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 
         Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkFailed("Card declined"));
     }
@@ -91,9 +91,9 @@ public class TransactionTests
     public void MarkRefundPending_ShouldSetStatusToRefundPendingAndRecordAmount_WhenSucceeded()
     {
         Transaction transaction = CreateValidTransaction();
-        transaction.MarkSucceeded();
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 
-        transaction.MarkRefundPending(Money.Of(60m, Currency.KWD));
+        transaction.MarkRefundPending(Money.Of(60m, Currency.KWD), RefundCause.GuestCancellation);
 
         Assert.Equal(TransactionStatus.RefundPending, transaction.TransactionStatus);
         Assert.Equal(Money.Of(60m, Currency.KWD), transaction.RefundAmount);
@@ -103,9 +103,9 @@ public class TransactionTests
     public void MarkRefundPending_ShouldAllowAZeroRefund_WhenSucceeded()
     {
         Transaction transaction = CreateValidTransaction();
-        transaction.MarkSucceeded();
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 
-        transaction.MarkRefundPending(Money.Of(0m, Currency.KWD));
+        transaction.MarkRefundPending(Money.Of(0m, Currency.KWD), RefundCause.GuestCancellation);
 
         Assert.Equal(Money.Of(0m, Currency.KWD), transaction.RefundAmount);
     }
@@ -114,9 +114,9 @@ public class TransactionTests
     public void MarkRefundPending_ShouldAllowARefundEqualToTheFullAmount_WhenSucceeded()
     {
         Transaction transaction = CreateValidTransaction();
-        transaction.MarkSucceeded();
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 
-        transaction.MarkRefundPending(transaction.Amount);
+        transaction.MarkRefundPending(transaction.Amount, RefundCause.GuestCancellation);
 
         Assert.Equal(transaction.Amount, transaction.RefundAmount);
     }
@@ -125,18 +125,18 @@ public class TransactionTests
     public void MarkRefundPending_ShouldThrow_WhenRefundAmountExceedsTheOriginalAmount()
     {
         Transaction transaction = CreateValidTransaction();
-        transaction.MarkSucceeded();
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 
-        Assert.ThrowsAny<ArgumentException>(() => transaction.MarkRefundPending(transaction.Amount + Money.Of(1m, Currency.KWD)));
+        Assert.ThrowsAny<ArgumentException>(() => transaction.MarkRefundPending(transaction.Amount + Money.Of(1m, Currency.KWD), RefundCause.GuestCancellation));
     }
 
     [Fact]
     public void MarkRefundPending_ShouldThrow_WhenRefundAmountIsNegative()
     {
         Transaction transaction = CreateValidTransaction();
-        transaction.MarkSucceeded();
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 
-        Assert.ThrowsAny<ArgumentException>(() => transaction.MarkRefundPending(Money.Of(-1m, Currency.KWD)));
+        Assert.ThrowsAny<ArgumentException>(() => transaction.MarkRefundPending(Money.Of(-1m, Currency.KWD), RefundCause.GuestCancellation));
     }
 
     [Fact]
@@ -144,7 +144,7 @@ public class TransactionTests
     {
         Transaction transaction = CreateValidTransaction();
 
-        Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkRefundPending(Money.Of(50m, Currency.KWD)));
+        Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkRefundPending(Money.Of(50m, Currency.KWD), RefundCause.GuestCancellation));
     }
 
     [Fact]
@@ -153,28 +153,28 @@ public class TransactionTests
         Transaction transaction = CreateValidTransaction();
         transaction.MarkFailed("Card declined");
 
-        Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkRefundPending(Money.Of(50m, Currency.KWD)));
+        Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkRefundPending(Money.Of(50m, Currency.KWD), RefundCause.GuestCancellation));
     }
 
     [Fact]
     public void MarkRefundPending_ShouldThrow_WhenCurrencyDoesNotMatch()
     {
         Transaction transaction = CreateValidTransaction();
-        transaction.MarkSucceeded();
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 
         // This guard is what licenses storing only the decimal. RefundAmount
         // derives its currency from Amount, so without this a USD refund
         // against a KWD transaction would come back out relabelled as KWD
         // rather than rejected - the type cannot catch what it reconstructs.
-        Assert.Throws<CurrencyMismatchException>(() => transaction.MarkRefundPending(Money.Of(50m, Currency.USD)));
+        Assert.Throws<CurrencyMismatchException>(() => transaction.MarkRefundPending(Money.Of(50m, Currency.USD), RefundCause.GuestCancellation));
     }
 
     [Fact]
     public void MarkRefunded_ShouldSetStatusToRefunded_WhenRefundPending()
     {
         Transaction transaction = CreateValidTransaction();
-        transaction.MarkSucceeded();
-        transaction.MarkRefundPending(Money.Of(50m, Currency.KWD));
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
+        transaction.MarkRefundPending(Money.Of(50m, Currency.KWD), RefundCause.GuestCancellation);
 
         transaction.MarkRefunded();
 
@@ -185,7 +185,7 @@ public class TransactionTests
     public void MarkRefunded_ShouldThrow_WhenStillSucceeded()
     {
         Transaction transaction = CreateValidTransaction();
-        transaction.MarkSucceeded();
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 
         Assert.Throws<TransactionAlreadyFinalizedException>(transaction.MarkRefunded);
     }
@@ -194,8 +194,8 @@ public class TransactionTests
     public void MarkRefundFailed_ShouldSetStatusToRefundFailedAndRecordReason_WhenRefundPending()
     {
         Transaction transaction = CreateValidTransaction();
-        transaction.MarkSucceeded();
-        transaction.MarkRefundPending(Money.Of(50m, Currency.KWD));
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
+        transaction.MarkRefundPending(Money.Of(50m, Currency.KWD), RefundCause.GuestCancellation);
 
         transaction.MarkRefundFailed("Original card closed");
 
@@ -207,7 +207,7 @@ public class TransactionTests
     public void MarkRefundFailed_ShouldThrow_WhenStillSucceeded()
     {
         Transaction transaction = CreateValidTransaction();
-        transaction.MarkSucceeded();
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 
         Assert.Throws<TransactionAlreadyFinalizedException>(() => transaction.MarkRefundFailed("Original card closed"));
     }
@@ -221,9 +221,9 @@ public class TransactionTests
         // to build its response - the same value, but asserted at the call
         // site, in the one place getting it wrong costs real money.
         Transaction transaction = Transaction.Create(Guid.NewGuid(), Money.Of(200m, Currency.KWD));
-        transaction.MarkSucceeded();
+        transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 
-        transaction.MarkRefundPending(Money.Of(60m, Currency.KWD));
+        transaction.MarkRefundPending(Money.Of(60m, Currency.KWD), RefundCause.GuestCancellation);
 
         Assert.NotNull(transaction.RefundAmount);
         Assert.Equal(transaction.Amount.Currency, transaction.RefundAmount!.Value.Currency);

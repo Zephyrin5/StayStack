@@ -512,7 +512,7 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
 
         bool[] outcomes =
         [
-            await TryCommitAsync(succeedDb, () => forSuccess.MarkSucceeded()),
+            await TryCommitAsync(succeedDb, () => forSuccess.MarkSucceeded(DateTimeOffset.UtcNow)),
             await TryCommitAsync(failDb, () => forFailure.MarkFailed("declined"))
         ];
 

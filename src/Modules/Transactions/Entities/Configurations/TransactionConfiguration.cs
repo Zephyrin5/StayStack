@@ -30,6 +30,11 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
 
         builder.Property(t => t.FailureReason).HasMaxLength(500);
 
+        // Text, like TransactionStatus above and for the same reasons: legible
+        // in psql, and safe against the enum's underlying values being
+        // reordered.
+        builder.Property(t => t.RefundCause).HasConversion<string>().HasMaxLength(20);
+
         // Two indexes over the same column, not one reconfigured - see
         // docs/adr/0011 for the naming gotchas that requires.
         builder.HasIndex(t => t.BookingId, "ix_transactions_booking_id");

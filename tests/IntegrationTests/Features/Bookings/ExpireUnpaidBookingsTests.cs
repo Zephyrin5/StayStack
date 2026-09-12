@@ -271,7 +271,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
                 paymentScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
 
             Transaction payment = Transaction.Create(bookingId, Money.Of(200m, Currency.KWD));
-            payment.MarkSucceeded();
+            payment.MarkSucceeded(DateTimeOffset.UtcNow);
             transactions.Transactions.Add(payment);
             await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
@@ -330,8 +330,8 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
                 paymentScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
 
             Transaction payment = Transaction.Create(bookingId, Money.Of(200m, Currency.KWD));
-            payment.MarkSucceeded();
-            payment.MarkRefundPending(Money.Of(200m, Currency.KWD));
+            payment.MarkSucceeded(DateTimeOffset.UtcNow);
+            payment.MarkRefundPending(Money.Of(200m, Currency.KWD), RefundCause.GuestCancellation);
             payment.MarkRefunded();
             transactions.Transactions.Add(payment);
             await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);

@@ -91,6 +91,14 @@ public record BookingAccessResult
     // only ever needs this one fact about BookingStatus.
     public bool IsConfirmed { get; init; }
 
+    /// <summary>
+    ///     When this booking was cancelled, null while it is not. Read by the
+    ///     refund paths in Transactions to order a cancellation against a
+    ///     payment - a timestamp rather than a bool, because "was it cancelled"
+    ///     is not the question; "was it cancelled before the money moved" is.
+    /// </summary>
+    public DateTimeOffset? CancelledAt { get; init; }
+
     // Both added for InitiateTransactionHandler, which used to read them off
     // BookingSummary via the unauthenticated GetBookingAsync. It now goes
     // through VerifyBookingAccessAsync like every other anonymous

@@ -79,7 +79,7 @@ public class CancelBookingHandlerTests : IDisposable
             .Setup(x => x.GetSucceededTransactionAmountAsync(booking.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Money.Of(200m, Currency.KWD));
         transactionReversalMock
-            .Setup(x => x.ReverseTransactionAsync(booking.Id, It.IsAny<Money>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.ReverseTransactionAsync(booking.Id, It.IsAny<Money>(), It.IsAny<DateTimeOffset?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Transactions is temporarily unreachable."));
         transactionReversalMock
             .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
@@ -156,7 +156,7 @@ public class CancelBookingHandlerTests : IDisposable
         // whole point of the state having moved on - so it must not be
         // consulted before GetRefundSnapshotAsync, which still can.
         Booking booking = await SeedBookingAsync();
-        booking.Cancel();
+        booking.Cancel(DateTimeOffset.UtcNow);
         await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
@@ -234,7 +234,7 @@ public class CancelBookingHandlerTests : IDisposable
             .Setup(x => x.GetSucceededTransactionAmountAsync(booking.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Money.Of(200m, Currency.KWD));
         transactionReversalMock
-            .Setup(x => x.ReverseTransactionAsync(booking.Id, It.IsAny<Money>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.ReverseTransactionAsync(booking.Id, It.IsAny<Money>(), It.IsAny<DateTimeOffset?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Transactions is temporarily unreachable."));
         transactionReversalMock
             .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
@@ -401,7 +401,7 @@ public class CancelBookingHandlerTests : IDisposable
         else
         {
             transactionReversalMock
-                .Setup(x => x.ReverseTransactionAsync(booking.Id, It.IsAny<Money>(), It.IsAny<CancellationToken>()))
+                .Setup(x => x.ReverseTransactionAsync(booking.Id, It.IsAny<Money>(), It.IsAny<DateTimeOffset?>(), It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new InvalidOperationException("Transactions is temporarily unreachable."));
             transactionReversalMock
                 .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))

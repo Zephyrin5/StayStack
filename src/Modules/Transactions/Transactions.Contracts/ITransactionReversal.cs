@@ -30,7 +30,20 @@ public interface ITransactionReversal
     ///     caller could previously pass a refund computed in the wrong
     ///     currency with nothing to catch it.
     /// </summary>
-    Task<decimal?> ReverseTransactionAsync(Guid bookingId, Money refundAmount, CancellationToken cancellationToken);
+    ///     <para>
+    ///         <paramref name="cancelledAt"/> is what makes the outcome
+    ///         deterministic. This is not the only path that can start a refund
+    ///         - a payment confirmation arriving against an already-cancelled
+    ///         booking starts one too, for the full amount - and both used to be
+    ///         guarded on status alone, so whichever dispatch ran first decided
+    ///         the money. The two now split the cases by ordering: this one
+    ///         writes when the payment succeeded before the cancellation, and
+    ///         declines otherwise. Null means the caller has no cancellation
+    ///         moment to offer, which hands every case to this path and
+    ///         reproduces the old behaviour.
+    ///     </para>
+    Task<decimal?> ReverseTransactionAsync(
+        Guid bookingId, Money refundAmount, DateTimeOffset? cancelledAt, CancellationToken cancellationToken);
 
     /// <summary>
     ///     The Amount of this booking's Succeeded transaction, if any -

@@ -8,7 +8,8 @@ namespace Transactions.Contracts;
 // should only ever reach this through ITransactionReversal, resolved via DI.
 internal class TransactionReversal(AppTransactionsDbContext dbContext) : ITransactionReversal
 {
-    public async Task<decimal?> ReverseTransactionAsync(Guid bookingId, Money refundAmount, CancellationToken cancellationToken)
+    public async Task<decimal?> ReverseTransactionAsync(
+        Guid bookingId, Money refundAmount, DateTimeOffset? cancelledAt, CancellationToken cancellationToken)
     {
         // Only a Succeeded transaction needs anything done here - money
         // was actually collected, so it needs reversing. A Pending one is
@@ -26,9 +27,19 @@ internal class TransactionReversal(AppTransactionsDbContext dbContext) : ITransa
             return null;
         }
 
+        // Declines when the payment landed after the cancellation: that payment
+        // bought nothing, so the whole amount is owed rather than a policy
+        // percentage of it, and the confirmation path is the one holding that
+        // figure. Returning null here is the same "nothing to reverse" answer
+        // the caller already handles.
+        if (!transaction.RefundOwedIsThisPathsToWrite(RefundCause.GuestCancellation, cancelledAt))
+        {
+            return null;
+        }
+
         try
         {
-            transaction.MarkRefundPending(refundAmount);
+            transaction.MarkRefundPending(refundAmount, RefundCause.GuestCancellation);
             await dbContext.SaveChangesAsync(cancellationToken);
             return refundAmount.Amount;
         }

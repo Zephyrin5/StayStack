@@ -10,7 +10,8 @@ namespace Transactions.Features.MarkTransactionSucceeded;
 
 public class MarkTransactionSucceededHandler(
     AppTransactionsDbContext dbContext,
-    TransactionsOutboxDispatcher dispatcher)
+    TransactionsOutboxDispatcher dispatcher,
+    TimeProvider timeProvider)
     : IRequestHandler<MarkTransactionSucceededRequest, MarkTransactionSucceededResponse>
 {
     public async ValueTask<MarkTransactionSucceededResponse> Handle(
@@ -30,7 +31,7 @@ public class MarkTransactionSucceededHandler(
         // call used to leave Succeeded + booking Pending forever, with no
         // retry path (MarkSucceeded's own guard rejects a retry with 409
         // once Succeeded is set).
-        transaction.MarkSucceeded();
+        transaction.MarkSucceeded(timeProvider.GetUtcNow());
 
         OutboxMessage confirmPaymentRow = dispatcher.Enqueue(
             new ConfirmBookingPaymentOutboxMessage(transaction.Id, transaction.BookingId),

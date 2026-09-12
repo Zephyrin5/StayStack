@@ -138,6 +138,23 @@ public sealed class Booking : Entity, IAggregateRoot
     /// </summary>
     public DateTimeOffset? PaymentDueAt { get; private set; }
 
+    /// <summary>
+    ///     When this booking was cancelled. Null while it is not.
+    ///     <para>
+    ///         Read across the module boundary, by the refund paths, to order a
+    ///         cancellation against a payment - see
+    ///         Transaction.RefundOwedIsThisPathsToWrite. Entity.ModifiedAt
+    ///         cannot serve: it is overwritten by every later write, so it says
+    ///         when the row last changed rather than when this happened.
+    ///     </para>
+    ///     <para>
+    ///         Set by Cancel() and never cleared, since nothing un-cancels a
+    ///         booking. Null on rows cancelled before this column existed,
+    ///         which the refund rule treats as "the payment came first".
+    ///     </para>
+    /// </summary>
+    public DateTimeOffset? CancelledAt { get; private set; }
+
     // Snapshotted from the unit's *current* policy at confirm time, same
     // "the terms they saw are the terms they get" reasoning as
     // TotalPrice/Currency - a host tightening their policy afterward can't
@@ -272,7 +289,7 @@ public sealed class Booking : Entity, IAggregateRoot
     // stays valid through CheckOut + 90 days so a stay can still be
     // cancelled shortly after checkout) - Cancel() being invoked already
     // means that check passed.
-    public void Cancel()
+    public void Cancel(DateTimeOffset cancelledAt)
     {
         if (BookingStatus == BookingStatus.Cancelled)
         {
@@ -280,6 +297,7 @@ public sealed class Booking : Entity, IAggregateRoot
         }
 
         BookingStatus = BookingStatus.Cancelled;
+        CancelledAt = cancelledAt;
         PaymentDueAt = null;
     }
 

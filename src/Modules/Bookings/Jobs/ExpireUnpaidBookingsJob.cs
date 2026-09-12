@@ -254,7 +254,7 @@ public partial class ExpireUnpaidBookingsJob(
                 new ReverseRedemptionOutboxMessage(booking.Id),
                 BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
 
-            booking.Cancel();
+            booking.Cancel(timeProvider.GetUtcNow());
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 

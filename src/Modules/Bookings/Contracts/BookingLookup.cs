@@ -54,6 +54,7 @@ internal class BookingLookup(
                 CheckOut = booking.CheckOut,
                 IsConfirmed = booking.BookingStatus == BookingStatus.Confirmed,
                 IsPending = booking.BookingStatus == BookingStatus.Pending,
+                CancelledAt = booking.CancelledAt,
                 TotalPrice = booking.TotalPrice,
                 GuestEmail = booking.GuestEmail,
                 CustomerId = booking.CustomerId,
@@ -95,6 +96,9 @@ internal class BookingLookup(
                 CheckOut = b.CheckOut,
                 IsConfirmed = b.BookingStatus == BookingStatus.Confirmed,
                 IsPending = b.BookingStatus == BookingStatus.Pending,
+                // Read by the refund paths in Transactions to order a
+                // cancellation against a payment.
+                CancelledAt = b.CancelledAt,
                 TotalPrice = b.TotalPrice,
                 GuestEmail = b.GuestEmail,
                 CustomerId = b.CustomerId,

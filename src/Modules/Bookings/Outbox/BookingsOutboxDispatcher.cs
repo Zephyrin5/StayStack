@@ -44,6 +44,7 @@ public class BookingsOutboxDispatcher(
                 await transactionReversal.ReverseTransactionAsync(
                     payload.BookingId,
                     Money.Of(payload.RefundAmount, payload.Currency),
+                    payload.CancelledAt,
                     cancellationToken);
                 break;
             }
