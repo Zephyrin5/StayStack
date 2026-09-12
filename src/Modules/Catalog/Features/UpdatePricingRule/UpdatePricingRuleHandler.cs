@@ -20,7 +20,8 @@ public class UpdatePricingRuleHandler(
     public async ValueTask<UpdatePricingRuleResponse> Handle(
         UpdatePricingRuleRequest request, CancellationToken cancellationToken)
     {
-        PricingRule? rule = await dbContext.PricingRules
+        // Loaded for the checks below only - the retried delegate reloads it.
+        PricingRule? rule = await dbContext.PricingRules.AsNoTracking()
             .SingleOrDefaultAsync(r => r.Id == request.PricingRuleId, cancellationToken);
 
         // Not found if the id doesn't exist, OR it exists but belongs to a
@@ -59,45 +60,58 @@ public class UpdatePricingRuleHandler(
 
         // Same TOCTOU this ADR-0012/#9 fix closed on the create path -
         // CreatePricingRuleHandler's own comment covers the full reasoning.
-        // No ChangeTracker.Clear() here, unlike Create, and deliberately
-        // not - `rule` was loaded once, before the retry strategy starts,
-        // and stays the SAME tracked instance across every retry; clearing
-        // it would detach it, breaking SaveChangesAsync's ability to see
-        // rule.SetDateRange/SetOverridePrice's mutations on a retried
-        // attempt.
         //
-        // AsNoTracking() below IS required, despite existingSameType being
-        // a fresh query every retry: without it, EF's identity map returns
-        // whatever sibling-row instance is already tracked from a prior
-        // rolled-back attempt - with THAT attempt's stale, pre-conflict
-        // values - instead of what the repeated SELECT just fetched. A
-        // retry after a genuine 40001 would silently keep checking a
-        // sibling's old state, defeating the point of retrying under
-        // Serializable isolation. Confirmed empirically via
-        // PricingRuleConcurrencyTests' write-skew case. Safe to add -
-        // existingSameType is read-only here, never mutated.
+        // This used to skip ChangeTracker.Clear() on purpose, arguing that
+        // `rule` "stays the SAME tracked instance across every retry" and that
+        // clearing it would break SaveChangesAsync's ability to see the
+        // mutations. That is backwards, and it was the most dangerous place in
+        // the codebase to get backwards: the mutations are applied *inside*
+        // this delegate, so clearing and reloading yields a fresh instance that
+        // then receives them.
+        //
+        // Keeping the instance is what broke it. SaveChangesAsync accepts its
+        // changes when it returns (acceptAllChangesOnSuccess defaults to true),
+        // so the new price becomes the entity's *original* value before
+        // CommitAsync has run. Under Serializable a 40001 is routinely raised
+        // at commit time - this is the handler's normal operating mode, not an
+        // exotic failure - and the retry then re-applies values EF no longer
+        // sees as changes. No UPDATE for them, commit succeeds, caller gets
+        // 200, row unchanged. See docs/adr/0025.
+        //
+        // AsNoTracking() below stays. Clear() now removes the identity-map
+        // hazard it was originally added for, but the query is read-only and
+        // saying so is worth a word either way.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
         await strategy.ExecuteAsync(async () =>
         {
+            dbContext.ChangeTracker.Clear();
+
             await using IDbContextTransaction transaction =
                 await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
+            // Reloaded under this attempt's transaction. The instance resolved
+            // above belongs to the authorization checks and to a snapshot a
+            // previous attempt may already have changed.
+            PricingRule locked = await dbContext.PricingRules
+                                     .SingleOrDefaultAsync(r => r.Id == request.PricingRuleId, cancellationToken)
+                                 ?? throw new NotFoundException(nameof(PricingRule), request.PricingRuleId);
+
             List<PricingRule> existingSameType = await dbContext.PricingRules
                 .AsNoTracking()
-                .Where(r => r.UnitId == rule.UnitId && r.RuleType == rule.RuleType && r.Id != rule.Id)
+                .Where(r => r.UnitId == locked.UnitId && r.RuleType == locked.RuleType && r.Id != locked.Id)
                 .ToListAsync(cancellationToken);
 
-            switch (rule.RuleType)
+            switch (locked.RuleType)
             {
                 case PricingRuleType.DateRangeOverride:
-                    ApplyDateRangeOverride(rule, request, existingSameType);
+                    ApplyDateRangeOverride(locked, request, existingSameType);
                     break;
                 case PricingRuleType.DayOfWeekMultiplier:
-                    ApplyDayOfWeekMultiplier(rule, request, existingSameType);
+                    ApplyDayOfWeekMultiplier(locked, request, existingSameType);
                     break;
                 case PricingRuleType.LengthOfStayDiscount:
-                    ApplyLengthOfStayDiscount(rule, request, existingSameType);
+                    ApplyLengthOfStayDiscount(locked, request, existingSameType);
                     break;
                 default:
                     throw new ValidationException(nameof(request.RuleType), "Unsupported RuleType.");

@@ -20,7 +20,9 @@ public class DeleteUnitHandler(
 {
     public async ValueTask<DeleteUnitResponse> Handle(DeleteUnitRequest request, CancellationToken cancellationToken)
     {
-        Unit? unit = await dbContext.Units
+        // Loaded for the ownership check only. Nothing inside the retried
+        // delegate below may touch these instances - see the comment there.
+        Unit? unit = await dbContext.Units.AsNoTracking()
             .SingleOrDefaultAsync(u => u.Id == request.UnitId, cancellationToken);
 
         if (unit is null)
@@ -28,7 +30,7 @@ public class DeleteUnitHandler(
             throw new NotFoundException(nameof(Unit), request.UnitId);
         }
 
-        Property? property = await dbContext.Properties
+        Property? property = await dbContext.Properties.AsNoTracking()
             .SingleOrDefaultAsync(p => p.Id == unit.PropertyId, cancellationToken);
 
         if (property is null)
@@ -53,19 +55,51 @@ public class DeleteUnitHandler(
 
         await strategy.ExecuteAsync(async () =>
         {
+            // Cleared and reloaded inside the delegate, which is the whole of
+            // docs/adr/0025 and was missing here while the sibling
+            // DeletePropertyHandler - written in the same change - had it.
+            //
+            // The instances above are loaded before the retry begins. Mutating
+            // one of them inside means SaveChangesAsync accepts the change
+            // (acceptAllChangesOnSuccess defaults to true), so Archived becomes
+            // the entity's *original* value the moment that call returns - even
+            // though CommitAsync has not run. A transient failure on the commit
+            // then retries a delegate where Archive() assigns a value EF no
+            // longer considers a change: the UPDATE carries the audit columns
+            // and not the status, the commit succeeds, and this handler reports
+            // success over a database still holding an Active unit.
+            dbContext.ChangeTracker.Clear();
+
             await using IDbContextTransaction transaction =
                 await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
+            Unit locked = await dbContext.Units
+                              .SingleOrDefaultAsync(u => u.Id == request.UnitId, cancellationToken)
+                          ?? throw new NotFoundException(nameof(Unit), request.UnitId);
+
+            // Reloaded too, rather than read off the detached instance: the
+            // time zone decides what "today" means to the archival guard, and
+            // reading it from an instance this delegate has just detached is
+            // the same mistake one level down.
+            Property lockedProperty = await dbContext.Properties
+                                          .SingleOrDefaultAsync(p => p.Id == locked.PropertyId, cancellationToken)
+                                      ?? throw new NotFoundException(nameof(Property), locked.PropertyId);
+
             await UnitArchival.EnsureArchivableAsync(
-                dbContext, unit.Id, property.TimeZoneId, timeProvider,
+                dbContext, locked.Id, lockedProperty.TimeZoneId, timeProvider,
                 unitArchivalGuard, availabilityLookup, cancellationToken);
 
-            unit.Archive(timeProvider.GetUtcNow(), currentUserProvider.UserId);
+            // Safe to repeat after an ambiguous commit: Entity.Archive is a
+            // plain assignment with no already-archived guard, so a retry that
+            // finds the unit archived writes the same value rather than
+            // throwing. The reload above is what makes that a real no-op
+            // instead of a silently skipped one.
+            locked.Archive(timeProvider.GetUtcNow(), currentUserProvider.UserId);
 
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         });
 
-        return new DeleteUnitResponse { UnitId = unit.Id };
+        return new DeleteUnitResponse { UnitId = request.UnitId };
     }
 }
