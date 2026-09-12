@@ -122,15 +122,6 @@ public class CancelBookingHandler(
             // response a function of whether that attempt happened to win -
             // the same request answering RefundPending: false with a figure,
             // or true, depending on a race the caller can't see or control.
-            // Kept only to decide whether to report a figure at all - not to
-            // decide the figure. A payment that has not committed yet reads as
-            // "nothing owed" here while an obligation is about to be written
-            // for it, so the response below derives RefundPending from the
-            // obligation instead, which is true regardless of where the payment
-            // has got to.
-            bool refundOwed =
-                await transactionReversal.GetSucceededTransactionAmountAsync(booking.Id, cancellationToken) is not null;
-
             // Last, and only on the branch that actually cancels something.
             //
             // Ordering is the whole of it. Ahead of the eligibility check it
@@ -261,7 +252,10 @@ public class CancelBookingHandler(
                     CancelledAt = cancelledAt,
                     PolicyRefundAmount = refundAmount.Amount,
                     Currency = refundAmount.Currency,
-                    Cause = BookingCancellationCause.GuestCancellation
+                    Cause = BookingCancellationCause.GuestCancellation,
+                    // Due immediately. The inline dispatch below almost always
+                    // beats the sweep to it; this only matters when it does not.
+                    NextAttemptAt = cancelledAt
                 });
 
                 // Enqueued here, per attempt. These are the rows whose absence
@@ -315,43 +309,18 @@ public class CancelBookingHandler(
             // read before the transaction opened - reporting a cancellation
             // off an entity nothing verified is how the old failure managed
             // to look like success.
-            // Still gated on a succeeded payment, and deliberately NOT on "an
-            // obligation exists and is unresolved".
+            // Read after the dispatch, and it is now the only thing that
+            // decides the shape of this response.
             //
-            // An obligation is written for every cancellation, including the
-            // overwhelming majority with no payment behind them at all, so
-            // reporting a pending refund whenever one exists would promise
-            // money back to every guest who cancels an unpaid booking.
+            // It used to be gated on a `refundOwed` boolean computed *before*
+            // the booking row lock. A payment succeeding in between - exactly
+            // the window the whole obligation design exists for - meant this
+            // handler wrote an obligation, the inline dispatch recorded a
+            // refund, and the response still said there was none.
             //
-            // What that leaves is a narrow snapshot problem: a payment
-            // committing after this read is reported here as "no refund" and
-            // then refunded anyway by the resolver. That is a response being a
-            // point-in-time answer rather than a wrong one - the obligation
-            // guarantees the refund happens, and a later re-cancel reports it
-            // off settled state.
-            if (!refundOwed)
-            {
-                return BuildResponse(
-                    outcome.Booking, refundAmount: null, currency: null, refundPercent: null, refundPending: false);
-            }
-
-            // The persisted figure when there is one, the computed one only as
-            // a fallback - because this handler's policy percentage is no
-            // longer guaranteed to be what gets refunded.
-            //
-            // A payment that succeeded *after* this cancellation bought
-            // nothing, so the whole amount goes back and the reversal above
-            // declines in favour of the confirmation path (see
-            // Transaction.RefundOwedIsThisPathsToWrite). Reporting the policy
-            // percentage there would hand the guest a number the database is
-            // about to contradict.
-            //
-            // Read after the dispatch, unlike refundOwed above, and for the
-            // opposite reason: refundOwed must not depend on whether the inline
-            // attempt won, whereas this is precisely "what did it decide". A
-            // miss is the ordinary "not settled yet" case - the durable outbox
-            // row is the guarantee and the relay will deliver it - so the
-            // computed figure stands in, still flagged RefundPending.
+            // The persisted snapshot cannot disagree with itself that way: if a
+            // refund is recorded, it is reported; if not, this is a cancellation
+            // with nothing settled against it yet.
             TransactionRefundSnapshot? settled =
                 await transactionReversal.GetRefundSnapshotAsync(outcome.Booking.Id, cancellationToken);
 
@@ -365,6 +334,35 @@ public class CancelBookingHandler(
                     refundPending: settled.RefundPending);
             }
 
+            // Nothing settled yet, so ask whether anything is owed - and ask it
+            // *here*, after the lock and the dispatch, which is the whole of
+            // this fix. The same question used to be answered before the
+            // booking row was locked, so a payment succeeding in between - the
+            // exact window the obligation design exists for - produced a
+            // cancellation that recorded a refund and a response that denied
+            // one.
+            //
+            // Safe to read now precisely because the snapshot above missed: a
+            // reversal that had landed would have moved the transaction past
+            // Succeeded and been reported already, so a Succeeded transaction
+            // at this point means a payment exists with nothing yet refunded
+            // against it.
+            Money? owed = await transactionReversal.GetSucceededTransactionAmountAsync(
+                outcome.Booking.Id, cancellationToken);
+
+            if (owed is null)
+            {
+                // No payment at all - the ordinary cancellation, and the honest
+                // answer is no refund. Reporting the computed policy figure
+                // here would promise money to every guest who cancels an unpaid
+                // booking.
+                return BuildResponse(
+                    outcome.Booking, refundAmount: null, currency: null, refundPercent: null, refundPending: false);
+            }
+
+            // Owed but not yet settled. The computed figure stands in, flagged
+            // pending - the obligation guarantees a refund happens, and a later
+            // re-cancel reports whatever it settled on.
             return BuildResponse(
                 outcome.Booking, refundAmount.Amount, refundAmount.Currency, refundPercent, refundPending: true);
         }

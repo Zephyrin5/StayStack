@@ -18,12 +18,14 @@ public class RefundObligationConfiguration : IEntityTypeConfiguration<RefundObli
         builder.Property(o => o.Currency).HasConversion<string>().HasMaxLength(3).IsRequired();
         builder.Property(o => o.Cause).HasConversion<string>().HasMaxLength(20).IsRequired();
 
-        // The backstop job's entire query: unresolved obligations, oldest
-        // first. Partial, because a resolved row is never scanned again and
-        // this index exists only to keep that sweep off a table that grows with
-        // every cancellation the platform ever takes. Named explicitly per
-        // ADR-0011's gotcha.
-        builder.HasIndex(o => o.CancelledAt, "ix_refund_obligations_unresolved")
+        // The backstop job's entire query: unresolved obligations that are due,
+        // soonest first. On NextAttemptAt rather than CancelledAt, because an
+        // ordering by cancellation time lets a backlog of unpaid rows that will
+        // never resolve hold the front of the queue forever. Partial, because a
+        // resolved row is never scanned again and this index exists only to
+        // keep that sweep off a table that grows with every cancellation the
+        // platform ever takes. Named explicitly per ADR-0011's gotcha.
+        builder.HasIndex(o => o.NextAttemptAt, "ix_refund_obligations_unresolved")
             .HasDatabaseName("ix_refund_obligations_unresolved")
             .HasFilter("resolved_at IS NULL");
     }

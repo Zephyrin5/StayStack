@@ -275,7 +275,8 @@ public partial class ExpireUnpaidBookingsJob(
                 CancelledAt = cancelledAt,
                 PolicyRefundAmount = booking.TotalPrice.Amount,
                 Currency = booking.TotalPrice.Currency,
-                Cause = BookingCancellationCause.Expiry
+                Cause = BookingCancellationCause.Expiry,
+                NextAttemptAt = cancelledAt
             });
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);

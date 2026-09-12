@@ -112,3 +112,38 @@ Three were tried, and only one is correct for a given handler:
 - `TransactionCommittingAsync` fires *before* the commit, so it proves the rollback case and nothing else. The existing archival tests used it and were only ever testing half the failure.
 - `TransactionCommittedAsync` is the lost acknowledgement for a handler that opens an explicit transaction. It never fires for one that does not - `InitiateTransactionHandler` leaves EF's implicit transaction to it - and that test silently passed through without triggering.
 - `SavedChangesAsync` does fire there, but runs **outside** the region the execution strategy retries, so throwing produced a 500 rather than a second attempt. The simulation has to sit where a real lost acknowledgement sits: inside the retried work. `ReaderExecutedAsync`/`NonQueryExecutedAsync`, immediately after the INSERT has executed, is that place.
+
+## Amendment: a completion marker in one module cannot gate work recorded in another
+
+The refund redesign replaced a pair of guessing conditionals with a durable `RefundObligation` plus a single resolver. The obligation carries a `ResolvedAt` marker, and treating that marker as authority reintroduced the same class of failure one level up.
+
+> **Bookings describes what cancellation _requires_. The committed Transactions refund record establishes whether that requirement has been _fulfilled_. `ResolvedAt` is recoverable bookkeeping so the sweep can skip rows cheaply - never an authority that can prevent a refund.**
+
+The general rule, which is the one to carry forward:
+
+> **A flag committed in module A must never gate work whose completion is recorded in module B. Read B's own state to decide whether the work happened; use A's flag only to skip cheaply when it agrees.**
+
+That is verify-before-compensate applied to a completion marker instead of a retry, and it fails the same way when ignored.
+
+### Why the marker cannot be trusted
+
+`OutboxDispatcherBase.ClaimAndDispatchAsync` runs `TryHandleAsync` **inside** its claim transaction, and the resolver writes to two databases. Which of those two writes is inside a transaction therefore depends on which dispatcher called it, and the two are mirror images:
+
+| Caller | Refund (Transactions) | Marker (Bookings) |
+|---|---|---|
+| `TransactionsOutboxDispatcher` | joins the dispatcher's transaction - **uncommitted** | own connection - **commits immediately** |
+| `BookingsOutboxDispatcher` | own connection - **commits immediately** | joins the dispatcher's transaction - **uncommitted** |
+
+So both of these are reachable:
+
+- **Marker without refund.** The dispatcher transaction fails after the marker committed. The retry saw `IsResolved` and returned; the dispatcher marked the message processed; the sweep skipped the row on `ResolvedAt != null`. **The refund was lost permanently, with every mechanism reporting success.**
+- **Refund without marker.** The process dies before the marker. The resolver queried for `Succeeded` alone, so every later run found the now-`RefundPending` transaction invisible and returned at the first step - leaving the obligation unresolved forever and re-processed by the sweep every cycle.
+
+The fix is one idea applied twice: query for `Succeeded` **or** `RefundPending`, treat `RefundPending` as "the refund is durable, only the bookkeeping is outstanding", and never early-return on `IsResolved`.
+
+### Consequences
+
+- **The `already-finalized` catch had the same hole**, and its own comment claimed the obligation was "still marked below" - which the `return` made false. It now finishes the bookkeeping.
+- **That catch also had to widen, and only an intermittent failure revealed it.** Two concurrent resolvers each load the transaction as `Succeeded`, so both pass `MarkRefundPending`'s in-memory guard and the loser is caught by the xmin concurrency token instead - `DbUpdateConcurrencyException`, not `TransactionAlreadyFinalizedException`. It now catches both and, rather than inferring from which arrived, re-reads to confirm a refund exists before marking anything.
+- **A backstop sweep must not be ordered by the event that created its rows.** Both writers record an obligation whether or not a payment succeeded, and an unpaid one correctly resolves to nothing - so ordered by `CancelledAt` and capped per run, a backlog of unpaid rows held the front of the queue permanently and no newer obligation with money behind it was ever reached. That is the ordinary workload, not an error: most cancellations are of unpaid bookings. `NextAttemptAt` with backoff fixes it, and `Attempts` makes the cap warning legible - a capped batch of high-attempt rows means "waiting on payments that may never come", a capped batch of fresh ones means genuinely behind.
+- **Do not resolve an unpaid obligation to clear it.** A late payment is exactly the case the row exists for; marking it settled to tidy the queue throws that case away.

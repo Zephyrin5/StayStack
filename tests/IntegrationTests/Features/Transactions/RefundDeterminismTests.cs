@@ -370,6 +370,72 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
     }
 
     [Fact]
+    public async Task ABacklogOfUnpaidObligations_DoesNotStarveOneWithAPaymentBehindIt()
+    {
+        // The sweep's ordinary workload, not an error condition. Both writers
+        // record an obligation whether or not anyone paid, and for an unpaid
+        // booking the resolver correctly does nothing - so the row stays
+        // unresolved. Ordered by CancelledAt and capped at 1000, a backlog of
+        // those held the front of the queue permanently and the sweep never
+        // reached a newer obligation that actually had money against it.
+        //
+        // Most cancellations are of unpaid bookings, so this is the steady
+        // state rather than a spike.
+        DateTimeOffset succeededAt = DateTimeOffset.UtcNow.AddHours(-2);
+        DateTimeOffset cancelledAt = DateTimeOffset.UtcNow.AddHours(-1);
+
+        (Guid bookingId, Guid transactionId) =
+            await SeedPaidButUnconfirmedAsync(daysUntilCheckIn: 124, succeededAt);
+
+        await CancelAsync(bookingId, cancelledAt, Money.Of(100m, Currency.KWD), dispatchNow: false);
+
+        // A thousand older obligations with no payment behind any of them -
+        // exactly the per-run cap, so under the old ordering they filled every
+        // batch and the payable one above never came up.
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+
+            for (int i = 0; i < 1000; i++)
+            {
+                bookings.RefundObligations.Add(new RefundObligation
+                {
+                    BookingId = Guid.CreateVersion7(),
+                    CancelledAt = cancelledAt.AddHours(-2).AddSeconds(i),
+                    NextAttemptAt = cancelledAt.AddHours(-2).AddSeconds(i),
+                    PolicyRefundAmount = 50m,
+                    Currency = Currency.KWD,
+                    Cause = BookingCancellationCause.GuestCancellation
+                });
+            }
+
+            await bookings.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            FakeTimeProvider clock = new FakeTimeProvider();
+            clock.SetUtcNow(DateTimeOffset.UtcNow.AddMinutes(10));
+
+            ResolveOutstandingRefundsJob job = new ResolveOutstandingRefundsJob(
+                scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
+                scope.ServiceProvider.GetRequiredService<ITransactionReversal>(),
+                clock,
+                NullLogger<ResolveOutstandingRefundsJob>.Instance);
+
+            // Twice. The first run is allowed to spend its whole window on the
+            // backlog - what must not happen is that every future run does too,
+            // which is what backing the unpayable rows off prevents.
+            await job.ResolveAsync(null!, TestContext.Current.CancellationToken);
+            await job.ResolveAsync(null!, TestContext.Current.CancellationToken);
+        }
+
+        Transaction settled = await ReadTransactionAsync(transactionId);
+
+        Assert.Equal(100m, settled.RefundAmount!.Value.Amount);
+    }
+
+    [Fact]
     public async Task ARefundAlreadyRecorded_IsNeverOverwritten()
     {
         // The backstop under the ordering rule. If both paths ever decided they

@@ -68,4 +68,33 @@ public sealed class RefundObligation
     ///     repeat a no-op.
     /// </summary>
     public DateTimeOffset? ResolvedAt { get; set; }
+
+    /// <summary>
+    ///     When the sweep should next consider this row.
+    ///     <para>
+    ///         Without it the sweep starved under its ordinary workload rather
+    ///         than under any error. Both writers record an obligation whether
+    ///         or not a payment ever succeeded, and for an unpaid booking - the
+    ///         common case by a wide margin - the resolver correctly does
+    ///         nothing, so the row stays unresolved and keeps its place at the
+    ///         front of an ordering by CancelledAt. A thousand of those pin the
+    ///         window permanently and no newer obligation with an actual
+    ///         payment behind it is ever reached.
+    ///     </para>
+    ///     <para>
+    ///         Backing off is right rather than merely cheap: an unpaid
+    ///         cancellation is not an error to retry, it is a row waiting for a
+    ///         payment that may still arrive. Resolving it to clear it would
+    ///         throw away exactly the case the obligation exists for.
+    ///     </para>
+    /// </summary>
+    public DateTimeOffset NextAttemptAt { get; set; }
+
+    /// <summary>
+    ///     How many times the sweep has looked at this row and found nothing to
+    ///     do. Turns the per-run cap log into a real signal: a batch of
+    ///     high-attempt rows means "waiting on payments that may never come",
+    ///     which is a different operational problem from "behind on work".
+    /// </summary>
+    public int Attempts { get; set; }
 }
