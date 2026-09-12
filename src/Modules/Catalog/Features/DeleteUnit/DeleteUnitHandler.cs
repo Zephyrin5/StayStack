@@ -7,6 +7,7 @@ using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore;
+using SeedWork.Enums;
 using Unit = Catalog.Entities.Unit;
 namespace Catalog.Features.DeleteUnit;
 
@@ -73,9 +74,33 @@ public class DeleteUnitHandler(
             await using IDbContextTransaction transaction =
                 await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-            Unit locked = await dbContext.Units
+            // IgnoreQueryFilters, because the soft-delete filter hides exactly
+            // the row a retry needs to see. An attempt that committed and lost
+            // its acknowledgement leaves the unit archived; without this the
+            // reload finds nothing and reports 404 for an archival that
+            // succeeded - a failure answer for a completed operation, which is
+            // worse than the retry it was added to survive.
+            //
+            // Scoped deliberately. IgnoreQueryFilters is query-wide rather than
+            // entity-wide (the trap documented during the Availability merge),
+            // so it belongs only on a query whose single root is the row being
+            // archived - never on one that also reaches Units or Properties for
+            // some other purpose.
+            Unit locked = await dbContext.Units.IgnoreQueryFilters()
                               .SingleOrDefaultAsync(u => u.Id == request.UnitId, cancellationToken)
                           ?? throw new NotFoundException(nameof(Unit), request.UnitId);
+
+            // Already archived: an earlier attempt of this same delegate
+            // committed. Recovered success, not a conflict - the caller asked
+            // for this unit to be archived and it is.
+            //
+            // Verify-before-compensate, in its smallest form: ask the database
+            // what happened rather than inferring from how the attempt ended.
+            if (locked.Status == EntityStatus.Archived)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return;
+            }
 
             // Reloaded too, rather than read off the detached instance: the
             // time zone decides what "today" means to the archival guard, and

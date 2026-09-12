@@ -8,6 +8,7 @@ using Dapper;
 using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using SeedWork.Enums;
 using Microsoft.EntityFrameworkCore.Storage;
 using Unit = Catalog.Entities.Unit;
 namespace Catalog.Features.DeleteProperty;
@@ -75,9 +76,25 @@ public class DeletePropertyHandler(
             // Re-read under that lock, not carried in from the authorization
             // check above: taking the lock orders this against unit creation
             // but tells it nothing about what happened before it got there.
-            Property locked = await dbContext.Properties
+            // IgnoreQueryFilters and the archived check below, for the same
+            // reason as the single-unit path: a committed-but-unacknowledged
+            // attempt leaves this property archived, and the filtered reload
+            // would then report 404 for work that succeeded.
+            //
+            // Query-wide rather than entity-wide, so this is confined to the
+            // one query whose root is the property being archived. The unit
+            // query below deliberately keeps its filter: those are the units
+            // still live under this property, which is exactly what it should
+            // see.
+            Property locked = await dbContext.Properties.IgnoreQueryFilters()
                                   .SingleOrDefaultAsync(p => p.Id == request.PropertyId, cancellationToken)
                               ?? throw new NotFoundException(nameof(Property), request.PropertyId);
+
+            if (locked.Status == EntityStatus.Archived)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return;
+            }
 
             // Archiving the Property alone would leave its Units still Active -
             // reachable via any query that goes through Units directly rather
