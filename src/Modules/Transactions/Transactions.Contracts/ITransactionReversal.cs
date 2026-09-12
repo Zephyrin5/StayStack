@@ -9,41 +9,10 @@ namespace Transactions.Contracts;
 /// </summary>
 public interface ITransactionReversal
 {
-    /// <summary>
-    ///     Best-effort, never throws: if the booking has a Succeeded
-    ///     transaction, moves it to RefundPending with the given amount -
-    ///     money was actually collected, so it needs reversing. A no-op for
-    ///     everything else, including a still-Pending transaction: we don't
-    ///     yet know what the gateway will do with it, so it's left alone
-    ///     rather than guessed at - see
-    ///     IBookingPaymentConfirmation.ConfirmPaymentAsync for how a late
-    ///     success against an already-cancelled booking is handled instead,
-    ///     on the other side of that eventual outcome. refundAmount is
-    ///     whatever the caller's own cancellation policy resolved to -
-    ///     Transactions has no notion of a policy itself, it just records
-    ///     the number it was given. Returns the amount actually reversed,
-    ///     or null if there was nothing Succeeded to reverse, so the caller
-    ///     can surface it back to whoever's cancelling. Takes Money, not a
-    ///     bare decimal, specifically so the currency can be validated
-    ///     against the transaction's own before it's trusted (see
-    ///     Transaction.MarkRefundPending) - closes a real hole where a
-    ///     caller could previously pass a refund computed in the wrong
-    ///     currency with nothing to catch it.
-    /// </summary>
-    ///     <para>
-    ///         <paramref name="cancelledAt"/> is what makes the outcome
-    ///         deterministic. This is not the only path that can start a refund
-    ///         - a payment confirmation arriving against an already-cancelled
-    ///         booking starts one too, for the full amount - and both used to be
-    ///         guarded on status alone, so whichever dispatch ran first decided
-    ///         the money. The two now split the cases by ordering: this one
-    ///         writes when the payment succeeded before the cancellation, and
-    ///         declines otherwise. Null means the caller has no cancellation
-    ///         moment to offer, which hands every case to this path and
-    ///         reproduces the old behaviour.
-    ///     </para>
-    Task<decimal?> ReverseTransactionAsync(
-        Guid bookingId, Money refundAmount, DateTimeOffset? cancelledAt, CancellationToken cancellationToken);
+    // ReverseTransactionAsync is gone. It was the cancellation half of a
+    // decision split across two paths, and both halves are now one call -
+    // ResolveRefundAsync below. Its signature had already grown a cancelledAt
+    // parameter to patch the split; the parameter went with it.
 
     /// <summary>
     ///     The Amount of this booking's Succeeded transaction, if any -
@@ -99,6 +68,33 @@ public interface ITransactionReversal
     ///     </para>
     /// </summary>
     Task<decimal?> ResolveRefundAsync(Guid bookingId, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     The same decision, for a caller that already knows this payment
+    ///     bought nothing.
+    ///     <para>
+    ///         <b>Why this is not just ResolveRefundAsync.</b> That one treats
+    ///         "no obligation" as "this booking was never cancelled, so there
+    ///         is nothing to settle" - correct when the trigger is a
+    ///         cancellation. The payment-confirmation paths reach here from a
+    ///         different fact: the payment could not be turned into a stay. A
+    ///         booking that is gone entirely, or one still Pending whose hold
+    ///         was released underneath it, has no obligation and never will -
+    ///         and is owed the whole amount.
+    ///     </para>
+    ///     <para>
+    ///         Routing those through ResolveRefundAsync would have silently
+    ///         stopped refunding them, which is the mirror image of the defect
+    ///         this redesign exists to remove: a payment nobody gives back
+    ///         because each side assumed the other had it.
+    ///     </para>
+    ///     <para>
+    ///         When an obligation <em>does</em> exist, this defers to it
+    ///         completely - the ordering rule still decides between the policy
+    ///         figure and the full amount.
+    ///     </para>
+    /// </summary>
+    Task<decimal?> RefundUnusablePaymentAsync(Guid bookingId, CancellationToken cancellationToken);
 }
 
 public record TransactionRefundSnapshot

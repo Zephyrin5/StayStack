@@ -145,57 +145,6 @@ public sealed class Transaction : Entity, IAggregateRoot
     // by CancelBookingHandler (via ITransactionReversal), and resolved by
     // the same admin stand-in endpoints MarkTransactionSucceeded/
     // MarkTransactionFailed use in place of a real gateway webhook.
-    /// <summary>
-    ///     Whether this path is the one that should write the refund, given when
-    ///     the payment succeeded relative to when the booking was cancelled.
-    ///     <para>
-    ///         Two paths reach MarkRefundPending for one transaction and they
-    ///         disagree about the amount: the cancellation path knows the policy
-    ///         figure, the delayed payment-confirmation path only ever refunds in
-    ///         full. Both were guarded on status alone, so whichever outbox
-    ///         dispatch happened to run first decided the money - identical
-    ///         business history producing 50% or 100% depending on scheduling,
-    ///         with the loser silently swallowing its own decision.
-    ///     </para>
-    ///     <para>
-    ///         The rule is ordering, not arrival. A payment that succeeded
-    ///         <em>before</em> the cancellation bought a stay the guest then
-    ///         cancelled, so the cancellation policy applies. One that succeeded
-    ///         <em>after</em> bought nothing, so the whole amount goes back. That
-    ///         is also what already happens whenever the two events are cleanly
-    ///         separated - a transaction still Pending at cancel time is left
-    ///         alone by the cancellation path, and the later confirmation refunds
-    ///         in full - so this makes the overlapping window agree with the rest
-    ///         rather than inventing a rule for it.
-    ///     </para>
-    ///     <para>
-    ///         The two callers pass complementary causes, so exactly one of them
-    ///         owns any given case and neither has to know the other's amount.
-    ///         That matters: the payment path cannot compute a policy refund, and
-    ///         does not have to, because whenever the policy figure is the right
-    ///         answer the cancellation path is guaranteed to have seen this
-    ///         transaction already Succeeded.
-    ///     </para>
-    ///     <para>
-    ///         A null <paramref name="cancelledAt"/> means no cancellation is in
-    ///         play - the payment failed to buy anything for some other reason,
-    ///         such as a hold released underneath it - and the full amount is
-    ///         owed. A null <see cref="SucceededAt"/> is a row from before that
-    ///         column existed; it is treated as having succeeded first, which
-    ///         hands the case to the cancellation path and preserves the
-    ///         pre-existing behaviour for old rows.
-    ///     </para>
-    /// </summary>
-    public bool RefundOwedIsThisPathsToWrite(RefundCause cause, DateTimeOffset? cancelledAt)
-    {
-        bool paidAfterTheCancellation = cancelledAt is null
-                                        || (SucceededAt is { } succeeded && succeeded > cancelledAt.Value);
-
-        return cause == Entities.RefundCause.PaymentUnusable
-            ? paidAfterTheCancellation
-            : !paidAfterTheCancellation;
-    }
-
     public void MarkRefundPending(Money refundAmount, RefundCause cause)
     {
         // First writer wins, and a second attempt is a no-op rather than an

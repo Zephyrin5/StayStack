@@ -28,6 +28,15 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- Same reasoning as Hosts/Promotions: TransactionReversal is internal
+             so Bookings can only reach it through ITransactionReversal, and the
+             refund decision now lives inside it - a unit test that mocked the
+             interface instead would assert nothing about the behaviour it is
+             named for. -->
+        <InternalsVisibleTo Include="UnitTests"/>
+    </ItemGroup>
+
+    <ItemGroup>
         <ProjectReference Include="..\..\Core\SeedWork\SeedWork.csproj"/>
         <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
         <ProjectReference Include="..\..\Infrastructure\Persistence\Persistence.csproj"/>

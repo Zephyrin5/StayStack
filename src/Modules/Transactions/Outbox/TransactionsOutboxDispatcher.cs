@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Outbox;
 using System.Text.Json;
+using Transactions.Contracts;
 using Transactions.Entities;
 using Transactions.Serialization;
 namespace Transactions.Outbox;
@@ -11,6 +12,7 @@ public partial class TransactionsOutboxDispatcher(
     AppTransactionsDbContext dbContext,
     IBookingPaymentConfirmation bookingPaymentConfirmation,
     IBookingLookup bookingLookup,
+    ITransactionReversal transactionReversal,
     TimeProvider timeProvider,
     ILogger<TransactionsOutboxDispatcher> logger)
     : OutboxDispatcherBase<AppTransactionsDbContext>(dbContext, timeProvider, logger)
@@ -34,7 +36,7 @@ public partial class TransactionsOutboxDispatcher(
                     // MarkTransactionSucceededHandler's original inline
                     // branch, moved here since it now runs after the outbox
                     // dispatch rather than inline in the handler.
-                    await MarkRefundPendingIfStillSucceededAsync(payload.TransactionId, payload.BookingId, cancellationToken);
+                    await ResolveRefundAsync(payload.BookingId, cancellationToken);
                 }
 
                 break;
@@ -107,7 +109,7 @@ public partial class TransactionsOutboxDispatcher(
 
         // Not confirmed, or gone entirely: the payment bought nothing, which
         // is the case this compensation was written for.
-        await MarkRefundPendingIfStillSucceededAsync(payload.TransactionId, payload.BookingId, cancellationToken);
+        await ResolveRefundAsync(payload.BookingId, cancellationToken);
 
         message.ProcessedAt = message.DeadLetteredAt;
         message.DeadLetteredAt = null;
@@ -128,40 +130,29 @@ public partial class TransactionsOutboxDispatcher(
     // retried dispatch, or the !confirmed branch above followed later by
     // OnDeadLetteredAsync racing it - is always a safe no-op past the first
     // time, rather than being mistaken for a real failure.
-    private async Task MarkRefundPendingIfStillSucceededAsync(
-        Guid transactionId, Guid bookingId, CancellationToken cancellationToken)
-    {
-        Transaction transaction = await DbContext.Transactions
-            .SingleAsync(t => t.Id == transactionId, cancellationToken);
-
-        if (transaction.TransactionStatus != TransactionStatus.Succeeded)
-        {
-            return;
-        }
-
-        // The cancellation moment, read across the boundary, because the full
-        // amount is only the right answer when this payment landed after the
-        // booking was already gone. If it landed first, the guest paid for a
-        // stay they then cancelled and the cancellation policy decides - a
-        // figure this path does not have and does not need, because
-        // ReverseTransactionAsync is guaranteed to have seen this transaction
-        // Succeeded in that case and owns it.
-        //
-        // Null when the booking is gone entirely, or was never cancelled and the
-        // payment failed for some other reason - a hold released underneath it -
-        // and the full amount is owed either way.
-        BookingAccessResult? booking = await bookingLookup.GetBookingDetailsAsync(bookingId, cancellationToken);
-
-        if (!transaction.RefundOwedIsThisPathsToWrite(RefundCause.PaymentUnusable, booking?.CancelledAt))
-        {
-            LogRefundLeftToTheCancellation(logger, transactionId, bookingId);
-            return;
-        }
-
-        transaction.MarkRefundPending(transaction.Amount, RefundCause.PaymentUnusable);
-    }
-
-    [LoggerMessage(LogLevel.Information,
-        "Transaction {TransactionId} resolved against cancelled booking {BookingId}, but the payment predates the cancellation - the policy refund from the cancellation path stands and no full refund was written")]
-    private static partial void LogRefundLeftToTheCancellation(ILogger logger, Guid transactionId, Guid bookingId);
+    /// <summary>
+    ///     Asks the one resolver to settle whatever this booking is owed.
+    ///     <para>
+    ///         This path used to decide the amount itself - always the full
+    ///         amount - and decline whenever it judged the cancellation path
+    ///         owned the case. It could not verify that judgement: the
+    ///         cancellation it was reasoning about might have committed no
+    ///         obligation at all, or might not have committed yet, and either
+    ///         way declining meant nobody refunded.
+    ///     </para>
+    ///     <para>
+    ///         It now knows only that this payment resolved against a booking
+    ///         that could not use it. Whether that is worth a policy refund or
+    ///         the whole amount is a question about two committed facts, which
+    ///         is somebody else's job to answer.
+    ///     </para>
+    /// </summary>
+    private Task ResolveRefundAsync(Guid bookingId, CancellationToken cancellationToken) =>
+        // RefundUnusablePaymentAsync, not ResolveRefundAsync. Both reach the
+        // same decision when an obligation exists; they differ when none does,
+        // and that difference is money. This path has already established the
+        // payment could not become a stay, so a booking with no cancellation
+        // behind it - gone entirely, or a hold lost underneath it - is owed the
+        // whole amount rather than nothing.
+        transactionReversal.RefundUnusablePaymentAsync(bookingId, cancellationToken);
 }

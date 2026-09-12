@@ -12,52 +12,14 @@ internal class TransactionReversal(
     IBookingLookup bookingLookup,
     TimeProvider timeProvider) : ITransactionReversal
 {
-    public async Task<decimal?> ReverseTransactionAsync(
-        Guid bookingId, Money refundAmount, DateTimeOffset? cancelledAt, CancellationToken cancellationToken)
-    {
-        // Only a Succeeded transaction needs anything done here - money
-        // was actually collected, so it needs reversing. A Pending one is
-        // deliberately left untouched: we don't yet know what the gateway
-        // will do with it, and guessing Failed here would be wrong if it
-        // later succeeds anyway. That case is instead handled on the
-        // success side - see MarkTransactionSucceededHandler, which checks
-        // whether the booking it's confirming is still around before
-        // treating a success as good news.
-        Transaction? transaction = await dbContext.Transactions
-            .SingleOrDefaultAsync(t => t.BookingId == bookingId && t.TransactionStatus == TransactionStatus.Succeeded, cancellationToken);
+    public Task<decimal?> ResolveRefundAsync(Guid bookingId, CancellationToken cancellationToken) =>
+        ResolveAsync(bookingId, refundWithoutAnObligation: false, cancellationToken);
 
-        if (transaction is null)
-        {
-            return null;
-        }
+    public Task<decimal?> RefundUnusablePaymentAsync(Guid bookingId, CancellationToken cancellationToken) =>
+        ResolveAsync(bookingId, refundWithoutAnObligation: true, cancellationToken);
 
-        // Declines when the payment landed after the cancellation: that payment
-        // bought nothing, so the whole amount is owed rather than a policy
-        // percentage of it, and the confirmation path is the one holding that
-        // figure. Returning null here is the same "nothing to reverse" answer
-        // the caller already handles.
-        if (!transaction.RefundOwedIsThisPathsToWrite(RefundCause.GuestCancellation, cancelledAt))
-        {
-            return null;
-        }
-
-        try
-        {
-            transaction.MarkRefundPending(refundAmount, RefundCause.GuestCancellation);
-            await dbContext.SaveChangesAsync(cancellationToken);
-            return refundAmount.Amount;
-        }
-        catch (TransactionAlreadyFinalizedException)
-        {
-            // Lost a race to a concurrent resolution (e.g.
-            // MarkTransactionSucceededHandler reaching the same
-            // conclusion from its own side at the same moment) - whichever
-            // side won is already correct, nothing left to do here.
-            return null;
-        }
-    }
-
-    public async Task<decimal?> ResolveRefundAsync(Guid bookingId, CancellationToken cancellationToken)
+    private async Task<decimal?> ResolveAsync(
+        Guid bookingId, bool refundWithoutAnObligation, CancellationToken cancellationToken)
     {
         // Step 1 - is there money to give back? Not Succeeded covers every
         // "nothing to do yet" case at once: still Pending at the gateway,
@@ -81,9 +43,27 @@ internal class TransactionReversal(
         RefundObligationSnapshot? obligation =
             await bookingLookup.GetRefundObligationAsync(bookingId, cancellationToken);
 
-        if (obligation is null || obligation.IsResolved)
+        if (obligation is { IsResolved: true })
         {
             return null;
+        }
+
+        if (obligation is null)
+        {
+            // No cancellation explains this payment. For a caller triggered by
+            // one, that means there is nothing to settle. For a caller that
+            // already established the payment bought nothing - a booking gone
+            // entirely, or a hold released underneath a still-Pending one - it
+            // means the whole amount is owed and no obligation is ever coming.
+            if (!refundWithoutAnObligation)
+            {
+                return null;
+            }
+
+            transaction.MarkRefundPending(transaction.Amount, RefundCause.PaymentUnusable);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            return transaction.Amount.Amount;
         }
 
         // Step 3 - how much. Both inputs are committed facts by now, which is

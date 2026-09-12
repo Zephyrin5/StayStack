@@ -41,11 +41,11 @@ public class BookingsOutboxDispatcher(
                                                            ?? throw new InvalidOperationException(
                                                                $"Outbox message {message.Id} had a null {nameof(ReverseTransactionOutboxMessage)} payload.");
 
-                await transactionReversal.ReverseTransactionAsync(
-                    payload.BookingId,
-                    Money.Of(payload.RefundAmount, payload.Currency),
-                    payload.CancelledAt,
-                    cancellationToken);
+                // A latency optimisation over ResolveOutstandingRefundsJob,
+                // not the thing correctness rests on - the obligation is the
+                // durable work item and this just asks for it to be settled
+                // now. Safe to deliver twice, or never.
+                await transactionReversal.ResolveRefundAsync(payload.BookingId, cancellationToken);
                 break;
             }
 

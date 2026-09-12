@@ -1,12 +1,15 @@
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;
+using Bookings.Jobs;
 using Bookings.Outbox;
 using Bookings.Serialization;
 using Catalog;
 using Catalog.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using NpgsqlTypes;
 using Outbox;
 using SeedWork.Enums;
@@ -132,11 +135,24 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
             .SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
         booking.Cancel(cancelledAt);
 
+        // The obligation, exactly as CancelBookingHandler writes it. It is what
+        // the resolver reads; without it there is nothing to settle and every
+        // assertion below would be about a refund that never had a reason to
+        // happen.
+        bookings.RefundObligations.Add(new RefundObligation
+        {
+            BookingId = bookingId,
+            CancelledAt = cancelledAt,
+            PolicyRefundAmount = policyRefund.Amount,
+            Currency = policyRefund.Currency,
+            Cause = BookingCancellationCause.GuestCancellation
+        });
+
         BookingsOutboxDispatcher dispatcher =
             scope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>();
 
         OutboxMessage row = dispatcher.Enqueue(
-            new ReverseTransactionOutboxMessage(bookingId, policyRefund.Amount, policyRefund.Currency, cancelledAt),
+            new ReverseTransactionOutboxMessage(bookingId),
             BookingsJsonSerializerContext.Default.ReverseTransactionOutboxMessage);
 
         await bookings.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -303,6 +319,54 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
 
         Assert.Equal(200m, settled.RefundAmount!.Value.Amount);
         Assert.Equal(RefundCause.PaymentUnusable, settled.RefundCause);
+    }
+
+    [Fact]
+    public async Task WithEveryOutboxMessageDroppedOnTheFloor_TheBackstopStillRefunds()
+    {
+        // The test that proves correctness no longer depends on delivery.
+        //
+        // Nothing is dispatched here at all - not the reversal, not the
+        // confirmation. Under the old design that meant no refund, because the
+        // decision only ever happened inside a message handler. The obligation
+        // is a durable work item, so the sweep finds it.
+        DateTimeOffset succeededAt = DateTimeOffset.UtcNow.AddHours(-2);
+        DateTimeOffset cancelledAt = DateTimeOffset.UtcNow.AddHours(-1);
+
+        (Guid bookingId, Guid transactionId) =
+            await SeedPaidButUnconfirmedAsync(daysUntilCheckIn: 123, succeededAt);
+
+        await CancelAsync(bookingId, cancelledAt, Money.Of(100m, Currency.KWD), dispatchNow: false);
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            // The clock is moved past the job's grace period rather than the
+            // grace being shortened: the job exists to catch obligations the
+            // messages did not, and waiting is how it tells those apart.
+            FakeTimeProvider clock = new FakeTimeProvider();
+            clock.SetUtcNow(DateTimeOffset.UtcNow.AddMinutes(10));
+
+            ResolveOutstandingRefundsJob job = new ResolveOutstandingRefundsJob(
+                scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
+                scope.ServiceProvider.GetRequiredService<ITransactionReversal>(),
+                clock,
+                NullLogger<ResolveOutstandingRefundsJob>.Instance);
+
+            await job.ResolveAsync(null!, TestContext.Current.CancellationToken);
+        }
+
+        Transaction settled = await ReadTransactionAsync(transactionId);
+
+        Assert.Equal(100m, settled.RefundAmount!.Value.Amount);
+        Assert.Equal(RefundCause.GuestCancellation, settled.RefundCause);
+
+        // And the obligation is marked, so the sweep stops revisiting it.
+        using IServiceScope assertScope = factory.Services.CreateScope();
+        RefundObligation obligation = await assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+            .RefundObligations.AsNoTracking()
+            .SingleAsync(o => o.BookingId == bookingId, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(obligation.ResolvedAt);
     }
 
     [Fact]

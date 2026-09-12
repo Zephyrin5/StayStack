@@ -17,12 +17,15 @@ public record ReleaseHoldOutboxMessage(Guid HoldId) : IOutboxMessage
     static string IOutboxMessage.OutboxType => TypeName;
 }
 
-// CancelledAt is nullable and added without a version bump, which the
-// IOutboxMessage contract allows: an added optional field deserializes as null
-// on rows written by an older deployment, and the refund rule treats a null as
-// "the payment came first" - the behaviour those rows already had.
-public record ReverseTransactionOutboxMessage(
-    Guid BookingId, decimal RefundAmount, Currency Currency, DateTimeOffset? CancelledAt = null) : IOutboxMessage
+// Carries only the booking id now. The amount, the currency and the
+// cancellation moment all live on the RefundObligation this message asks
+// someone to resolve, so repeating them here was three chances to disagree
+// with the row that decides.
+//
+// Removing fields keeps the .v1 identifier. System.Text.Json ignores
+// properties it does not recognise, so a queued row written with the wider
+// payload still deserializes - and there is no deployed database carrying any.
+public record ReverseTransactionOutboxMessage(Guid BookingId) : IOutboxMessage
 {
     public const string TypeName = "bookings.reverse-transaction.v1";
     static string IOutboxMessage.OutboxType => TypeName;

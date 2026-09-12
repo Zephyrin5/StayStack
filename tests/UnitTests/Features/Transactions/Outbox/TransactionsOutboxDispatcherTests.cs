@@ -8,6 +8,7 @@ using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using System.Text.Json;
 using Transactions;
+using Transactions.Contracts;
 using Transactions.Entities;
 using Transactions.Outbox;
 using Transactions.Serialization;
@@ -67,10 +68,20 @@ public class TransactionsOutboxDispatcherTests : IDisposable
         bookingLookupMock
             .Setup(x => x.GetBookingDetailsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((BookingAccessResult?)null);
+        bookingLookupMock
+            .Setup(x => x.GetRefundObligationAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RefundObligationSnapshot?)null);
+
+        // The real reversal, not a mock: the refund decision moved into it,
+        // so mocking it would leave this test asserting nothing about the
+        // behaviour it is named for. The booking lookup below answers "no such
+        // booking", which is the case - no obligation, and none coming.
+        TransactionReversal transactionReversal =
+            new TransactionReversal(_dbContext, bookingLookupMock.Object, TimeProvider.System);
 
         TransactionsOutboxDispatcher dispatcher = new TransactionsOutboxDispatcher(
-            _dbContext, bookingPaymentConfirmationMock.Object, bookingLookupMock.Object, TimeProvider.System,
-            NullLogger<TransactionsOutboxDispatcher>.Instance);
+            _dbContext, bookingPaymentConfirmationMock.Object, bookingLookupMock.Object, transactionReversal,
+            TimeProvider.System, NullLogger<TransactionsOutboxDispatcher>.Instance);
 
         // One attempt short of OutboxDispatcherBase's own MaxAttempts (10) -
         // this dispatch is the one that pushes it over and triggers

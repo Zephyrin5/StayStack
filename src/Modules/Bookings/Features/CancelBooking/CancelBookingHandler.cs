@@ -122,6 +122,12 @@ public class CancelBookingHandler(
             // response a function of whether that attempt happened to win -
             // the same request answering RefundPending: false with a figure,
             // or true, depending on a race the caller can't see or control.
+            // Kept only to decide whether to report a figure at all - not to
+            // decide the figure. A payment that has not committed yet reads as
+            // "nothing owed" here while an obligation is about to be written
+            // for it, so the response below derives RefundPending from the
+            // obligation instead, which is true regardless of where the payment
+            // has got to.
             bool refundOwed =
                 await transactionReversal.GetSucceededTransactionAmountAsync(booking.Id, cancellationToken) is not null;
 
@@ -263,12 +269,11 @@ public class CancelBookingHandler(
                 // refund on the strength of them existing, and the relay
                 // backstop can only deliver rows that were written.
                 OutboxMessage reverseTransactionRow = dispatcher.Enqueue(
-                    // The cancellation moment travels with the message, so the
-                    // reversal can tell a payment that preceded this
-                    // cancellation from one that followed it. Without it the
-                    // amount was decided by whichever dispatch ran first.
-                    new ReverseTransactionOutboxMessage(
-                        locked.Id, refundAmount.Amount, refundAmount.Currency, cancelledAt),
+                    // Just the booking id. Everything the resolver needs is on
+                    // the obligation written above, in this same transaction -
+                    // repeating the amount here would be a second copy that can
+                    // disagree with the row that decides.
+                    new ReverseTransactionOutboxMessage(locked.Id),
                     BookingsJsonSerializerContext.Default.ReverseTransactionOutboxMessage);
                 OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
                     new ReverseRedemptionOutboxMessage(locked.Id),
@@ -310,6 +315,20 @@ public class CancelBookingHandler(
             // read before the transaction opened - reporting a cancellation
             // off an entity nothing verified is how the old failure managed
             // to look like success.
+            // Still gated on a succeeded payment, and deliberately NOT on "an
+            // obligation exists and is unresolved".
+            //
+            // An obligation is written for every cancellation, including the
+            // overwhelming majority with no payment behind them at all, so
+            // reporting a pending refund whenever one exists would promise
+            // money back to every guest who cancels an unpaid booking.
+            //
+            // What that leaves is a narrow snapshot problem: a payment
+            // committing after this read is reported here as "no refund" and
+            // then refunded anyway by the resolver. That is a response being a
+            // point-in-time answer rather than a wrong one - the obligation
+            // guarantees the refund happens, and a later re-cancel reports it
+            // off settled state.
             if (!refundOwed)
             {
                 return BuildResponse(
