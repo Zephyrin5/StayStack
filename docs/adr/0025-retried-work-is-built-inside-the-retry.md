@@ -46,3 +46,37 @@ Corollaries, each earned by one of the failures above:
 - **Test the property, not idempotency.** Running a reconciler twice only proves the second run is a no-op, which was never at risk. The test lets the external compensation succeed, fails the local transaction, and asserts the original request's state is intact.
 - **And check the assertion detects the defect.** The reconciler test was vacuous on first writing: `ReverseRedemptionAsync` is an `UPDATE` setting `reversed_at`, never a `DELETE`, so asserting the redemption row still exists passes just as happily against a fully reversed one. Confirmed by reversing it up front and watching the test stay green.
 - **One existing test changed meaning rather than breaking.** A throwing `IHostRegistrar` used to prove a per-item guard stopped one bad row starving the reconcile queue. The registrar is not called in the loop any more, so that starvation is structurally impossible rather than caught - and the test now asserts the stronger property.
+
+## Amendment: the rule needed a second half, and it needed applying twice more
+
+Three further sites, found in two rounds after this was written. The rule was right; it was under-applied and under-stated.
+
+### Two more handlers built retried work outside the retry
+
+`DeleteUnitHandler` loaded its `Unit` before `strategy.ExecuteAsync` and called `Archive()` on it inside - while `DeletePropertyHandler`, written in the same change, cleared and reloaded. The retry then assigned `Archived` to an entity whose *original* value was already `Archived`, EF saw no change, the `UPDATE` carried the audit columns alone, and a 200 was returned over a still-active unit.
+
+`UpdatePricingRuleHandler` had the same shape and is worse, for two reasons. It runs at `Serializable` and retries `40001` as its normal operating mode rather than as an exotic failure - so the path is *ordinary* there. And it carried a comment arguing the arrangement was deliberate:
+
+> No `ChangeTracker.Clear()` here, unlike Create, and deliberately not - `rule` was loaded once, before the retry strategy starts, and stays the SAME tracked instance across every retry; clearing it would detach it, breaking `SaveChangesAsync`'s ability to see the mutations on a retried attempt.
+
+That is backwards. The mutations are applied *inside* the delegate, so clearing and reloading yields a fresh instance that then receives them. **Keeping the instance is what loses them.** A price update returned 200 and left the old price in the database.
+
+The sweep cleared the other fourteen `strategy.ExecuteAsync` sites, and the reason most are safe is worth recording, because it is not obvious: **`Add` is not exposed to this defect.** After `Clear()` an `Added` entity is re-`Add`ed and re-inserted; only a *loaded* one is silently seen as unchanged. So `CreateUnitHandler` and `SignUpHandler` are fine. `PromotionRedemption` and `HoldAvailabilityHandler` are raw SQL, `RefreshTokenHandler` makes no tracked writes, and the rest already reload inside.
+
+### The rule extends past retries: nothing observable may depend on an uncommitted write
+
+`ConfirmBookingHandler.RecoverOwnCommittedAttemptAsync` called `ReplayAsync` - which mints a management token and saves its hash - while the caller's transaction was still open. The caller's `await using` then rolled it back. The guest received **200, a real booking id, and a credential that fails at first use.**
+
+The sibling branch in `BeginConfirmationAsync`'s unique-violation catch did the same work correctly, because it happened to roll back first. One branch remembered and one did not, which is the whole diagnosis: the boundary lived in each branch's discipline rather than in the shape of the code.
+
+**Stated as a rule: a transaction's outcome is decided before anything observable leaves the handler. Nothing returned to a caller may depend on a write in a transaction that has not committed.**
+
+`ConfirmationStart` now carries the `CheckoutIdempotencyRecord` - the *decision* - instead of the response built from it, and `Handle` performs the replay once the transaction is resolved and the execution strategy is behind it. A fourth branch added here cannot reproduce the bug, because no branch is in a position to issue a credential.
+
+### Two checks guarding one invariant must be ordered against the state machine
+
+Not a retry rule, and it earns its own line. `UnitArchival.EnsureArchivableAsync` asks two questions - is there a live booking, is there a live hold - and `HasActiveHoldForUnitAsync` deliberately excludes `'booked'`. The advisory lock excludes *new* holds but does not freeze an existing one, so a hold can run `held -> pending_payment -> booked` between the two checks. With bookings checked first, a checkout completing in that gap was invisible to both, and the unit was archived with a live paid stay against it.
+
+**Where two checks guard the same invariant against a state machine that can advance between them, order them so the later check covers the states the earlier one can transition into.** Here that means holds first: `'booked'` implies a `Confirmed` booking, since `MarkHoldPaidAsync` sets it in the same transaction as `Booking.Confirm()`.
+
+The test gates on whichever check runs first rather than on a named one, so it pins the property rather than the current order - a test hard-coded to the order would go green the moment someone reordered the method, which is the exact edit the comment in that method exists to prevent.

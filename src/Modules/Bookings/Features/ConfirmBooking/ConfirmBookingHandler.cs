@@ -84,9 +84,20 @@ public class ConfirmBookingHandler(
 
         // The race the top-of-handler read cannot close: a concurrent request
         // carrying the same key finished between that read and our insert.
-        if (start.Replay is not null)
+        //
+        // Replayed here rather than inside BeginConfirmationAsync, and that is
+        // the point: the transaction is resolved and the execution strategy is
+        // behind us, so the management token this mints is written by a save
+        // that commits on its own. Done in there, it was minted inside a
+        // transaction nobody was going to commit.
+        if (start.ReplayRecord is not null)
         {
-            return start.Replay;
+            // Nothing from the abandoned attempt may ride along with the token
+            // insert. Safe only on this branch - the success path below needs
+            // its intent and record still tracked.
+            dbContext.ChangeTracker.Clear();
+
+            return await ReplayAsync(start.ReplayRecord, requestFingerprint, cancellationToken);
         }
 
         // Non-null whenever Replay is null - the two are the result's two
@@ -518,12 +529,29 @@ public class ConfirmBookingHandler(
     /// </summary>
     /// <summary>
     ///     Either a confirmation that has begun - <see cref="Intent"/> and
-    ///     <see cref="Hold"/> set - or a finished response to return instead
-    ///     of beginning one. Exactly one arm is populated.
+    ///     <see cref="Hold"/> set - or the record a replay should be built
+    ///     from instead of beginning one. Exactly one arm is populated.
+    ///     <para>
+    ///         <see cref="ReplayRecord"/> is the record, deliberately, and not
+    ///         the response built from it. Building the response mints a
+    ///         management token and saves its hash, and every branch that
+    ///         reached that point was doing it <em>inside</em> a transaction
+    ///         that is about to be abandoned. One of them rolled back first and
+    ///         one did not, so the guest got a 200 carrying a credential whose
+    ///         row was discarded on the way out - a token that fails at the
+    ///         first exchange, for a booking that really exists.
+    ///     </para>
+    ///     <para>
+    ///         Returning the decision moves that write to the caller, after the
+    ///         transaction is resolved and outside the execution strategy. The
+    ///         boundary is then structural rather than something each branch
+    ///         has to remember, which is the part that failed: the shape was
+    ///         fine until a branch was added that forgot.
+    ///     </para>
     /// </summary>
     private sealed record ConfirmationStart
     {
-        public ConfirmBookingResponse? Replay { get; init; }
+        public CheckoutIdempotencyRecord? ReplayRecord { get; init; }
         public PendingBookingIntent? Intent { get; init; }
         public ConfirmedHold? Hold { get; init; }
         public CheckoutIdempotencyRecord? Record { get; init; }
@@ -594,8 +622,11 @@ public class ConfirmBookingHandler(
                 // it. Nothing has been staged in this transaction yet, which is
                 // why the UPDATE running first also makes this recovery simple -
                 // there is no half-built state to unpick.
+                // No fingerprint here any more: this method decides *which*
+                // record applies and nothing else. Matching the fingerprint is
+                // part of building the replay, which now happens in Handle.
                 return await RecoverOwnCommittedAttemptAsync(
-                    holdId, bookingId, keyHash, requestFingerprint, transaction, cancellationToken);
+                    holdId, bookingId, keyHash, transaction, cancellationToken);
             }
 
             PendingBookingIntent intent = new PendingBookingIntent
@@ -666,10 +697,7 @@ public class ConfirmBookingHandler(
 
                     if (byKey is not null)
                     {
-                        return new ConfirmationStart
-                        {
-                            Replay = await ReplayAsync(byKey, requestFingerprint, cancellationToken)
-                        };
+                        return new ConfirmationStart { ReplayRecord = byKey };
                     }
                 }
 
@@ -707,7 +735,7 @@ public class ConfirmBookingHandler(
     ///     </para>
     /// </summary>
     private async Task<ConfirmationStart> RecoverOwnCommittedAttemptAsync(
-        Guid holdId, Guid bookingId, string? keyHash, string requestFingerprint,
+        Guid holdId, Guid bookingId, string? keyHash,
         IDbContextTransaction transaction, CancellationToken cancellationToken)
     {
         // Keyed on this request's own pre-generated bookingId, not on holdId.
@@ -733,16 +761,20 @@ public class ConfirmBookingHandler(
 
                 if (byKey is not null)
                 {
-                    return new ConfirmationStart
-                    {
-                        Replay = await ReplayAsync(byKey, requestFingerprint, cancellationToken)
-                    };
+                    // The read above has to happen inside the transaction - it
+                    // is the decision. Ending it here rather than leaving it to
+                    // the caller's `await using`, so the caller is holding a
+                    // resolved transaction by the time it issues anything.
+                    await transaction.RollbackAsync(cancellationToken);
+
+                    return new ConfirmationStart { ReplayRecord = byKey };
                 }
             }
 
             // The hold is genuinely not available to this caller. NotFound,
             // the same answer an expired or nonexistent hold gets, because a
             // caller can do exactly one thing about any of them.
+            await transaction.RollbackAsync(cancellationToken);
             throw new NotFoundException("Hold", holdId);
         }
 
