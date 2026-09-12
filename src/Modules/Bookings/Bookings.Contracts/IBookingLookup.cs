@@ -65,6 +65,50 @@ public interface IBookingLookup
     ///     doesn't exist.
     /// </summary>
     Task<BookingAccessResult?> GetBookingDetailsAsync(Guid bookingId, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     The refund this booking's cancellation committed to owing, if it was
+    ///     cancelled. Null when it was not.
+    ///     <para>
+    ///         Written in the same transaction as the cancellation, so a reader
+    ///         either sees it with a true CancelledAt or sees nothing - never a
+    ///         null timestamp standing in for "committed but not yet visible",
+    ///         which is what made reading CancelledAt off the booking unsafe.
+    ///     </para>
+    /// </summary>
+    Task<RefundObligationSnapshot?> GetRefundObligationAsync(Guid bookingId, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     Marks the obligation settled, once a refund has been recorded
+    ///     against the transaction.
+    ///     <para>
+    ///         The second of two commits, and the reason the first is safe to
+    ///         repeat: a crash in between leaves this unset, the backstop job
+    ///         tries again, and MarkRefundPending's own first-wins guard makes
+    ///         the repeated write a no-op rather than a second refund.
+    ///     </para>
+    /// </summary>
+    Task MarkRefundObligationResolvedAsync(
+        Guid bookingId, DateTimeOffset resolvedAt, CancellationToken cancellationToken);
+}
+
+public record RefundObligationSnapshot
+{
+    public required Guid BookingId { get; init; }
+    public required DateTimeOffset CancelledAt { get; init; }
+
+    /// <summary>What the cancellation policy resolved to at cancellation time.</summary>
+    public required Money PolicyRefundAmount { get; init; }
+
+    /// <summary>Whether a refund has already been decided for this obligation.</summary>
+    public required bool IsResolved { get; init; }
+
+    /// <summary>
+    ///     Whether the guest cancelled, or the unpaid-checkout sweep did. The
+    ///     resolver records it on the transaction so the reason a refund
+    ///     happened survives past the row that caused it.
+    /// </summary>
+    public required BookingCancellationCause Cause { get; init; }
 }
 
 public record BookingSummary

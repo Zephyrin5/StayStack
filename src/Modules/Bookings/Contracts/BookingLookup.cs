@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Bookings.Entities;
+using SeedWork.ValueObjects;
 using Bookings.Features.Common;
 using Microsoft.EntityFrameworkCore;
 using Bookings.Contracts;
@@ -83,6 +84,34 @@ internal class BookingLookup(
             })
             .ToListAsync(cancellationToken);
     }
+
+    public async Task<RefundObligationSnapshot?> GetRefundObligationAsync(
+        Guid bookingId, CancellationToken cancellationToken)
+    {
+        RefundObligation? obligation = await dbContext.RefundObligations.AsNoTracking()
+            .SingleOrDefaultAsync(o => o.BookingId == bookingId, cancellationToken);
+
+        return obligation is null
+            ? null
+            : new RefundObligationSnapshot
+            {
+                BookingId = obligation.BookingId,
+                CancelledAt = obligation.CancelledAt,
+                PolicyRefundAmount = Money.Of(obligation.PolicyRefundAmount, obligation.Currency),
+                IsResolved = obligation.ResolvedAt is not null,
+                Cause = obligation.Cause
+            };
+    }
+
+    public Task MarkRefundObligationResolvedAsync(
+        Guid bookingId, DateTimeOffset resolvedAt, CancellationToken cancellationToken) =>
+        // ExecuteUpdate filtered on still-unresolved, so a repeat is a zero-row
+        // no-op rather than a rewritten timestamp - the first resolution is the
+        // one that happened, and moving the marker would hide a retry that
+        // should be visible.
+        dbContext.RefundObligations
+            .Where(o => o.BookingId == bookingId && o.ResolvedAt == null)
+            .ExecuteUpdateAsync(o => o.SetProperty(row => row.ResolvedAt, resolvedAt), cancellationToken);
 
     public Task<BookingAccessResult?> GetBookingDetailsAsync(Guid bookingId, CancellationToken cancellationToken)
     {

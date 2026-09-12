@@ -240,6 +240,24 @@ public class CancelBookingHandler(
                 DateTimeOffset cancelledAt = timeProvider.GetUtcNow();
                 locked.Cancel(cancelledAt);
 
+                // The durable refund obligation, in the same transaction as the
+                // cancellation. Deliberately says nothing about whether a
+                // payment exists - that is what the two paths used to guess at,
+                // each declining cases it assumed the other owned.
+                //
+                // The booking id is the key, so a retried attempt collides
+                // rather than writing a second. Discarded and re-added on each
+                // attempt because the tracker is cleared at the top of this
+                // delegate (docs/adr/0025).
+                dbContext.RefundObligations.Add(new RefundObligation
+                {
+                    BookingId = locked.Id,
+                    CancelledAt = cancelledAt,
+                    PolicyRefundAmount = refundAmount.Amount,
+                    Currency = refundAmount.Currency,
+                    Cause = BookingCancellationCause.GuestCancellation
+                });
+
                 // Enqueued here, per attempt. These are the rows whose absence
                 // made the old failure silent: the response promises a pending
                 // refund on the strength of them existing, and the relay

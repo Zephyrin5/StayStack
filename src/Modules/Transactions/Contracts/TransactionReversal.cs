@@ -1,3 +1,4 @@
+using Bookings.Contracts;
 using Microsoft.EntityFrameworkCore;
 using SeedWork.ValueObjects;
 using Transactions.Entities;
@@ -6,7 +7,10 @@ namespace Transactions.Contracts;
 
 // internal, same reasoning as Catalog.Contracts.HoldConfirmation - Bookings
 // should only ever reach this through ITransactionReversal, resolved via DI.
-internal class TransactionReversal(AppTransactionsDbContext dbContext) : ITransactionReversal
+internal class TransactionReversal(
+    AppTransactionsDbContext dbContext,
+    IBookingLookup bookingLookup,
+    TimeProvider timeProvider) : ITransactionReversal
 {
     public async Task<decimal?> ReverseTransactionAsync(
         Guid bookingId, Money refundAmount, DateTimeOffset? cancelledAt, CancellationToken cancellationToken)
@@ -51,6 +55,82 @@ internal class TransactionReversal(AppTransactionsDbContext dbContext) : ITransa
             // side won is already correct, nothing left to do here.
             return null;
         }
+    }
+
+    public async Task<decimal?> ResolveRefundAsync(Guid bookingId, CancellationToken cancellationToken)
+    {
+        // Step 1 - is there money to give back? Not Succeeded covers every
+        // "nothing to do yet" case at once: still Pending at the gateway,
+        // Failed, or already past Succeeded because a refund was decided
+        // earlier.
+        Transaction? transaction = await dbContext.Transactions
+            .SingleOrDefaultAsync(
+                t => t.BookingId == bookingId && t.TransactionStatus == TransactionStatus.Succeeded,
+                cancellationToken);
+
+        if (transaction is null)
+        {
+            return null;
+        }
+
+        // Step 2 - was it cancelled? The obligation is the answer, not the
+        // booking's own CancelledAt. It is written in the cancellation's own
+        // transaction, so it is visible if and only if the cancellation
+        // committed; reading the booking instead could see a null for a
+        // cancellation already in flight and conclude the payment came second.
+        RefundObligationSnapshot? obligation =
+            await bookingLookup.GetRefundObligationAsync(bookingId, cancellationToken);
+
+        if (obligation is null || obligation.IsResolved)
+        {
+            return null;
+        }
+
+        // Step 3 - how much. Both inputs are committed facts by now, which is
+        // the entire point of resolving here rather than at either writer.
+        //
+        // Paid, then cancelled: the guest bought a stay and gave it up, so the
+        // cancellation policy applies. Cancelled, then paid: that payment
+        // bought nothing, so all of it goes back.
+        //
+        // A null SucceededAt is a row from before that column existed. It takes
+        // the policy refund - unknown history, the conservative answer - and
+        // never "somebody else owns this", which is the inference that produced
+        // refunds nobody wrote.
+        bool paidAfterTheCancellation =
+            transaction.SucceededAt is { } succeeded && succeeded > obligation.CancelledAt;
+
+        Money amount = paidAfterTheCancellation ? transaction.Amount : obligation.PolicyRefundAmount;
+
+        RefundCause cause = paidAfterTheCancellation
+            ? RefundCause.PaymentUnusable
+            : obligation.Cause == BookingCancellationCause.Expiry
+                ? RefundCause.BookingExpired
+                : RefundCause.GuestCancellation;
+
+        try
+        {
+            transaction.MarkRefundPending(amount, cause);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (TransactionAlreadyFinalizedException)
+        {
+            // Something resolved this transaction between the read above and
+            // this write. Whichever side won is already correct; the obligation
+            // is still marked below so the sweep stops revisiting it.
+            return null;
+        }
+
+        // Two commits, and this is the second. A crash in between leaves the
+        // obligation unresolved and the backstop job runs this again -
+        // harmlessly, because MarkRefundPending is a no-op once an amount is
+        // recorded. The reverse order would be the unsafe one: an obligation
+        // marked resolved with no refund behind it is invisible to every
+        // retry there is.
+        await bookingLookup.MarkRefundObligationResolvedAsync(
+            bookingId, timeProvider.GetUtcNow(), cancellationToken);
+
+        return amount.Amount;
     }
 
     public async Task<Money?> GetSucceededTransactionAmountAsync(Guid bookingId, CancellationToken cancellationToken)

@@ -254,7 +254,29 @@ public partial class ExpireUnpaidBookingsJob(
                 new ReverseRedemptionOutboxMessage(booking.Id),
                 BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
 
-            booking.Cancel(timeProvider.GetUtcNow());
+            DateTimeOffset cancelledAt = timeProvider.GetUtcNow();
+            booking.Cancel(cancelledAt);
+
+            // An obligation here too, and this is the gap that had no path at
+            // all: this job enqueued a redemption reversal and nothing else, so
+            // a payment committing between the guard above and this
+            // cancellation produced a cancelled booking with a succeeded
+            // payment and no reversal message of any kind - not even a losing
+            // one. Nothing retried, because nothing had been written.
+            //
+            // The full amount, not a policy percentage. The guest did not ask
+            // for this - the platform reclaimed the inventory at its own
+            // deadline - so charging a cancellation fee would be billing them
+            // for our clock. On the ordinary path there is no payment at all
+            // and the resolver no-ops, which costs one row per expiry.
+            dbContext.RefundObligations.Add(new RefundObligation
+            {
+                BookingId = booking.Id,
+                CancelledAt = cancelledAt,
+                PolicyRefundAmount = booking.TotalPrice.Amount,
+                Currency = booking.TotalPrice.Currency,
+                Cause = BookingCancellationCause.Expiry
+            });
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 

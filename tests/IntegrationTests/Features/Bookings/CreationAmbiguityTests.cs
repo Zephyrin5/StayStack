@@ -255,15 +255,31 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
 
         HttpResponseMessage response;
 
-        try
+        // Its own client network, via X-Forwarded-For. The cap counts by
+        // client_key, which the endpoint derives from the remote address - and
+        // in this host every request arrives from loopback, so with a cap of 1
+        // any hold taken by any other test in the run would exhaust it. This
+        // test passed alone and failed in a full run until it stopped sharing.
+        //
+        // The header is honoured because ForwardedHeadersOptions seeds
+        // KnownProxies with ::1, which is exactly where these requests come
+        // from - the same default Program.cs's startup guard exists to stop
+        // anyone relying on in production.
+        HttpRequestMessage hold = new HttpRequestMessage(HttpMethod.Post, "/api/availability/holds")
         {
-            response = await client.PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
+            Content = JsonContent.Create(new HoldAvailabilityRequest
             {
                 UnitId = unit.Id,
                 CheckIn = checkIn,
                 CheckOut = checkIn.AddDays(2),
                 GuestCount = 2
-            }, TestContext.Current.CancellationToken);
+            })
+        };
+        hold.Headers.Add("X-Forwarded-For", "203.0.113.47");
+
+        try
+        {
+            response = await client.SendAsync(hold, TestContext.Current.CancellationToken);
         }
         finally
         {
@@ -275,9 +291,9 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(LoseTheAckOnFirstBookingsCommitFor.Fired, "The lost acknowledgement never reached the hold.");
 
-        HoldAvailabilityResponse? hold = await response.Content
+        HoldAvailabilityResponse? recovered = await response.Content
             .ReadFromJsonAsync<HoldAvailabilityResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
-        Assert.NotNull(hold);
+        Assert.NotNull(recovered);
 
         using IServiceScope assertScope = factory.Services.CreateScope();
         AppBookingsDbContext bookings = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
@@ -286,7 +302,7 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
             .Where(h => h.UnitId == unit.Id)
             .ToListAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(hold.HoldId, Assert.Single(held).Id);
+        Assert.Equal(recovered.HoldId, Assert.Single(held).Id);
     }
 
     [Fact]

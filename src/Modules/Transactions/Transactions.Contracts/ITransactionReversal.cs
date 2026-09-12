@@ -76,6 +76,29 @@ public interface ITransactionReversal
     ///     lookup failure.
     /// </summary>
     Task<TransactionRefundSnapshot?> GetRefundSnapshotAsync(Guid bookingId, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     Decides and records the refund a cancelled booking is owed, once.
+    ///     <para>
+    ///         The single place the amount is chosen, replacing two paths that
+    ///         each guessed whether the other would handle a case. Both inputs
+    ///         are durable by the time this runs - the payment's own status and
+    ///         the obligation the cancellation committed - so the decision is a
+    ///         read of two committed facts rather than a prediction about a
+    ///         write that may not have happened yet.
+    ///     </para>
+    ///     <para>
+    ///         Safe to call repeatedly and from anywhere: it is a no-op unless
+    ///         there is a Succeeded transaction and an unresolved obligation.
+    ///         That is what lets the outbox messages be latency optimisations
+    ///         over a sweep rather than the thing correctness depends on.
+    ///     </para>
+    ///     <para>
+    ///         Returns the amount recorded, or null when there was nothing to
+    ///         do.
+    ///     </para>
+    /// </summary>
+    Task<decimal?> ResolveRefundAsync(Guid bookingId, CancellationToken cancellationToken);
 }
 
 public record TransactionRefundSnapshot
