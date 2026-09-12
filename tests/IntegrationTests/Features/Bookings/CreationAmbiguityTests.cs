@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Data.Common;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Persistence.Interceptors;
@@ -210,6 +211,77 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         // Exactly one, and it is the one the caller was handed. Two rows would
         // mean the retry inserted a second; zero would mean the response names
         // a hold that does not exist.
+        List<UnitAvailabilityHold> held = await bookings.UnitAvailabilityHolds.AsNoTracking()
+            .Where(h => h.UnitId == unit.Id)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(hold.HoldId, Assert.Single(held).Id);
+    }
+
+    [Fact]
+    public async Task AHoldRecoveringAtTheCap_IsNotRefusedByItsOwnCommittedHold()
+    {
+        // The test above runs far below the cap, so it only ever exercised the
+        // recovery in the insert's catch - a path that was already reachable.
+        //
+        // The cap check runs *before* the insert. A retry counts the hold its
+        // own previous attempt committed, so a client at the limit is refused
+        // with 429 and never reaches that catch at all. With a cap of one, a
+        // single lost acknowledgement locks the client out until the hold
+        // expires, while the row it cannot see keeps blocking that range.
+        Unit unit = await SeedUnitAsync();
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(142);
+
+        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    // App:Holds, not Bookings:HoldCap - HoldCapOptions binds
+                    // AppSection("Holds"), and AppSection prefixes "App". The
+                    // first version of this key overrode nothing, leaving the
+                    // testing default of 100000 in place and the test green
+                    // without ever reaching the cap.
+                    ["App:Holds:MaxActiveHoldsPerClient"] = "1"
+                }));
+
+            builder.ConfigureServices(services =>
+                services.AddScoped<AuditableEntitySaveChangesInterceptor, LoseTheAckOnFirstBookingsCommitFor>());
+        });
+
+        using HttpClient client = host.CreateClient();
+
+        LoseTheAckOnFirstBookingsCommitFor.Arm();
+
+        HttpResponseMessage response;
+
+        try
+        {
+            response = await client.PostAsJsonAsync("/api/availability/holds", new HoldAvailabilityRequest
+            {
+                UnitId = unit.Id,
+                CheckIn = checkIn,
+                CheckOut = checkIn.AddDays(2),
+                GuestCount = 2
+            }, TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            LoseTheAckOnFirstBookingsCommitFor.Disarm();
+        }
+
+        // 200, not 429. The retry recognises its own committed hold before the
+        // cap gets a chance to count it.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(LoseTheAckOnFirstBookingsCommitFor.Fired, "The lost acknowledgement never reached the hold.");
+
+        HoldAvailabilityResponse? hold = await response.Content
+            .ReadFromJsonAsync<HoldAvailabilityResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(hold);
+
+        using IServiceScope assertScope = factory.Services.CreateScope();
+        AppBookingsDbContext bookings = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+
         List<UnitAvailabilityHold> held = await bookings.UnitAvailabilityHolds.AsNoTracking()
             .Where(h => h.UnitId == unit.Id)
             .ToListAsync(TestContext.Current.CancellationToken);

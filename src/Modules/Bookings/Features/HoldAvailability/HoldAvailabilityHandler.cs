@@ -241,6 +241,32 @@ public class HoldAvailabilityHandler(
                                                  );
                                                """;
 
+            // Before the cap, and that ordering is the whole of this check.
+            //
+            // Pre-generating holdId let a retry recognise its own committed
+            // insert, but only from the catch below - which the cap never lets
+            // it reach. A retry counts the hold its own previous attempt
+            // committed, so a client at the limit is refused with 429 while the
+            // row it cannot see blocks that range and occupies one of its slots
+            // for the full hold lifetime. With a cap of one, the first lost
+            // acknowledgement locks the client out until the hold expires.
+            //
+            // One indexed read on a primary key, on a path that is otherwise
+            // the hottest write in the system - and it answers a question no
+            // other check can: is this row mine?
+            //
+            // After the stale-hold cleanup above, deliberately. A row that
+            // cleanup would have deleted is expired, and handing an expired
+            // hold back as a live one would be worse than re-inserting.
+            (DateTimeOffset HoldExpiresAt, string Status)? own =
+                await FindOwnHoldAsync(connection, holdId, transaction.GetDbTransaction(), cancellationToken);
+
+            if (own is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return (holdId, own.Value.HoldExpiresAt);
+            }
+
             int activeHoldCount = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
                 activeHoldCountSql,
                 new { request.ClientKey, Now = now },
@@ -311,19 +337,22 @@ public class HoldAvailabilityHandler(
                 // is looking at its own committed work.
                 await transaction.RollbackAsync(cancellationToken);
 
-                (DateTimeOffset HoldExpiresAt, string Status)? own =
-                    await connection.QuerySingleOrDefaultAsync<(DateTimeOffset, string)?>(new CommandDefinition(
-                        """SELECT hold_expires_at, status FROM unit_availability_holds WHERE id = @Id""",
-                        new { Id = holdId }, cancellationToken: cancellationToken));
+                // The same lookup as before the cap check, now that the
+                // transaction is gone. Still needed here as well as there: a
+                // concurrent attempt of this same request can commit in
+                // between, so the row can appear after that earlier check found
+                // nothing.
+                (DateTimeOffset HoldExpiresAt, string Status)? committed =
+                    await FindOwnHoldAsync(connection, holdId, transaction: null, cancellationToken);
 
-                if (own is not null)
+                if (committed is not null)
                 {
                     // Our own, committed. Returning it is what stops a flaky
                     // connection stranding inventory: the alternative left a
                     // live hold nobody could reach, still counting against this
                     // client's cap for its whole lifetime, while the caller was
                     // told the unit was unavailable.
-                    return (holdId, own.Value.HoldExpiresAt);
+                    return (holdId, committed.Value.HoldExpiresAt);
                 }
 
                 throw new UnitUnavailableException(request.UnitId);
@@ -342,4 +371,26 @@ public class HoldAvailabilityHandler(
             Currency = pricing.TotalPrice.Currency
         };
     }
+
+    /// <summary>
+    ///     This operation's own hold, by the id it pre-generated.
+    ///     <para>
+    ///         Ids are version-7 GUIDs minted per invocation, so a row under
+    ///         this one can only have been written by an earlier attempt of this
+    ///         same request - which makes a hit an unambiguous "my work
+    ///         committed" rather than anything about another caller.
+    ///     </para>
+    ///     <para>
+    ///         Status is returned but not filtered on. A row that has since
+    ///         moved to 'pending_payment' or 'booked' was consumed by this
+    ///         guest's own checkout, and "here is the hold you created" stays
+    ///         the truthful answer; refusing it would report failure for two
+    ///         operations that both succeeded.
+    ///     </para>
+    /// </summary>
+    private static Task<(DateTimeOffset HoldExpiresAt, string Status)?> FindOwnHoldAsync(
+        IDbConnection connection, Guid holdId, IDbTransaction? transaction, CancellationToken cancellationToken) =>
+        connection.QuerySingleOrDefaultAsync<(DateTimeOffset, string)?>(new CommandDefinition(
+            """SELECT hold_expires_at, status FROM unit_availability_holds WHERE id = @Id""",
+            new { Id = holdId }, transaction, cancellationToken: cancellationToken));
 }
