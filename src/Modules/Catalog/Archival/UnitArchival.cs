@@ -68,27 +68,63 @@ public static class UnitArchival
                 cancellationToken: cancellationToken));
         }
 
-        // A held/booked hold or a live booking both mean someone is actively
+        // A live hold or a live booking both mean someone is actively
         // transacting against this unit - archiving out from under either one
         // is exactly the mid-checkout 404 (ConfirmBookingHandler's
         // unitLookup.GetUnitAsync returning null) this guard exists to prevent,
         // on top of the more obvious case of pulling a unit out from under a
         // guest mid-stay.
         //
+        // ---------------------------------------------------------------
+        // HOLDS ARE CHECKED FIRST. THE ORDER IS LOAD-BEARING. DO NOT SWAP.
+        // ---------------------------------------------------------------
+        //
+        // The lock above excludes *new* holds. It does not freeze an existing
+        // one: neither ConfirmHoldAsync nor MarkHoldPaidAsync acquires it, so a
+        // hold that already existed when this method started can advance
+        // held -> pending_payment -> booked while these two checks run.
+        //
+        // HasActiveHoldForUnitAsync deliberately excludes 'booked' (a sold hold
+        // is never deleted, so counting it made a unit unarchivable for life -
+        // see its own contract). That exclusion is what makes the ordering
+        // matter, because it means the hold check has a blind spot exactly
+        // where the booking check has coverage.
+        //
+        // With bookings checked first, a checkout completing in the gap fell
+        // through both: no booking existed yet when the booking check ran, and
+        // by the time the hold check ran the hold had reached 'booked' and was
+        // excluded. The unit was archived with a live paid stay against it.
+        //
+        // Checking holds first means the check that runs *last* covers the
+        // states the first one can transition into, and 'booked' implies a
+        // Confirmed booking - MarkHoldPaidAsync sets it in the same transaction
+        // as Booking.Confirm(), so the row the booking check needs is always
+        // committed by then. Every interleaving:
+        //
+        //   'held' / 'pending_payment' at the hold check -> hold check throws
+        //   already 'booked'                             -> booking check throws
+        //   reaches 'booked' between the two checks       -> booking check throws
+        //   no hold at all                                -> the lock stops one appearing
+        //
+        // The historical case still archives, which is the behaviour restored
+        // deliberately a few rounds ago: a 'booked' hold whose stay has ended is
+        // invisible to the hold check, and HasActiveBookingForUnitAsync filters
+        // CheckOut >= today, so both pass.
+        //
+        // The UTC instant, not the property-local `today` below. A hold's
+        // expiry is a timestamp rather than a date - the two questions are
+        // measured in different units and only one of them is a calendar day.
+        if (await availabilityLookup.HasActiveHoldForUnitAsync(unitId, timeProvider.GetUtcNow(), cancellationToken))
+        {
+            throw new UnitHasActiveBookingsException(unitId);
+        }
+
         // The property's own zone, not UTC - "is a booking still active" is
         // measured against CheckOut, itself a property-local date. Both callers
         // already have the Property loaded. See docs/adr/0018.
         DateOnly today = PropertyTimeZone.Today(timeProvider, timeZoneId);
 
         if (await unitArchivalGuard.HasActiveBookingForUnitAsync(unitId, today, cancellationToken))
-        {
-            throw new UnitHasActiveBookingsException(unitId);
-        }
-
-        // The UTC instant, not the property-local `today` above. A hold's
-        // expiry is a timestamp rather than a date - the two questions are
-        // measured in different units and only one of them is a calendar day.
-        if (await availabilityLookup.HasActiveHoldForUnitAsync(unitId, timeProvider.GetUtcNow(), cancellationToken))
         {
             throw new UnitHasActiveBookingsException(unitId);
         }

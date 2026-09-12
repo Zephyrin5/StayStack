@@ -1,4 +1,7 @@
 using Bookings;
+using Bookings.Contracts;
+using Bookings.Entities;
+using Bookings.Features.ConfirmBooking;
 using Bookings.Features.HoldAvailability;
 using Catalog;
 using Catalog.Contracts;
@@ -47,12 +50,19 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
     // committed.
     //
     // It decorates the hold lookup rather than IUnitArchivalGuard, and that is
-    // load-bearing rather than arbitrary. UnitArchival asks the booking guard
-    // first and the hold lookup second, so pausing on the booking guard parks
-    // the archive *between* its two checks - and on release the hold check runs
-    // and sees the hold that just arrived. The archive then correctly refuses,
-    // with or without a lock, and the test passes against the broken code. It
-    // did exactly that on the first attempt.
+    // load-bearing rather than arbitrary. The pause has to leave the archive
+    // with *both* checks behind it; parking it between them means the check
+    // that has not run yet sees whatever the test just did and refuses
+    // correctly, with or without a lock - so the test passes against the broken
+    // code. The first draft did exactly that.
+    //
+    // UnitArchival checks holds first and bookings second, so the hold lookup
+    // is the earlier of the two and this decorator alone would park the archive
+    // in the middle. What saves it is that these three tests race the *hold*
+    // lookup's own subject: each releases only after the thing it is racing has
+    // finished, and the booking check that runs afterwards has no opinion about
+    // a hold. If a test is ever added here whose racing action creates a
+    // booking, it must use the first-check gate below instead.
     private sealed class PauseAfterChecking(
         IUnitAvailabilityLookup inner, Guid unitId, TaskCompletionSource gate, TaskCompletionSource reached)
         : IUnitAvailabilityLookup
@@ -78,6 +88,76 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
             DateOnly checkIn, DateOnly checkOut, DateTimeOffset now, CancellationToken cancellationToken) =>
             inner.GetBlockedUnitIdsAsync(checkIn, checkOut, now, cancellationToken);
     }
+
+    // Fires once, on whichever of UnitArchival's two checks runs first.
+    //
+    // Deliberately order-agnostic. The property under test is "a checkout that
+    // completes while an archive is deciding cannot slip through", and that has
+    // to hold whichever check is written first - a test that hard-codes the
+    // current order would go green the moment someone reorders the method,
+    // which is the exact edit the ordering comment in UnitArchival exists to
+    // stop.
+    private sealed class FirstCheckGate(Guid unitId)
+    {
+        private int _armed = 1;
+
+        public TaskCompletionSource Gate { get; } = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Reached { get; } = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task PauseIfFirstAsync(Guid id)
+        {
+            if (id != unitId || Interlocked.Exchange(ref _armed, 0) == 0)
+            {
+                return;
+            }
+
+            Reached.TrySetResult();
+            await Gate.Task;
+        }
+    }
+
+    private sealed class PauseOnHoldCheck(IUnitAvailabilityLookup inner, FirstCheckGate gate) : IUnitAvailabilityLookup
+    {
+        public async Task<bool> HasActiveHoldForUnitAsync(Guid id, DateTimeOffset now, CancellationToken cancellationToken)
+        {
+            bool result = await inner.HasActiveHoldForUnitAsync(id, now, cancellationToken);
+            await gate.PauseIfFirstAsync(id);
+            return result;
+        }
+
+        public Task<IReadOnlyList<ActiveHoldRange>> GetActiveHoldRangesAsync(
+            Guid unitId, DateOnly from, DateOnly to, DateTimeOffset now, CancellationToken cancellationToken) =>
+            inner.GetActiveHoldRangesAsync(unitId, from, to, now, cancellationToken);
+
+        public Task<IReadOnlySet<Guid>> GetBlockedUnitIdsAsync(
+            DateOnly checkIn, DateOnly checkOut, DateTimeOffset now, CancellationToken cancellationToken) =>
+            inner.GetBlockedUnitIdsAsync(checkIn, checkOut, now, cancellationToken);
+    }
+
+    private sealed class PauseOnBookingCheck(IUnitArchivalGuard inner, FirstCheckGate gate) : IUnitArchivalGuard
+    {
+        public async Task<bool> HasActiveBookingForUnitAsync(Guid id, DateOnly today, CancellationToken cancellationToken)
+        {
+            bool result = await inner.HasActiveBookingForUnitAsync(id, today, cancellationToken);
+            await gate.PauseIfFirstAsync(id);
+            return result;
+        }
+    }
+
+    private HttpClient ClientPausingAtTheFirstCheck(FirstCheckGate gate) =>
+        factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                ServiceDescriptor holds = services.Single(d => d.ServiceType == typeof(IUnitAvailabilityLookup));
+                services.Remove(holds);
+                services.AddScoped<IUnitAvailabilityLookup>(sp => new PauseOnHoldCheck(
+                    (IUnitAvailabilityLookup)ActivatorUtilities.CreateInstance(sp, holds.ImplementationType!), gate));
+
+                ServiceDescriptor bookings = services.Single(d => d.ServiceType == typeof(IUnitArchivalGuard));
+                services.Remove(bookings);
+                services.AddScoped<IUnitArchivalGuard>(sp => new PauseOnBookingCheck(
+                    (IUnitArchivalGuard)ActivatorUtilities.CreateInstance(sp, bookings.ImplementationType!), gate));
+            })).CreateClient();
 
     private HttpClient ClientPausingTheArchiveOn(Guid unitId, TaskCompletionSource gate, TaskCompletionSource reached) =>
         factory.WithWebHostBuilder(builder =>
@@ -347,5 +427,110 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
 
         return factory.CreateClient().SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task ACheckoutThatCompletesAndPaysWhileArchivalIsDeciding_BlocksTheArchive()
+    {
+        // The interleaving the advisory lock does not cover. It excludes *new*
+        // holds; it does not freeze an existing one, because neither
+        // ConfirmHoldAsync nor MarkHoldPaidAsync takes it. So a hold that was
+        // already there when archival started can run all the way to 'booked'
+        // while archival is between its two checks.
+        //
+        // That mattered because HasActiveHoldForUnitAsync deliberately excludes
+        // 'booked'. With bookings checked first, a checkout completing in the
+        // gap fell through both: no booking existed when the booking check ran,
+        // and the hold was 'booked' - and therefore invisible - by the time the
+        // hold check ran. The unit got archived with a live paid stay on it.
+        Unit unit = CreateTestUnit();
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            catalog.AddRange(_pendingProperties);
+            catalog.Add(unit);
+            await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        string adminToken = await SignInAsAdministratorAsync();
+
+        // A live 'held' hold, in place before archival begins. This is what
+        // makes the race reachable at all: the lock would refuse to let one
+        // appear later.
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(80);
+        HttpClient guest = factory.CreateClient();
+
+        HttpResponseMessage holdResponse = await guest.PostAsJsonAsync("/api/availability/holds",
+            new HoldAvailabilityRequest
+            {
+                UnitId = unit.Id,
+                CheckIn = checkIn,
+                CheckOut = checkIn.AddDays(2),
+                GuestCount = 2
+            }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, holdResponse.StatusCode);
+        HoldAvailabilityResponse? hold = await holdResponse.Content
+            .ReadFromJsonAsync<HoldAvailabilityResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(hold);
+
+        FirstCheckGate gate = new FirstCheckGate(unit.Id);
+        HttpClient archiveClient = ClientPausingAtTheFirstCheck(gate);
+
+        // Act - archival is now parked with one of its two checks behind it,
+        // holding the exclusive lock and a hold that is still merely 'held'.
+        Task<HttpResponseMessage> archive = ArchiveUnitAsync(archiveClient, unit.Id, adminToken);
+        await gate.Reached.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // The whole checkout, start to finish, inside that window. Neither half
+        // of it takes the advisory lock, which is exactly why it can run here.
+        HttpResponseMessage confirmResponse = await guest.PostAsJsonAsync("/api/bookings", new ConfirmBookingRequest
+        {
+            HoldId = hold.HoldId,
+            GuestName = "Jane Guest",
+            GuestEmail = "jane@example.com"
+        }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, confirmResponse.StatusCode);
+        ConfirmBookingResponse? booking = await confirmResponse.Content
+            .ReadFromJsonAsync<ConfirmBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(booking);
+
+        // Paying is what moves the hold to 'booked' and into the hold check's
+        // blind spot. Without this the hold stays 'pending_payment', which the
+        // hold check does see - a different and much easier case.
+        using (IServiceScope paymentScope = factory.Services.CreateScope())
+        {
+            Assert.True(await paymentScope.ServiceProvider.GetRequiredService<IBookingPaymentConfirmation>()
+                .ConfirmPaymentAsync(booking.BookingId, TestContext.Current.CancellationToken));
+        }
+
+        gate.Gate.SetResult();
+
+        HttpResponseMessage response = await archive;
+
+        // Assert - archival is refused. 409, the same answer a unit with an
+        // ordinary live booking gets.
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        using IServiceScope assertScope = factory.Services.CreateScope();
+
+        Assert.True(
+            await assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>()
+                .Units.AsNoTracking().AnyAsync(u => u.Id == unit.Id, TestContext.Current.CancellationToken),
+            "The unit was archived with a paid, confirmed booking against it.");
+
+        // And the stay survived intact - the thing that would actually have
+        // been lost.
+        AppBookingsDbContext bookings = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+
+        Booking persisted = await bookings.Bookings.AsNoTracking()
+            .SingleAsync(b => b.Id == booking.BookingId, TestContext.Current.CancellationToken);
+        Assert.Equal(BookingStatus.Confirmed, persisted.BookingStatus);
+
+        UnitAvailabilityHold soldHold = await bookings.UnitAvailabilityHolds.AsNoTracking()
+            .SingleAsync(h => h.Id == hold.HoldId, TestContext.Current.CancellationToken);
+        Assert.Equal("booked", soldHold.Status);
     }
 }
