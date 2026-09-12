@@ -80,3 +80,35 @@ Not a retry rule, and it earns its own line. `UnitArchival.EnsureArchivableAsync
 **Where two checks guard the same invariant against a state machine that can advance between them, order them so the later check covers the states the earlier one can transition into.** Here that means holds first: `'booked'` implies a `Confirmed` booking, since `MarkHoldPaidAsync` sets it in the same transaction as `Booking.Confirm()`.
 
 The test gates on whichever check runs first rather than on a named one, so it pins the property rather than the current order - a test hard-coded to the order would go green the moment someone reordered the method, which is the exact edit the comment in that method exists to prevent.
+
+## Amendment: identity is generated outside the retry, and constraints are matched by name
+
+The third and fourth call sites of the same principle, found the round after the first amendment.
+
+`EnableRetryOnFailure` cannot distinguish a failed transaction from one that committed and lost its acknowledgement. It re-runs the delegate either way - so a delegate that mints a fresh id on each attempt collides with its own predecessor, and then reports that collision as somebody else's conflict.
+
+`HoldAvailabilityHandler` generated its `holdId` inside the retried delegate. A retry inserted a *different* id over the same range, the GiST exclusion constraint refused it, and the caller got 409 for a hold that exists. Worse than losing the response: the orphan carries the same `client_key`, and the per-client cap counts `held` and `pending_payment` by that key - so the guest lost the range *and* burned one of their concurrent slots for the hold's full lifetime, repeatedly on a flaky connection.
+
+`InitiateTransactionHandler` has no explicit delegate, and its id was already stable - `Transaction.Create` runs once, outside the `SaveChangesAsync` that EF retries. Its defect was the catch:
+
+```csharp
+catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: UniqueViolation })
+    throw new TransactionAlreadyInProgressException(request.BookingId);
+```
+
+Two unique indexes reach that, meaning opposite things. `ix_transactions_booking_id_active` is a real conflict. The primary key is *our own committed insert*, and answering "already in progress" is true and useless - the guest cannot learn the id of the transaction they just created, so the payment is stranded behind a number nobody can see.
+
+**The rule: any write that creates a row under a retrying execution strategy generates its identity outside the retried delegate, and treats a collision on that identity as "my earlier attempt committed" - read the row back and return it. Constraint matching is by name, never by `SqlState` alone.**
+
+Two details the implementation turned up:
+
+- **Do not branch on the SqlState even when the codes look distinct.** A re-inserted hold violates the primary key (`23505`) *and* overlaps itself on the exclusion constraint (`23P01`), and Postgres does not promise which it reports. The pre-generated id answers directly - does a row under *my* id exist - so both codes route to the same question rather than to different answers.
+- **An unrecognised constraint must not be assumed to be ours.** `InitiateTransactionHandler` rethrows anything that is neither the active-transaction index nor the primary key, because guessing it is our own committed insert would report success for a write that never happened.
+
+### Simulating a lost acknowledgement takes the right hook
+
+Three were tried, and only one is correct for a given handler:
+
+- `TransactionCommittingAsync` fires *before* the commit, so it proves the rollback case and nothing else. The existing archival tests used it and were only ever testing half the failure.
+- `TransactionCommittedAsync` is the lost acknowledgement for a handler that opens an explicit transaction. It never fires for one that does not - `InitiateTransactionHandler` leaves EF's implicit transaction to it - and that test silently passed through without triggering.
+- `SavedChangesAsync` does fire there, but runs **outside** the region the execution strategy retries, so throwing produced a 500 rather than a second attempt. The simulation has to sit where a real lost acknowledgement sits: inside the retried work. `ReaderExecutedAsync`/`NonQueryExecutedAsync`, immediately after the INSERT has executed, is that place.

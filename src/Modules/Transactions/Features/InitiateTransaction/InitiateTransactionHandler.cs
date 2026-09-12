@@ -78,12 +78,60 @@ public class InitiateTransactionHandler(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        catch (DbUpdateException ex)
+            when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } violation)
         {
-            throw new TransactionAlreadyInProgressException(request.BookingId);
+            // By constraint name, never by SqlState alone. Two unique indexes
+            // reach this catch and they mean opposite things, so the broad
+            // version turned a recoverable duplicate into a false conflict.
+            //
+            // ix_transactions_booking_id_active is the real conflict: another
+            // transaction for this booking is already Pending or Succeeded. The
+            // pre-check above catches the ordinary case; this catches two
+            // concurrent requests that both passed it.
+            if (violation.ConstraintName == ActiveTransactionIndex)
+            {
+                throw new TransactionAlreadyInProgressException(request.BookingId);
+            }
+
+            // The primary key, which means this insert already committed and
+            // lost its acknowledgement. SaveChangesAsync runs under a retrying
+            // execution strategy even without an explicit delegate here, and
+            // Transaction.Create ran once - so the retry re-inserts the same
+            // id rather than a new one.
+            //
+            // Reported as "already in progress", that was true and useless: the
+            // guest cannot learn the id of the transaction they just created,
+            // so the payment is stranded behind a number nobody can see. Read
+            // it back and answer with it, the same shape ConfirmBookingHandler
+            // uses for its own pre-generated booking id (docs/adr/0025).
+            // Anything else is a unique index nobody anticipated, and guessing
+            // it is our own committed insert would report success for a write
+            // that never happened. Let it surface.
+            if (violation.ConstraintName != PrimaryKey)
+            {
+                throw;
+            }
+
+            dbContext.ChangeTracker.Clear();
+
+            Transaction committed = await dbContext.Transactions.AsNoTracking()
+                .SingleAsync(t => t.Id == transaction.Id, cancellationToken);
+
+            return BuildResponse(committed);
         }
 
-        return new InitiateTransactionResponse
+        return BuildResponse(transaction);
+    }
+
+    // The primary key name from the Initial migration. A literal, because the
+    // catch above has to compare against it and EF exposes no strongly-typed
+    // handle on a constraint name.
+    private const string PrimaryKey = "pk_transactions";
+    private const string ActiveTransactionIndex = "ix_transactions_booking_id_active";
+
+    private static InitiateTransactionResponse BuildResponse(Transaction transaction) =>
+        new InitiateTransactionResponse
         {
             TransactionId = transaction.Id,
             BookingId = transaction.BookingId,
@@ -91,5 +139,5 @@ public class InitiateTransactionHandler(
             Currency = transaction.Amount.Currency,
             TransactionStatus = transaction.TransactionStatus
         };
-    }
+
 }

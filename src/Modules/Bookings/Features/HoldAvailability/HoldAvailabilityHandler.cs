@@ -125,6 +125,28 @@ public class HoldAvailabilityHandler(
         // identity map to go stale.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
+        // Outside the retried delegate, deliberately. Generated inside, a retry
+        // after a committed-but-unacknowledged attempt produced a *different*
+        // id, so the insert collided with its own predecessor on the exclusion
+        // constraint and the caller was told the unit was unavailable - while
+        // attempt one's hold sat live and unreachable, carrying the same
+        // client_key and so burning one of that guest's concurrent-hold slots
+        // for its whole lifetime. On a flaky connection, repeatedly.
+        //
+        // Pre-generating it turns that collision into a question with an
+        // answer: is this row mine? See the catch below, and docs/adr/0025.
+        // Outside the retried delegate, deliberately. Generated inside, a retry
+        // after a committed-but-unacknowledged attempt produced a *different*
+        // id, so the insert collided with its own predecessor on the exclusion
+        // constraint and the caller was told the unit was unavailable - while
+        // attempt one's hold sat live and unreachable, carrying the same
+        // client_key and so burning one of that guest's concurrent-hold slots
+        // for its whole lifetime. On a flaky connection, repeatedly.
+        //
+        // Pre-generating it turns that collision into a question with an
+        // answer: is this row mine? See the catch below, and docs/adr/0025.
+        Guid holdId = Guid.CreateVersion7();
+
         (Guid HoldId, DateTimeOffset HoldExpiresAt) result = await strategy.ExecuteAsync(async () =>
         {
             await using IDbContextTransaction transaction =
@@ -231,7 +253,6 @@ public class HoldAvailabilityHandler(
                 throw new TooManyActiveHoldsException();
             }
 
-            Guid holdId = Guid.CreateVersion7();
             DateTimeOffset holdExpiresAt = now.Add(HoldDuration);
 
             const string sql = """
@@ -266,18 +287,45 @@ public class HoldAvailabilityHandler(
                     transaction.GetDbTransaction(),
                     cancellationToken: cancellationToken));
             }
-            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.ExclusionViolation)
+            catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.ExclusionViolation
+                                                   or PostgresErrorCodes.UniqueViolation)
             {
-                // The database itself rejected the insert - some or all of
-                // the requested range is already held/booked for this unit.
-                // This IS the double-booking guarantee: no rows-affected
-                // check, no manual locking, the constraint does the work.
-                // Not classified as transient, so it propagates straight
-                // out of ExecuteAsync instead of being retried - a real
-                // conflict, not a transient one. See
-                // HoldAvailabilityConcurrencyTests for proof this holds
-                // under real concurrent requests.
+                // Two very different things arrive here, and telling them apart
+                // is the whole of it.
+                //
+                // The exclusion constraint means some or all of the requested
+                // range is already held or booked for this unit. That IS the
+                // double-booking guarantee - no rows-affected check, no manual
+                // locking, the constraint does the work - and it is a real
+                // conflict rather than a transient one, so it propagates
+                // straight out of ExecuteAsync. See
+                // HoldAvailabilityConcurrencyTests.
+                //
+                // But this insert now carries a pre-generated id, so a retry
+                // after a committed-but-unacknowledged attempt re-inserts a row
+                // that is already there - and that violates the primary key
+                // *and* overlaps itself on the exclusion constraint. Postgres
+                // does not promise which of the two it reports, so branching on
+                // the SqlState would be a coin flip. The id answers directly:
+                // if a hold under our own pre-generated id exists, this attempt
+                // is looking at its own committed work.
                 await transaction.RollbackAsync(cancellationToken);
+
+                (DateTimeOffset HoldExpiresAt, string Status)? own =
+                    await connection.QuerySingleOrDefaultAsync<(DateTimeOffset, string)?>(new CommandDefinition(
+                        """SELECT hold_expires_at, status FROM unit_availability_holds WHERE id = @Id""",
+                        new { Id = holdId }, cancellationToken: cancellationToken));
+
+                if (own is not null)
+                {
+                    // Our own, committed. Returning it is what stops a flaky
+                    // connection stranding inventory: the alternative left a
+                    // live hold nobody could reach, still counting against this
+                    // client's cap for its whole lifetime, while the caller was
+                    // told the unit was unavailable.
+                    return (holdId, own.Value.HoldExpiresAt);
+                }
+
                 throw new UnitUnavailableException(request.UnitId);
             }
 
