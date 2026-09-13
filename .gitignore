@@ -21,3 +21,8 @@ riderModule.iml
 # this increment's commit. client/ has its own .gitignore for when it is
 # committed (node_modules, .next, .env.local, etc.).
 /client/
+
+# Repomix - generated codebase dumps. repomix.config.js writes them to
+# .repomix/; repomix-output.* is the tool's default when run without it.
+/.repomix/
+repomix-output.*
