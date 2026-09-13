@@ -66,8 +66,9 @@ public class InitiateTransactionHandler(
         // pair, and any booking-wide query that assumes one row then throws on
         // every retry and every sweep pass, forever.
         //
-        // Ordering is booking then transaction, which is the rule cancellation
-        // and payment confirmation already follow. Nothing new to deadlock on.
+        // The payment lock is the only lock this path takes, so it has no
+        // ordering of its own to get wrong. The paths that take it alongside the
+        // booking row lock take it first - see BookingPaymentLock.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
         return await strategy.ExecuteAsync(async () =>

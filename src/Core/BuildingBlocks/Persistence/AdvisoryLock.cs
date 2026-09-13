@@ -60,4 +60,12 @@ public static class AdvisoryLock
     ///     some other means.
     /// </summary>
     public const string AcquireSharedSql = "SELECT pg_advisory_xact_lock_shared(@LockKey);";
+
+    /// <summary>
+    ///     Exclusive, without waiting: true if taken, false if somebody else
+    ///     holds it. The sweep's side - the advisory counterpart of
+    ///     <c>SKIP LOCKED</c>, for a caller that should step over contended work
+    ///     and revisit it rather than stall a batch behind it.
+    /// </summary>
+    public const string TryAcquireExclusiveSql = "SELECT pg_try_advisory_xact_lock(@LockKey);";
 }

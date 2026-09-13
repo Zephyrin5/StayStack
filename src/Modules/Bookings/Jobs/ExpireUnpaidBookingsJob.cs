@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using System.Data.Common;
 using Microsoft.Extensions.Logging;
+using BuildingBlocks.Persistence;
 using Transactions.Contracts;
 using TickerQ.Utilities.Base;
 using TickerQ.Utilities.Models;
@@ -166,6 +167,37 @@ public partial class ExpireUnpaidBookingsJob(
             {
                 DbConnection connection = dbContext.Database.GetDbConnection();
 
+                // The payment lock first, then the row - the order every path
+                // taking both follows (see BookingPaymentLock).
+                //
+                // This job used to hold the row lock alone, and that could not
+                // exclude initiation: InitiateTransactionHandler never reads or
+                // writes this row, it holds BookingPaymentLock and reads the
+                // booking through IBookingLookup. So initiation could re-read
+                // Pending under its lock, this job cancel and release the unit,
+                // and initiation then commit a payment against a booking that no
+                // longer existed - precisely the state the lock was introduced
+                // to prevent, reachable through the one cancelling path that had
+                // not been given it.
+                //
+                // Try, not wait, for the same reason the row claim below skips
+                // rather than blocks: a sweep steps over contended work and
+                // revisits it next minute. Declining here costs one run's
+                // latency; waiting would stall every booking behind this one.
+                // It is taken inside this transaction, so a skip further down
+                // releases it with the rollback.
+                bool paymentLockTaken = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+                    AdvisoryLock.TryAcquireExclusiveSql,
+                    new { LockKey = BookingPaymentLock.KeyFor(bookingId) },
+                    transaction.GetDbTransaction(),
+                    cancellationToken: cancellationToken));
+
+                if (!paymentLockTaken)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return false;
+                }
+
                 Guid? claimedId = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
                     """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE SKIP LOCKED""",
                     new { BookingId = bookingId },
@@ -227,8 +259,9 @@ public partial class ExpireUnpaidBookingsJob(
             // guarantee is as strong as one read can make it: no payment that
             // committed Succeeded before this line can be expired. What remains
             // is a genuine tie - a payment committing between this read and the
-            // commit below, microseconds wide - and it is not closable from
-            // here without one module locking the other's rows. At that point
+            // commit below, microseconds wide. The payment lock above excludes
+            // a new payment being opened, not an existing one succeeding:
+            // MarkTransactionSucceededHandler does not take it. At that point
             // the payment really did land as the claim lapsed, and the existing
             // refund is a defensible answer to it. That is a different thing
             // from refunding payments that beat the deadline by minutes, which

@@ -50,5 +50,5 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 | [0022](0022-checkout-idempotency-keys.md) | Checkout idempotency keys | Accepted (amended: the stored plaintext token is gone) |
 | [0023](0023-booking-management-sessions.md) | The management token is exchanged once, not carried everywhere | Accepted |
 | [0024](0024-every-memory-cache-entry-declares-its-size.md) | Every IMemoryCache entry declares its size, in bytes | Accepted |
-| [0025](0025-retried-work-is-built-inside-the-retry.md) | Work that must survive a retry is built inside the retry | Accepted (amended: uncommitted writes, and check ordering) |
+| [0025](0025-retried-work-is-built-inside-the-retry.md) | Work that must survive a retry is built inside the retry | Accepted (amended: uncommitted writes, check ordering, and payment-lock protocol) |
 | [0026](0026-stay-search-materialises-the-platform-wide-blocked-set.md) | Stay search materialises a platform-wide blocked set, and that is a known ceiling | Accepted (records a boundary) |

@@ -165,7 +165,19 @@ Two supporting notes:
 
 Cancellation locks the booking row with `FOR UPDATE`, which is database-wide and would exclude a payment perfectly well - except that Transactions cannot take it without naming `bookings`, the coupling docs/adr/0004 exists to prevent. `BookingPaymentLock` is the same answer `UnitAvailabilityLock` gave to the same question: a key both sides agree on without either reaching into the other's schema. Taken exclusively by both, since two concurrent initiations are already refused by the active index and there is no parallelism worth preserving.
 
-Ordering is unchanged - booking, then transaction - so nothing new was introduced for a deadlock to form around.
+#### Every cancelling path takes it, advisory lock first
+
+> **Every path that cancels a booking takes `BookingPaymentLock`, in the same transaction as the cancellation. A path taking both locks takes the advisory lock first, then the booking row lock.**
+
+The lock went into cancellation and initiation, and not into `ExpireUnpaidBookingsJob` - the other path that cancels a booking. Expiry held the booking row alone, and initiation never touches that row, so the two could not see each other: initiation re-read `Pending` under its lock, expiry cancelled and released the unit, and initiation committed a payment against a booking that no longer existed. Exactly the state the lock was introduced to prevent, through the one participant nobody updated.
+
+Once two paths take both locks, their order is load-bearing. Advisory first, because a path waiting on it then holds no row lock while it waits, so payment confirmation - which takes the row lock alone - is never queued behind an unrelated initiation. `CancelBookingHandler` took them the other way round and was reordered.
+
+Expiry takes it with `pg_try_advisory_xact_lock` rather than waiting, the advisory counterpart of the `SKIP LOCKED` row claim it already made: a sweep steps over contended work and revisits it next run. Both are inside one transaction, so a skip at either releases the other with the rollback.
+
+`BookingPaymentLockProtocolTests` pins both halves from source - every file calling `Booking.Cancel` must take the lock, before the row lock and before the cancel - because this failure is invisible from inside any file that changed.
+
+What the lock does **not** exclude: an existing `Pending` payment *succeeding*. `MarkTransactionSucceededHandler` does not take it, so expiry's microseconds-wide tie between its succeeded-payment guard and its commit remains. The refund obligation compensates it.
 
 ### Only the owner of a transaction may clear its change tracker
 

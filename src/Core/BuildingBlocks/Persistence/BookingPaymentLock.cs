@@ -21,9 +21,19 @@ namespace BuildingBlocks.Persistence;
 ///         create a second way to get the pairing wrong.
 ///     </para>
 ///     <para>
-///         Ordering is unchanged: the booking is locked before the transaction,
-///         which is the rule cancellation and payment confirmation already
-///         follow. Nothing new is introduced for a deadlock to form around.
+///         Held by <b>every path that cancels a booking</b> - today
+///         CancelBookingHandler and ExpireUnpaidBookingsJob - and by
+///         initiation. A cancelling path that holds only the booking row is
+///         invisible to initiation, which never touches that row; expiry was
+///         exactly that for a while. BookingPaymentLockProtocolTests pins it.
+///     </para>
+///     <para>
+///         <b>Ordering: this lock first, then the booking row lock.</b> Two
+///         paths take both, so the order is load-bearing rather than
+///         incidental. Taking the advisory lock first also means a path
+///         waiting on it holds no row lock while it waits, so payment
+///         confirmation - which takes the row lock alone - is never queued
+///         behind an initiation it has nothing to do with.
 ///     </para>
 /// </summary>
 public static class BookingPaymentLock

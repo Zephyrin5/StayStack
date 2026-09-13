@@ -169,7 +169,29 @@ public class CancelBookingHandler(
                 await using IDbContextTransaction transaction =
                     await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-                // The booking lock is taken FIRST, before the hold is touched.
+                // The payment lock, then the row lock, then the hold - and that
+                // order is load-bearing, not incidental (see BookingPaymentLock).
+                //
+                // The payment lock exists alongside the row lock rather than
+                // instead of it. FOR UPDATE already excludes anything that can
+                // reach this row through Bookings; it cannot be taken by
+                // Transactions, which would have to name this table to do so.
+                // So initiation agrees on an advisory key instead.
+                //
+                // First, because ExpireUnpaidBookingsJob now takes both too, and
+                // two paths taking the same two locks must take them in one
+                // order. Inside the same transaction, so it is released with it
+                // whichever way it ends.
+                if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
+                {
+                    await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
+                        AdvisoryLock.AcquireExclusiveSql,
+                        new { LockKey = BookingPaymentLock.KeyFor(request.BookingId) },
+                        transaction.GetDbTransaction(),
+                        cancellationToken: cancellationToken));
+                }
+
+                // The booking lock is taken before the hold is touched.
                 // BookingPaymentConfirmation locks the booking and then marks
                 // the hold paid; taking them in the other order here let a
                 // concurrent cancel and payment deadlock. Postgres detects it
@@ -198,24 +220,6 @@ public class CancelBookingHandler(
                     await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
                         """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE""",
                         new { request.BookingId },
-                        transaction.GetDbTransaction(),
-                        cancellationToken: cancellationToken));
-                }
-
-                // The payment lock, alongside the row lock above rather than
-                // instead of it. FOR UPDATE already excludes anything that can
-                // reach this row through Bookings; it cannot be taken by
-                // Transactions, which would have to name this table to do so.
-                // So initiation agrees on an advisory key instead - see
-                // BuildingBlocks.Persistence.BookingPaymentLock.
-                //
-                // Inside the same transaction, so it is released with it
-                // whichever way it ends.
-                if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
-                {
-                    await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
-                        AdvisoryLock.AcquireExclusiveSql,
-                        new { LockKey = BookingPaymentLock.KeyFor(request.BookingId) },
                         transaction.GetDbTransaction(),
                         cancellationToken: cancellationToken));
                 }
