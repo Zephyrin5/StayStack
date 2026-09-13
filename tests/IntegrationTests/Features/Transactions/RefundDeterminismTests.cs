@@ -96,7 +96,7 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
         AppTransactionsDbContext transactions =
             scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
 
-        Transaction payment = Transaction.Create(bookingId, Money.Of(200m, Currency.KWD));
+        Transaction payment = Transaction.Create(Guid.CreateVersion7(), bookingId, Money.Of(200m, Currency.KWD));
 
         if (succeededAt is { } paidAt)
         {

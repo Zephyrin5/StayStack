@@ -10,7 +10,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using System.Data.Common;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -72,22 +71,23 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         }
     }
 
-    // Hooks the command, not the transaction and not SavedChangesAsync, and
-    // both rejected alternatives are worth recording.
+    // After the commit, not after the INSERT command, and the difference is the
+    // whole test.
     //
-    // InitiateTransactionHandler opens no explicit transaction - EF wraps its
-    // single SaveChanges in the implicit one - so no transaction interceptor
-    // fires there at all, and the first draft of this test simply never
-    // triggered. SavedChangesAsync does fire, but it runs *outside* the region
-    // the execution strategy retries, so throwing there propagated a 500
-    // instead of provoking a second attempt: the simulation has to sit where a
-    // real lost acknowledgement sits, inside the retried work.
+    // This used to hook ReaderExecutedAsync, back when initiation had no
+    // explicit transaction and the INSERT's implicit one committed with the
+    // statement. Initiation now runs inside a transaction it opens to hold
+    // BookingPaymentLock, so throwing after the command threw *before* the
+    // commit: disposal rolled the insert back, the retry inserted a fresh row,
+    // and the test passed while proving only that a rollback is retried. The
+    // lost acknowledgement it is named for went unexercised - the same trap
+    // CatalogRetryTests fell into.
     //
-    // ReaderExecutedAsync/NonQueryExecutedAsync run immediately after the
-    // INSERT has executed and inside that region, which is exactly the shape:
-    // the row is in the database and the caller is about to be told it is not.
+    // TransactionCommittedAsync runs once the row is durable and inside the
+    // region the execution strategy retries: the row is in the database and the
+    // caller is about to be told it is not.
     private sealed class LoseTheAckOnFirstTransactionsCommit(ICurrentUserProvider currentUser, TimeProvider timeProvider)
-        : AuditableEntitySaveChangesInterceptor(currentUser, timeProvider), IDbCommandInterceptor
+        : AuditableEntitySaveChangesInterceptor(currentUser, timeProvider), IDbTransactionInterceptor
     {
         private static int _armed;
         private static int _fired;
@@ -102,35 +102,19 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
 
         public static bool Fired => Volatile.Read(ref _fired) > 0;
 
-        public ValueTask<DbDataReader> ReaderExecutedAsync(
-            DbCommand command, CommandExecutedEventData eventData, DbDataReader result,
+        public Task TransactionCommittedAsync(
+            DbTransaction transaction, TransactionEndEventData eventData,
             CancellationToken cancellationToken = default)
         {
-            Throw(command, eventData);
-            return ValueTask.FromResult(result);
-        }
-
-        public ValueTask<int> NonQueryExecutedAsync(
-            DbCommand command, CommandExecutedEventData eventData, int result,
-            CancellationToken cancellationToken = default)
-        {
-            Throw(command, eventData);
-            return ValueTask.FromResult(result);
-        }
-
-        private static void Throw(DbCommand command, CommandExecutedEventData eventData)
-        {
-            if (Volatile.Read(ref _armed) != 1
-                || eventData.Context is not AppTransactionsDbContext
-                || !command.CommandText.Contains("INSERT INTO", StringComparison.Ordinal)
-                || !command.CommandText.Contains("transactions", StringComparison.Ordinal)
-                || Interlocked.Increment(ref _fired) != 1)
+            if (Volatile.Read(ref _armed) == 1
+                && eventData.Context is AppTransactionsDbContext
+                && Interlocked.Increment(ref _fired) == 1)
             {
-                return;
+                throw new PostgresException(
+                    "simulated lost acknowledgement after commit", "ERROR", "ERROR", "40001");
             }
 
-            throw new PostgresException(
-                "simulated lost acknowledgement after insert", "ERROR", "ERROR", "40001");
+            return Task.CompletedTask;
         }
     }
 
@@ -308,13 +292,11 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
     [Fact]
     public async Task ATransactionWhoseCommitLosesItsAcknowledgement_ReturnsTheTransactionItAlreadyCreated()
     {
-        // Same shape, different constraint. The retry re-inserts the same id -
-        // Transaction.Create runs once, outside the SaveChanges the strategy
-        // retries - so it violates the primary key. The catch matched
-        // UniqueViolation broadly and could not tell that from the
-        // active-transaction index, so it reported "already in progress": true,
-        // and useless, because the guest has no way to learn the id of the
-        // transaction they just created.
+        // The first attempt commits and loses its acknowledgement. The retry
+        // must answer with the transaction that attempt created: the guest has
+        // no other way to learn its id, and "already in progress" - which is
+        // what the active-transaction check says about the guest's own row -
+        // is true and useless.
         Unit unit = await SeedUnitAsync();
         DateOnly checkIn = CatalogSeeding.Today().AddDays(141);
 

@@ -105,12 +105,18 @@ public sealed class Transaction : Entity, IAggregateRoot
 
     public Money? RefundAmount => _refundAmount is { } amount ? Money.Of(amount, Amount.Currency) : null;
 
-    public static Transaction Create(Guid bookingId, Money amount)
+    // The id is the caller's, never minted here. A factory that generates its
+    // own identity hands a retried caller a different one on every attempt, and
+    // a caller whose commit lost its acknowledgement can then never find the row
+    // it already wrote (docs/adr/0025). ConfirmBookingHandler's booking id is
+    // pre-generated for the same reason.
+    public static Transaction Create(Guid id, Guid bookingId, Money amount)
     {
+        Guard.Against.Default(id);
         Guard.Against.Default(bookingId);
         Guard.Against.NegativeOrZero(amount.Amount);
 
-        return new Transaction(Guid.CreateVersion7(), bookingId, amount, TransactionStatus.Pending);
+        return new Transaction(id, bookingId, amount, TransactionStatus.Pending);
     }
 
     // Both transitions guard "only from Pending" - a transaction is a

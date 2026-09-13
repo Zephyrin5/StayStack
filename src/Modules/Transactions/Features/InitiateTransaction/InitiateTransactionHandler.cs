@@ -71,6 +71,15 @@ public class InitiateTransactionHandler(
         // booking row lock take it first - see BookingPaymentLock.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
+        // Once, outside the retry. Generated inside, as it used to be, every
+        // attempt minted a new id - so an attempt whose commit lost its
+        // acknowledgement was followed by one that could not recognise the row
+        // it had written, found it as "a transaction already in progress", and
+        // answered 409 to the guest who had just created it. A primary-key
+        // recovery existed for exactly this case and could never fire, which
+        // was worse than its absence: it read as handled.
+        Guid transactionId = Guid.CreateVersion7();
+
         return await strategy.ExecuteAsync(async () =>
         {
             dbContext.ChangeTracker.Clear();
@@ -87,10 +96,33 @@ public class InitiateTransactionHandler(
                     cancellationToken: cancellationToken));
             }
 
-            // Re-read under the lock. Taking the lock only orders this against
-            // a cancellation - it says nothing about what that cancellation did
-            // before this got here, which is the same lesson the archival path
-            // learned.
+            // An earlier attempt of this request may already have committed.
+            //
+            // Asked under the lock, and that is what makes one read enough. An
+            // earlier attempt held this same lock until its transaction ended,
+            // and Postgres makes a commit visible before it releases that
+            // transaction's locks - so by the time this attempt holds the lock,
+            // the earlier one has either committed visibly or rolled back. There
+            // is no in-flight commit left to race.
+            //
+            // Asked first - before the payability re-read and before the
+            // active-transaction check - because both would otherwise judge the
+            // request against a world containing its own row: the active check
+            // refuses it as "already in progress", and a cancellation that
+            // landed since would refuse it as not payable. Neither is true of
+            // an operation that has already happened. The commit is the
+            // outcome; what follows it is somebody else's concern, and a payment
+            // against a booking cancelled afterwards is exactly what the refund
+            // obligation exists to settle.
+            Transaction? committed = await dbContext.Transactions.AsNoTracking()
+                .SingleOrDefaultAsync(t => t.Id == transactionId, cancellationToken);
+
+            if (committed is not null)
+            {
+                await scope.RollbackAsync(cancellationToken);
+                return BuildResponse(committed);
+            }
+
             // Re-read under the lock. Taking the lock only orders this against
             // a cancellation - it says nothing about what that cancellation did
             // before this got here, which is the same lesson the archival path
@@ -103,7 +135,8 @@ public class InitiateTransactionHandler(
                 throw new BookingNotPayableException(request.BookingId);
             }
 
-            InitiateTransactionResponse created = await InsertAsync(request, current, cancellationToken);
+            InitiateTransactionResponse created =
+                await InsertAsync(transactionId, request, current, cancellationToken);
 
             await scope.CommitAsync(cancellationToken);
             return created;
@@ -111,9 +144,9 @@ public class InitiateTransactionHandler(
     }
 
     private async ValueTask<InitiateTransactionResponse> InsertAsync(
-        InitiateTransactionRequest request, BookingAccessResult booking, CancellationToken cancellationToken)
+        Guid transactionId, InitiateTransactionRequest request, BookingAccessResult booking,
+        CancellationToken cancellationToken)
     {
-
         // A Pending or Succeeded transaction blocks a new one - Failed
         // leaves room for a retry, and the refund states are moot since a
         // booking only reaches those via cancellation, which already fails
@@ -135,7 +168,7 @@ public class InitiateTransactionHandler(
             throw new TransactionAlreadyInProgressException(request.BookingId);
         }
 
-        Transaction transaction = Transaction.Create(request.BookingId, booking.TotalPrice);
+        Transaction transaction = Transaction.Create(transactionId, request.BookingId, booking.TotalPrice);
 
         dbContext.Transactions.Add(transaction);
 
@@ -146,53 +179,39 @@ public class InitiateTransactionHandler(
         catch (DbUpdateException ex)
             when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } violation)
         {
-            // By constraint name, never by SqlState alone. Two unique indexes
-            // reach this catch and they mean opposite things, so the broad
-            // version turned a recoverable duplicate into a false conflict.
+            // By constraint name, never by SqlState alone: a unique violation
+            // is only a conflict when it is the index that means one.
             //
             // ix_transactions_booking_id_active is the real conflict: another
-            // transaction for this booking is already Pending or Succeeded. The
-            // pre-check above catches the ordinary case; this catches two
-            // concurrent requests that both passed it.
-            if (violation.ConstraintName == ActiveTransactionIndex)
-            {
-                throw new TransactionAlreadyInProgressException(request.BookingId);
-            }
-
-            // The primary key, which means this insert already committed and
-            // lost its acknowledgement. SaveChangesAsync runs under a retrying
-            // execution strategy even without an explicit delegate here, and
-            // Transaction.Create ran once - so the retry re-inserts the same
-            // id rather than a new one.
+            // transaction for this booking is already Pending or Succeeded.
+            // Anything else is a violation nobody anticipated, and guessing what
+            // it means would report an outcome for a write that never happened.
+            // Let it surface.
             //
-            // Reported as "already in progress", that was true and useless: the
-            // guest cannot learn the id of the transaction they just created,
-            // so the payment is stranded behind a number nobody can see. Read
-            // it back and answer with it, the same shape ConfirmBookingHandler
-            // uses for its own pre-generated booking id (docs/adr/0025).
-            // Anything else is a unique index nobody anticipated, and guessing
-            // it is our own committed insert would report success for a write
-            // that never happened. Let it surface.
-            if (violation.ConstraintName != PrimaryKey)
+            // That includes the primary key. There used to be a recovery branch
+            // for it - "the retry re-inserted our own committed row, read it
+            // back" - and it was unreachable twice over: first because the id
+            // was minted per attempt, so no retry could collide on it; now
+            // because the lookup at the top of the delegate finds that row under
+            // the payment lock before an insert is attempted. Recovery that
+            // cannot run reads as a case handled, so it is gone rather than kept
+            // as a backstop. It would also have been broken: the violation
+            // aborts this explicit transaction, and the read-back it issued next
+            // would have failed with 25P02.
+            if (violation.ConstraintName != ActiveTransactionIndex)
             {
                 throw;
             }
 
-            dbContext.ChangeTracker.Clear();
-
-            Transaction committed = await dbContext.Transactions.AsNoTracking()
-                .SingleAsync(t => t.Id == transaction.Id, cancellationToken);
-
-            return BuildResponse(committed);
+            throw new TransactionAlreadyInProgressException(request.BookingId);
         }
 
         return BuildResponse(transaction);
     }
 
-    // The primary key name from the Initial migration. A literal, because the
+    // The index name from the migration that created it. A literal, because the
     // catch above has to compare against it and EF exposes no strongly-typed
     // handle on a constraint name.
-    private const string PrimaryKey = "pk_transactions";
     private const string ActiveTransactionIndex = "ix_transactions_booking_id_active";
 
     private static InitiateTransactionResponse BuildResponse(Transaction transaction) =>

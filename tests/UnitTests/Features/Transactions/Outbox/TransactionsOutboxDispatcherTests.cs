@@ -51,7 +51,7 @@ public class TransactionsOutboxDispatcherTests : IDisposable
         // confirmation that will never succeed (ConfirmPaymentAsync throwing
         // NotFoundException is the realistic, non-transient way this
         // actually happens - simulated here as any persistent failure).
-        Transaction transaction = Transaction.Create(Guid.NewGuid(), Money.Of(100m, Currency.KWD));
+        Transaction transaction = Transaction.Create(Guid.CreateVersion7(), Guid.NewGuid(), Money.Of(100m, Currency.KWD));
         transaction.MarkSucceeded(DateTimeOffset.UtcNow);
         _dbContext.Transactions.Add(transaction);
         await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);

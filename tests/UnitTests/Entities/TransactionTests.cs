@@ -8,7 +8,7 @@ public class TransactionTests
 {
     private static Transaction CreateValidTransaction()
     {
-        return Transaction.Create(Guid.NewGuid(), Money.Of(100m, Currency.KWD));
+        return Transaction.Create(Guid.CreateVersion7(), Guid.NewGuid(), Money.Of(100m, Currency.KWD));
     }
 
     [Fact]
@@ -16,7 +16,7 @@ public class TransactionTests
     {
         Guid bookingId = Guid.NewGuid();
 
-        Transaction transaction = Transaction.Create(bookingId, Money.Of(100m, Currency.KWD));
+        Transaction transaction = Transaction.Create(Guid.CreateVersion7(), bookingId, Money.Of(100m, Currency.KWD));
 
         Assert.NotEqual(Guid.Empty, transaction.Id);
         Assert.Equal(bookingId, transaction.BookingId);
@@ -28,7 +28,7 @@ public class TransactionTests
     [Fact]
     public void Create_ShouldThrow_WhenBookingIdIsEmpty()
     {
-        Assert.ThrowsAny<ArgumentException>(() => Transaction.Create(Guid.Empty, Money.Of(100m, Currency.KWD)));
+        Assert.ThrowsAny<ArgumentException>(() => Transaction.Create(Guid.CreateVersion7(), Guid.Empty, Money.Of(100m, Currency.KWD)));
     }
 
     [Theory]
@@ -36,7 +36,7 @@ public class TransactionTests
     [InlineData(-1)]
     public void Create_ShouldThrow_WhenAmountIsNotPositive(decimal amount)
     {
-        Assert.ThrowsAny<ArgumentException>(() => Transaction.Create(Guid.NewGuid(), Money.Of(amount, Currency.KWD)));
+        Assert.ThrowsAny<ArgumentException>(() => Transaction.Create(Guid.CreateVersion7(), Guid.NewGuid(), Money.Of(amount, Currency.KWD)));
     }
 
     [Fact]
@@ -220,7 +220,7 @@ public class TransactionTests
         // CancelBookingHandler used to reach for booking.TotalPrice.Currency
         // to build its response - the same value, but asserted at the call
         // site, in the one place getting it wrong costs real money.
-        Transaction transaction = Transaction.Create(Guid.NewGuid(), Money.Of(200m, Currency.KWD));
+        Transaction transaction = Transaction.Create(Guid.CreateVersion7(), Guid.NewGuid(), Money.Of(200m, Currency.KWD));
         transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 
         transaction.MarkRefundPending(Money.Of(60m, Currency.KWD), RefundCause.GuestCancellation);
@@ -236,7 +236,7 @@ public class TransactionTests
         // Null, not a zero-valued Money - "no refund recorded" and "a refund
         // of nothing" are different facts, and the nullable Money? keeps them
         // distinguishable the same way the nullable decimal did.
-        Transaction transaction = Transaction.Create(Guid.NewGuid(), Money.Of(200m, Currency.KWD));
+        Transaction transaction = Transaction.Create(Guid.CreateVersion7(), Guid.NewGuid(), Money.Of(200m, Currency.KWD));
 
         Assert.Null(transaction.RefundAmount);
     }

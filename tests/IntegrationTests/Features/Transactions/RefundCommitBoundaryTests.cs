@@ -105,7 +105,7 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
         AppTransactionsDbContext transactions =
             scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
 
-        Transaction payment = Transaction.Create(bookingId, Money.Of(200m, Currency.KWD));
+        Transaction payment = Transaction.Create(Guid.CreateVersion7(), bookingId, Money.Of(200m, Currency.KWD));
         payment.MarkSucceeded(succeededAt);
         transactions.Transactions.Add(payment);
         await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -358,7 +358,7 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
                 scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
 
             // B succeeded afterwards - the pair the old query could not read.
-            Transaction second = Transaction.Create(bookingId, Money.Of(200m, Currency.KWD));
+            Transaction second = Transaction.Create(Guid.CreateVersion7(), bookingId, Money.Of(200m, Currency.KWD));
             second.MarkSucceeded(DateTimeOffset.UtcNow);
             transactions.Transactions.Add(second);
             await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
