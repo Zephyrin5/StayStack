@@ -43,7 +43,7 @@ public class OutboxDispatcherConcurrencyTests(IntegrationTestWebApplicationFacto
     }
 
     [Fact]
-    public async Task DispatchPendingAsync_ConcurrentOverlappingRuns_HandleTheSameRowExactlyOnce()
+    public async Task ConcurrentOverlappingRuns_HandleTheSameRowExactlyOnce()
     {
         // Arrange - one unprocessed row, simulating two overlapping runs of
         // the same one-minute relay cron (a batch slower than its own
@@ -67,9 +67,18 @@ public class OutboxDispatcherConcurrencyTests(IntegrationTestWebApplicationFacto
         // Act - several concurrent "relay runs", each its own DI scope (own
         // DbContext, own connection - a shared DbContext would serialize
         // these onto one connection and never actually race at the
-        // database), all scanning for and trying to claim the same row.
+        // database), all trying to claim the same row.
         int totalHandled = 0;
         const int concurrentRuns = 8;
+
+        OutboxMessage seeded;
+
+        using (IServiceScope readScope = factory.Services.CreateScope())
+        {
+            seeded = await readScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+                .BookingsOutboxMessages.AsNoTracking()
+                .SingleAsync(m => m.Id == messageId, TestContext.Current.CancellationToken);
+        }
 
         async Task RunOnceAsync()
         {
@@ -78,7 +87,22 @@ public class OutboxDispatcherConcurrencyTests(IntegrationTestWebApplicationFacto
             CountingOutboxDispatcher dispatcher = new CountingOutboxDispatcher(
                 dbContext, TimeProvider.System, NullLogger<CountingOutboxDispatcher>.Instance);
 
-            await dispatcher.DispatchPendingAsync(50, TestContext.Current.CancellationToken);
+            // TryDispatchAsync by id, not DispatchPendingAsync - the same
+            // choice OutboxIdempotencyTests made, for the same reason. The
+            // scan claims whatever is pending in the shared test database, so
+            // this dispatcher also handled rows other tests had left behind
+            // and counted them here: a cancellation whose inline dispatch
+            // failed backs off 30 seconds, and in a suite running longer than
+            // that it is due again by the time this test arrives. It failed on
+            // CI and not locally purely because that depends on ordering and
+            // elapsed time.
+            //
+            // Nothing is lost by claiming directly. DispatchPendingAsync is
+            // documented as "only a candidate scan, not a claim" - the mutual
+            // exclusion under test lives entirely in ClaimAndDispatchAsync,
+            // which is what TryDispatchAsync calls. Driving it directly
+            // contends on precisely the row under test and touches no other.
+            await dispatcher.TryDispatchAsync(seeded, TestContext.Current.CancellationToken);
 
             Interlocked.Add(ref totalHandled, dispatcher.HandledCount);
         }
