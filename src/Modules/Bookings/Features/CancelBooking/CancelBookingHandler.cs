@@ -50,35 +50,28 @@ public class CancelBookingHandler(
         // the refund tier is measured against CheckIn, a property-local date,
         // so a UTC "today" crosses tier boundaries a day early or late
         // depending on which side of UTC the property sits. See
-        // docs/adr/0018. This and `cancelledOn` below must stay on the same
-        // clock: they feed the same ComputeRefund, and disagreeing across a
-        // local midnight would make a recancel report a different figure than
-        // the one already queued in ReverseTransactionOutboxMessage.
+        // docs/adr/0018.
         DateOnly today = PropertyTimeZone.Today(timeProvider, booking.TimeZoneId);
 
         // A booking confirmed before cancellation policies existed has no
         // snapshot - falls back to the same default new units get, rather
         // than fabricating a specific claim about what applied
         // retroactively. See Booking.CancellationPolicy's own doc comment.
-        //
-        // Read unconditionally, not just on the fresh-cancel path below -
-        // Cancel() only ever sets BookingStatus, never CancellationPolicy/
-        // CheckIn/TotalPrice, so this is exactly as valid on an idempotent
-        // recancel, and ComputeRefund below needs it either way.
         CancellationPolicy cancellationPolicy = booking.CancellationPolicy ?? CancellationPolicy.CreateDefault();
 
-        // Shared by the fresh-cancel enqueue below and the recancel fallback
-        // further down - same formula, deliberately parameterized on "as of
-        // what date" rather than always using `today`, since those two call
-        // sites need different anchors (see the recancel branch's own
-        // comment for why). Cancelling on or after check-in day itself
-        // lands on the same strictest applicable tier as cancelling the
-        // moment check-in starts, not an undefined negative day count. The
-        // division has to happen first, in plain decimal, before the one
-        // Money multiplication - see Money's own doc comment on why
-        // `a * b / c` and `a * (b / c)` aren't the same value for a type
-        // that rounds on every operation.
-        (Money Amount, decimal Percent) ComputeRefund(DateOnly asOf)
+        // Guest policy, and used in exactly one place: fixing the refund
+        // obligation's amount when the cancellation writes it. Every figure
+        // reported afterwards comes from that obligation through
+        // RefundDecision - recomputing policy at report time is how the
+        // response came to disagree with the refund actually recorded.
+        //
+        // Cancelling on or after check-in day itself lands on the same
+        // strictest applicable tier as cancelling the moment check-in starts,
+        // not an undefined negative day count. The division has to happen
+        // first, in plain decimal, before the one Money multiplication - see
+        // Money's own doc comment on why `a * b / c` and `a * (b / c)` aren't
+        // the same value for a type that rounds on every operation.
+        Money ComputeRefund(DateOnly asOf)
         {
             // Reads CheckIn/TotalPrice/CancellationPolicy only, none of which
             // Cancel() touches, so the pre-lock snapshot is as good as the
@@ -87,7 +80,7 @@ public class CancelBookingHandler(
             // disagree if the clock crossed a tier boundary between them.
             int daysBeforeCheckIn = Math.Max(booking.CheckIn.DayNumber - asOf.DayNumber, 0);
             decimal percent = cancellationPolicy.ResolveRefundPercent(daysBeforeCheckIn);
-            return (booking.TotalPrice * (percent / 100m), percent);
+            return booking.TotalPrice * (percent / 100m);
         }
 
         // Idempotent re-cancel skips re-enqueueing the outbox messages a
@@ -137,7 +130,7 @@ public class CancelBookingHandler(
             // caller could already read.
             RequireGuestEmailForLinkAccess(access, request.GuestEmail);
 
-            (Money refundAmount, decimal refundPercent) = ComputeRefund(today);
+            Money refundAmount = ComputeRefund(today);
 
             // Everything that must survive a retry is built INSIDE the
             // delegate, and that placement is the whole point rather than a
@@ -376,11 +369,9 @@ public class CancelBookingHandler(
                     outcome.Booking, refundAmount: null, currency: null, refundPercent: null, refundPending: false);
             }
 
-            // Owed but not yet settled. The computed figure stands in, flagged
-            // pending - the obligation guarantees a refund happens, and a later
-            // re-cancel reports whatever it settled on.
-            return BuildResponse(
-                outcome.Booking, refundAmount.Amount, refundAmount.Currency, refundPercent, refundPending: true);
+            // Owed but not yet settled - reported as the resolver will settle it,
+            // from the obligation this request just committed.
+            return await BuildPendingRefundResponseAsync(outcome.Booking, payment, cancellationToken);
         }
 
         // Everything below serves the idempotent re-cancel only, so these are
@@ -441,25 +432,55 @@ public class CancelBookingHandler(
             return BuildResponse(booking, refundAmount: null, currency: null, refundPercent: null, refundPending: false);
         }
 
-        // A Succeeded transaction exists but nothing has reversed it yet -
-        // a refund is guaranteed, but the figure still has to be resolved
-        // here since no snapshot exists yet.
-        //
-        // Anchored to when this booking was actually cancelled, not
-        // `today` - on a fresh cancel those are the same moment, but on a
-        // recancel whose earlier dispatch hasn't landed, `today` could
-        // cross a tier boundary since the original cancel and disagree
-        // with the amount already baked into the queued
-        // ReverseTransactionOutboxMessage payload. booking.ModifiedAt
-        // reflects the SaveChangesAsync that ran Cancel() - nothing else
-        // touches a Cancelled booking - so it's a reliable stand-in for
-        // the original cancellation date.
-        DateOnly cancelledOn = PropertyTimeZone.ToLocalDate(
-            booking.ModifiedAt ?? timeProvider.GetUtcNow(), booking.TimeZoneId);
-        (Money pendingRefundAmount, decimal pendingRefundPercent) = ComputeRefund(cancelledOn);
+        // A Succeeded transaction exists but nothing has reversed it yet - a
+        // refund is guaranteed, and reported as it will be settled.
+        return await BuildPendingRefundResponseAsync(booking, paymentState, cancellationToken);
+    }
 
-        return BuildResponse(
-            booking, pendingRefundAmount.Amount, pendingRefundAmount.Currency, pendingRefundPercent, refundPending: true);
+    /// <summary>
+    ///     A refund owed and not yet recorded, described by the same decision the
+    ///     resolver will make.
+    ///     <para>
+    ///         Both branches used to recompute guest policy here with
+    ///         ComputeRefund - the second party computing the number the
+    ///         obligation exists to compute once. It disagreed with the resolver
+    ///         in both cases that differ from guest policy: an expired booking,
+    ///         whose obligation carries the full price, and a payment that
+    ///         succeeded after its cancellation, which buys nothing and is
+    ///         refunded in full. A guest was shown 50% pending against a durable
+    ///         100%.
+    ///     </para>
+    ///     <para>
+    ///         Guest policy still belongs to ComputeRefund at the one moment it
+    ///         is decided: when the obligation is written. After that, the
+    ///         obligation is the input and RefundDecision is the rule.
+    ///     </para>
+    /// </summary>
+    private async Task<CancelBookingResponse> BuildPendingRefundResponseAsync(
+        Booking booking, PaymentStateSnapshot payment, CancellationToken cancellationToken)
+    {
+        RefundObligation? obligation = await dbContext.RefundObligations.AsNoTracking()
+            .SingleOrDefaultAsync(o => o.BookingId == booking.Id, cancellationToken);
+
+        // No obligation means no cancellation explains this payment - unreachable
+        // for a booking either cancelling path cancelled, since both write one in
+        // the cancellation's own transaction. Reported as what would then happen
+        // to it: its confirmation reaches a cancelled booking and the whole
+        // payment is refunded as unusable.
+        Money amount = obligation is null
+            ? payment.Amount
+            : RefundDecision.For(
+                payment.Amount,
+                payment.SucceededAt,
+                obligation.CancelledAt,
+                Money.Of(obligation.PolicyRefundAmount, obligation.Currency)).Amount;
+
+        // Against what was paid, the same ratio the settled branch reports, so a
+        // pending figure and the refund it becomes cannot disagree on percent
+        // either. Guarded for the reason given there.
+        decimal? percent = payment.Amount.Amount == 0m ? null : amount.Amount / payment.Amount.Amount * 100m;
+
+        return BuildResponse(booking, amount.Amount, amount.Currency, percent, refundPending: true);
     }
 
     /// <summary>

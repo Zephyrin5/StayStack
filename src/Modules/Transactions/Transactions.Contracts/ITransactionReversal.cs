@@ -160,6 +160,13 @@ public record PaymentStateSnapshot
     ///     question "is a refund owed" used to be answered by a second call.
     /// </summary>
     public bool AwaitingRefund { get; init; }
+
+    /// <summary>
+    ///     When the payment succeeded, null on rows predating that column. The
+    ///     input a caller needs to ask RefundDecision what an outstanding refund
+    ///     will come to, rather than recomputing it by another rule.
+    /// </summary>
+    public DateTimeOffset? SucceededAt { get; init; }
 }
 
 public record TransactionRefundSnapshot

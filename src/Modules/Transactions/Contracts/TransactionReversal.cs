@@ -148,20 +148,15 @@ internal class TransactionReversal(
         // Step 3 - how much. Both inputs are committed facts by now, which is
         // the entire point of resolving here rather than at either writer.
         //
-        // Paid, then cancelled: the guest bought a stay and gave it up, so the
-        // cancellation policy applies. Cancelled, then paid: that payment
-        // bought nothing, so all of it goes back.
-        //
-        // A null SucceededAt is a row from before that column existed. It takes
-        // the policy refund - unknown history, the conservative answer - and
-        // never "somebody else owns this", which is the inference that produced
-        // refunds nobody wrote.
-        bool paidAfterTheCancellation =
-            transaction.SucceededAt is { } succeeded && succeeded > obligation.CancelledAt;
+        // RefundDecision, not an inline rule: CancelBookingHandler reports the
+        // pending amount from the same function, and when the two computed it
+        // separately they disagreed on every expiry and every payment that
+        // landed after its cancellation.
+        RefundDecision decision = RefundDecision.For(transaction.Amount, transaction.SucceededAt, obligation);
 
-        Money amount = paidAfterTheCancellation ? transaction.Amount : obligation.PolicyRefundAmount;
+        Money amount = decision.Amount;
 
-        RefundCause cause = paidAfterTheCancellation
+        RefundCause cause = decision.PaidAfterTheCancellation
             ? RefundCause.PaymentUnusable
             : obligation.Cause == BookingCancellationCause.Expiry
                 ? RefundCause.BookingExpired
@@ -286,7 +281,8 @@ internal class TransactionReversal(
                 Amount = transaction.Amount,
                 RefundAmount = transaction.RefundAmount,
                 RefundPending = transaction.TransactionStatus == TransactionStatus.RefundPending,
-                AwaitingRefund = transaction.TransactionStatus == TransactionStatus.Succeeded
+                AwaitingRefund = transaction.TransactionStatus == TransactionStatus.Succeeded,
+                SucceededAt = transaction.SucceededAt
             };
     }
 
