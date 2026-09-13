@@ -36,7 +36,7 @@ public partial class TransactionsOutboxDispatcher(
                     // MarkTransactionSucceededHandler's original inline
                     // branch, moved here since it now runs after the outbox
                     // dispatch rather than inline in the handler.
-                    await ResolveRefundAsync(payload.BookingId, cancellationToken);
+                    await ResolveRefundAsync(payload.TransactionId, cancellationToken);
                 }
 
                 break;
@@ -109,7 +109,7 @@ public partial class TransactionsOutboxDispatcher(
 
         // Not confirmed, or gone entirely: the payment bought nothing, which
         // is the case this compensation was written for.
-        await ResolveRefundAsync(payload.BookingId, cancellationToken);
+        await ResolveRefundAsync(payload.TransactionId, cancellationToken);
 
         message.ProcessedAt = message.DeadLetteredAt;
         message.DeadLetteredAt = null;
@@ -147,12 +147,16 @@ public partial class TransactionsOutboxDispatcher(
     ///         is somebody else's job to answer.
     ///     </para>
     /// </summary>
-    private Task ResolveRefundAsync(Guid bookingId, CancellationToken cancellationToken) =>
+    private Task ResolveRefundAsync(Guid transactionId, CancellationToken cancellationToken) =>
         // RefundUnusablePaymentAsync, not ResolveRefundAsync. Both reach the
         // same decision when an obligation exists; they differ when none does,
         // and that difference is money. This path has already established the
         // payment could not become a stay, so a booking with no cancellation
         // behind it - gone entirely, or a hold lost underneath it - is owed the
         // whole amount rather than nothing.
-        transactionReversal.RefundUnusablePaymentAsync(bookingId, cancellationToken);
+        // By transaction id. This path knows exactly which payment attempt it
+        // is about - the message has carried the id all along - and scanning by
+        // booking is what turned a legal RefundPending + Succeeded pair into an
+        // exception on every retry.
+        transactionReversal.RefundUnusablePaymentByTransactionAsync(transactionId, cancellationToken);
 }

@@ -4,6 +4,7 @@ using Bookings.Features.Common;
 using Bookings.Outbox;
 using Dapper;
 using System.Data.Common;
+using BuildingBlocks.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Bookings.Serialization;
@@ -201,6 +202,24 @@ public class CancelBookingHandler(
                         cancellationToken: cancellationToken));
                 }
 
+                // The payment lock, alongside the row lock above rather than
+                // instead of it. FOR UPDATE already excludes anything that can
+                // reach this row through Bookings; it cannot be taken by
+                // Transactions, which would have to name this table to do so.
+                // So initiation agrees on an advisory key instead - see
+                // BuildingBlocks.Persistence.BookingPaymentLock.
+                //
+                // Inside the same transaction, so it is released with it
+                // whichever way it ends.
+                if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
+                {
+                    await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
+                        AdvisoryLock.AcquireExclusiveSql,
+                        new { LockKey = BookingPaymentLock.KeyFor(request.BookingId) },
+                        transaction.GetDbTransaction(),
+                        cancellationToken: cancellationToken));
+                }
+
                 Booking? locked = await dbContext.Bookings
                     .SingleOrDefaultAsync(b => b.Id == request.BookingId, cancellationToken);
 
@@ -321,36 +340,29 @@ public class CancelBookingHandler(
             // The persisted snapshot cannot disagree with itself that way: if a
             // refund is recorded, it is reported; if not, this is a cancellation
             // with nothing settled against it yet.
-            TransactionRefundSnapshot? settled =
-                await transactionReversal.GetRefundSnapshotAsync(outcome.Booking.Id, cancellationToken);
+            // One read, and that is the point. This used to be two - the refund
+            // snapshot, then "is anything owed" - and a dispatcher or the sweep
+            // can move the payment Succeeded -> RefundPending between them. The
+            // first would see no refund, the second no succeeded payment, and
+            // the response reported neither: no refund at all, describing a
+            // state that never existed.
+            //
+            // Two reads of moving state cannot be made coherent by reordering
+            // them. There has to be one.
+            PaymentStateSnapshot? payment =
+                await transactionReversal.GetPaymentStateAsync(outcome.Booking.Id, cancellationToken);
 
-            if (settled is not null)
+            if (payment?.RefundAmount is { } recorded)
             {
                 return BuildResponse(
                     outcome.Booking,
-                    settled.RefundAmount.Amount,
-                    settled.RefundAmount.Currency,
-                    settled.Amount.Amount == 0m ? null : settled.RefundAmount.Amount / settled.Amount.Amount * 100m,
-                    refundPending: settled.RefundPending);
+                    recorded.Amount,
+                    recorded.Currency,
+                    payment.Amount.Amount == 0m ? null : recorded.Amount / payment.Amount.Amount * 100m,
+                    refundPending: payment.RefundPending);
             }
 
-            // Nothing settled yet, so ask whether anything is owed - and ask it
-            // *here*, after the lock and the dispatch, which is the whole of
-            // this fix. The same question used to be answered before the
-            // booking row was locked, so a payment succeeding in between - the
-            // exact window the obligation design exists for - produced a
-            // cancellation that recorded a refund and a response that denied
-            // one.
-            //
-            // Safe to read now precisely because the snapshot above missed: a
-            // reversal that had landed would have moved the transaction past
-            // Succeeded and been reported already, so a Succeeded transaction
-            // at this point means a payment exists with nothing yet refunded
-            // against it.
-            Money? owed = await transactionReversal.GetSucceededTransactionAmountAsync(
-                outcome.Booking.Id, cancellationToken);
-
-            if (owed is null)
+            if (payment is not { AwaitingRefund: true })
             {
                 // No payment at all - the ordinary cancellation, and the honest
                 // answer is no refund. Reporting the computed policy figure
@@ -379,10 +391,13 @@ public class CancelBookingHandler(
         // refunded booking reporting no refund on an idempotent recancel.
         // RefundPercent is derived from the snapshot's own ratio, not
         // resolved fresh, so it always matches what actually landed.
-        TransactionRefundSnapshot? refundSnapshot =
-            await transactionReversal.GetRefundSnapshotAsync(booking.Id, cancellationToken);
+        // The same single observation as the fresh-cancel branch above, and for
+        // the same reason: the pair of reads this replaces could straddle a
+        // Succeeded -> RefundPending transition and report neither state.
+        PaymentStateSnapshot? paymentState =
+            await transactionReversal.GetPaymentStateAsync(booking.Id, cancellationToken);
 
-        if (refundSnapshot is not null)
+        if (paymentState?.RefundAmount is { } settledRefund)
         {
             // Guarded rather than assumed. Transaction.Create's own
             // Guard.Against.NegativeOrZero means Amount is never zero here,
@@ -393,9 +408,9 @@ public class CancelBookingHandler(
             // into a 500 on a cancellation. Reporting a null percent
             // alongside a real amount is the honest answer if the
             // denominator ever is zero.
-            decimal? refundPercent = refundSnapshot.Amount.Amount == 0m
+            decimal? refundPercent = paymentState.Amount.Amount == 0m
                 ? null
-                : refundSnapshot.RefundAmount.Amount / refundSnapshot.Amount.Amount * 100m;
+                : settledRefund.Amount / paymentState.Amount.Amount * 100m;
 
             // Currency comes off the snapshot itself now. It used to be paired
             // back on here from booking.TotalPrice - the same currency, but
@@ -407,8 +422,8 @@ public class CancelBookingHandler(
             // whose refund was still queued was told the money had gone back
             // when it had only been asked for.
             return BuildResponse(
-                booking, refundSnapshot.RefundAmount.Amount, refundSnapshot.RefundAmount.Currency,
-                refundPercent, refundPending: refundSnapshot.RefundPending);
+                booking, settledRefund.Amount, settledRefund.Currency,
+                refundPercent, refundPending: paymentState.RefundPending);
         }
 
         // No snapshot yet - either there was never anything to refund, or a
@@ -417,10 +432,7 @@ public class CancelBookingHandler(
         // earlier recancel's, failed or hasn't run). The only way to tell
         // these apart deterministically, independent of whether dispatch
         // happens to land inline.
-        bool hasSucceededTransaction =
-            await transactionReversal.GetSucceededTransactionAmountAsync(booking.Id, cancellationToken) is not null;
-
-        if (!hasSucceededTransaction)
+        if (paymentState is not { AwaitingRefund: true })
         {
             return BuildResponse(booking, refundAmount: null, currency: null, refundPercent: null, refundPending: false);
         }

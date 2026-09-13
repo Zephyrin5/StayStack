@@ -10,7 +10,10 @@ using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using Transactions;
 using Transactions.Contracts;
+using Outbox;
 using Transactions.Entities;
+using Transactions.Outbox;
+using Transactions.Serialization;
 namespace IntegrationTests.Features.Transactions;
 
 // The refund decision spans two databases and therefore two commits: the amount
@@ -199,6 +202,237 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
         Assert.NotNull(obligation.ResolvedAt);
         Assert.Equal(100m, settled.RefundAmount!.Value.Amount);
         Assert.Equal(RefundCause.GuestCancellation, settled.RefundCause);
+    }
+
+    // Moves the transaction to RefundPending from a *different* scope, at the
+    // one moment that puts the resolver into its concurrency catch.
+    //
+    // The resolver reads the transaction, then asks for the obligation, then
+    // writes. Flipping the row during that middle call means its own write is
+    // made from a now-stale tracked entity - the in-memory status is still
+    // Succeeded so MarkRefundPending's guard passes, and the xmin token catches
+    // it at SaveChanges. That is the branch under test, and nothing else
+    // reaches it deterministically: a transaction already RefundPending on
+    // entry short-circuits at step 2 and never gets near the catch.
+    private sealed class RefundTheTransactionMidResolve(
+        IBookingLookup inner, IServiceScopeFactory scopes, Guid transactionId) : IBookingLookup
+    {
+        private int _fired;
+
+        public async Task<RefundObligationSnapshot?> GetRefundObligationAsync(
+            Guid bookingId, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _fired) == 1)
+            {
+                using IServiceScope scope = scopes.CreateScope();
+                AppTransactionsDbContext transactions =
+                    scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+
+                Transaction payment = await transactions.Transactions
+                    .SingleAsync(t => t.Id == transactionId, cancellationToken);
+
+                payment.MarkRefundPending(Money.Of(100m, Currency.KWD), RefundCause.GuestCancellation);
+                await transactions.SaveChangesAsync(cancellationToken);
+            }
+
+            return await inner.GetRefundObligationAsync(bookingId, cancellationToken);
+        }
+
+        public Task<BookingSummary?> GetBookingAsync(Guid bookingId, CancellationToken cancellationToken) =>
+            inner.GetBookingAsync(bookingId, cancellationToken);
+
+        public Task<BookingAccessResult?> VerifyBookingAccessAsync(
+            Guid bookingId, Guid? customerId, CancellationToken cancellationToken) =>
+            inner.VerifyBookingAccessAsync(bookingId, customerId, cancellationToken);
+
+        public Task<IReadOnlyList<BookingAccessResult>> GetConfirmedBookingsForCustomerAsync(
+            Guid customerId, DateOnly checkOutFrom, DateOnly checkOutTo, CancellationToken cancellationToken) =>
+            inner.GetConfirmedBookingsForCustomerAsync(customerId, checkOutFrom, checkOutTo, cancellationToken);
+
+        public Task<BookingAccessResult?> GetBookingDetailsAsync(Guid bookingId, CancellationToken cancellationToken) =>
+            inner.GetBookingDetailsAsync(bookingId, cancellationToken);
+
+        public Task MarkRefundObligationResolvedAsync(
+            Guid bookingId, DateTimeOffset resolvedAt, CancellationToken cancellationToken) =>
+            inner.MarkRefundObligationResolvedAsync(bookingId, resolvedAt, cancellationToken);
+    }
+
+    [Fact]
+    public async Task AResolverLosingTheRaceInsideADispatcher_StillMarksItsMessageProcessed()
+    {
+        // The previous race test calls the resolver directly, so it cannot see
+        // this at all: the damage is to an entity only the dispatcher is
+        // tracking.
+        //
+        // TransactionsOutboxDispatcher loads its OutboxMessage tracked on the
+        // scoped AppTransactionsDbContext and assigns ProcessedAt after the
+        // handler returns. The resolver's concurrency catch used to call
+        // ChangeTracker.Clear() on that same context, detaching the message -
+        // so ProcessedAt went to a detached entity, SaveChangesAsync wrote
+        // nothing, and the dispatch reported success over a message still
+        // pending. It self-healed on redelivery, which is worse rather than
+        // better: the reported outcome and the persisted state disagreed, and
+        // nothing anywhere said so.
+        (Guid bookingId, Guid transactionId) = await SeedCancelledAndPaidAsync(daysUntilCheckIn: 163);
+
+        Guid messageId = Guid.CreateVersion7();
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppTransactionsDbContext transactions =
+                scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+
+            transactions.Set<OutboxMessage>().Add(new OutboxMessage
+            {
+                Id = messageId,
+                Type = ConfirmBookingPaymentOutboxMessage.TypeName,
+                Payload = System.Text.Json.JsonSerializer.Serialize(
+                    new ConfirmBookingPaymentOutboxMessage(transactionId, bookingId),
+                    TransactionsJsonSerializerContext.Default.ConfirmBookingPaymentOutboxMessage),
+                CreatedAt = DateTimeOffset.UtcNow,
+                NextAttemptAt = DateTimeOffset.UtcNow
+            });
+
+            await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using (IServiceScope hostScope = factory.WithWebHostBuilder(builder =>
+                   builder.ConfigureServices(services =>
+                   {
+                       ServiceDescriptor original = services.Single(d => d.ServiceType == typeof(IBookingLookup));
+                       services.Remove(original);
+                       services.AddScoped<IBookingLookup>(sp => new RefundTheTransactionMidResolve(
+                           (IBookingLookup)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!),
+                           sp.GetRequiredService<IServiceScopeFactory>(),
+                           transactionId));
+                   })).Services.CreateScope())
+        {
+            await hostScope.ServiceProvider.GetRequiredService<TransactionsOutboxDispatcher>()
+                .DispatchPendingAsync(50, TestContext.Current.CancellationToken);
+        }
+
+        // From a fresh scope, because the whole defect is that the tracked
+        // instance and the row disagreed.
+        using IServiceScope assertScope = factory.Services.CreateScope();
+
+        OutboxMessage persisted = await assertScope.ServiceProvider
+            .GetRequiredService<AppTransactionsDbContext>()
+            .Set<OutboxMessage>().AsNoTracking()
+            .SingleAsync(m => m.Id == messageId, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(persisted.ProcessedAt);
+    }
+
+    [Fact]
+    public async Task ARefundPendingAttemptBesideASucceededOne_ResolvesTheRightOne()
+    {
+        // A state the schema permits and every booking-wide query used to throw
+        // on. The active-transaction index filters
+        // transaction_status IN ('Pending','Succeeded'), so a RefundPending
+        // attempt and a Succeeded one coexist legally - and SingleOrDefault
+        // over "this booking's transactions" then threw on every retry and
+        // every sweep pass for as long as both rows existed.
+        //
+        // Reachable in practice from an initiation racing a cancellation, which
+        // is why that race stopped being merely untidy.
+        (Guid bookingId, Guid refundedId) = await SeedCancelledAndPaidAsync(daysUntilCheckIn: 164);
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppTransactionsDbContext transactions =
+                scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+
+            // A is refunded already.
+            Transaction refunded = await transactions.Transactions
+                .SingleAsync(t => t.Id == refundedId, TestContext.Current.CancellationToken);
+            refunded.MarkRefundPending(Money.Of(100m, Currency.KWD), RefundCause.GuestCancellation);
+
+            await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        Guid secondId;
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppTransactionsDbContext transactions =
+                scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+
+            // B succeeded afterwards - the pair the old query could not read.
+            Transaction second = Transaction.Create(bookingId, Money.Of(200m, Currency.KWD));
+            second.MarkSucceeded(DateTimeOffset.UtcNow);
+            transactions.Transactions.Add(second);
+            await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
+            secondId = second.Id;
+        }
+
+        // Act - B's own confirmation, which names B by id.
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<ITransactionReversal>()
+                .RefundUnusablePaymentByTransactionAsync(secondId, TestContext.Current.CancellationToken);
+        }
+
+        using IServiceScope assertScope = factory.Services.CreateScope();
+        AppTransactionsDbContext db = assertScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+
+        // B is refunded in full - it bought nothing, and the obligation was
+        // already settled against A.
+        Transaction resolvedSecond = await db.Transactions.AsNoTracking()
+            .SingleAsync(t => t.Id == secondId, TestContext.Current.CancellationToken);
+        Assert.Equal(TransactionStatus.RefundPending, resolvedSecond.TransactionStatus);
+        Assert.Equal(200m, resolvedSecond.RefundAmount!.Value.Amount);
+
+        // A is untouched - its own refund stands at the policy figure.
+        Transaction untouched = await db.Transactions.AsNoTracking()
+            .SingleAsync(t => t.Id == refundedId, TestContext.Current.CancellationToken);
+        Assert.Equal(100m, untouched.RefundAmount!.Value.Amount);
+        Assert.Equal(RefundCause.GuestCancellation, untouched.RefundCause);
+    }
+
+    [Fact]
+    public async Task APaymentStateRead_DescribesOneMomentRatherThanTwo()
+    {
+        // 4b, at the level the defect actually lived: cancellation asked two
+        // questions - "is there a refund" then "is anything owed" - and a
+        // dispatcher or the sweep can move the payment Succeeded ->
+        // RefundPending in between. The first read saw no refund, the second no
+        // succeeded payment, and the response reported neither state.
+        //
+        // A single read cannot produce that answer, and this pins the property
+        // directly: for a payment in the RefundPending state, one observation
+        // reports the refund rather than "nothing to refund".
+        (Guid bookingId, Guid transactionId) = await SeedCancelledAndPaidAsync(daysUntilCheckIn: 165);
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppTransactionsDbContext transactions =
+                scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+
+            Transaction payment = await transactions.Transactions
+                .SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
+
+            payment.MarkRefundPending(Money.Of(100m, Currency.KWD), RefundCause.GuestCancellation);
+            await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using IServiceScope readScope = factory.Services.CreateScope();
+
+        PaymentStateSnapshot? state = await readScope.ServiceProvider.GetRequiredService<ITransactionReversal>()
+            .GetPaymentStateAsync(bookingId, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(state);
+
+        // The refund is visible. Under the old pair, the second read - which
+        // asked only for Succeeded - reported nothing for this exact state, and
+        // whichever of the two the response happened to trust decided the
+        // answer.
+        Assert.Equal(100m, state.RefundAmount!.Value.Amount);
+        Assert.True(state.RefundPending);
+
+        // And it is not simultaneously reported as still awaiting one, which is
+        // the contradiction the two separate reads could produce.
+        Assert.False(state.AwaitingRefund);
+        Assert.Equal(200m, state.Amount.Amount);
     }
 
     [Fact]

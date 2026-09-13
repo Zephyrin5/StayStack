@@ -21,7 +21,7 @@ namespace UnitTests.Features.Bookings.CancelBooking;
 // refund" from "a refund is queued but the inline dispatch attempt hasn't
 // landed yet" - both used to read back as every refund field being null. See
 // CancelBookingResponse.RefundPending's own doc comment and
-// ITransactionReversal.GetSucceededTransactionAmountAsync.
+// ITransactionReversal.GetPaymentStateAsync.
 public class CancelBookingHandlerTests : IDisposable
 {
     private readonly SqliteConnection _connection;
@@ -76,14 +76,13 @@ public class CancelBookingHandlerTests : IDisposable
 
         Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
         transactionReversalMock
-            .Setup(x => x.GetSucceededTransactionAmountAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Money.Of(200m, Currency.KWD));
-        transactionReversalMock
             .Setup(x => x.ResolveRefundAsync(booking.Id, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Transactions is temporarily unreachable."));
+        // One observation now, replacing the pair of reads that could straddle
+        // a Succeeded -> RefundPending transition. Paid, nothing refunded yet.
         transactionReversalMock
-            .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((TransactionRefundSnapshot?)null); // nothing landed yet - the reversal never ran
+            .Setup(x => x.GetPaymentStateAsync(booking.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentStateSnapshot { Amount = Money.Of(200m, Currency.KWD), AwaitingRefund = true });
 
         BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
             _dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
@@ -121,9 +120,6 @@ public class CancelBookingHandlerTests : IDisposable
         Booking booking = await SeedBookingAsync();
 
         Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
-        transactionReversalMock
-            .Setup(x => x.GetSucceededTransactionAmountAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Money?)null);
 
         BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
             _dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
@@ -152,20 +148,24 @@ public class CancelBookingHandlerTests : IDisposable
         // Arrange - a booking that was already cancelled and whose refund
         // already reached the refund sub-lifecycle (transaction moved past
         // Succeeded to RefundPending/Refunded) on some earlier call.
-        // GetSucceededTransactionAmountAsync no longer sees it - that's the
+        // GetPaymentStateAsync sees the refund rather than "nothing succeeded",
         // whole point of the state having moved on - so it must not be
-        // consulted before GetRefundSnapshotAsync, which still can.
+        // which is exactly what one coherent read buys.
         Booking booking = await SeedBookingAsync();
         booking.Cancel(DateTimeOffset.UtcNow);
         await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
+        // Refunded and settled - the transaction has moved past Succeeded, so
+        // the single read reports the refund rather than "nothing to refund".
         transactionReversalMock
-            .Setup(x => x.GetSucceededTransactionAmountAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Money?)null);
-        transactionReversalMock
-            .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new TransactionRefundSnapshot { Amount = Money.Of(200m, Currency.KWD), RefundAmount = Money.Of(100m, Currency.KWD), RefundPending = false });
+            .Setup(x => x.GetPaymentStateAsync(booking.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentStateSnapshot
+            {
+                Amount = Money.Of(200m, Currency.KWD),
+                RefundAmount = Money.Of(100m, Currency.KWD),
+                RefundPending = false
+            });
 
         BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
             _dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
@@ -231,14 +231,11 @@ public class CancelBookingHandlerTests : IDisposable
 
         Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
         transactionReversalMock
-            .Setup(x => x.GetSucceededTransactionAmountAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Money.Of(200m, Currency.KWD));
-        transactionReversalMock
             .Setup(x => x.ResolveRefundAsync(booking.Id, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Transactions is temporarily unreachable."));
         transactionReversalMock
-            .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((TransactionRefundSnapshot?)null); // nothing ever lands, on either call
+            .Setup(x => x.GetPaymentStateAsync(booking.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentStateSnapshot { Amount = Money.Of(200m, Currency.KWD), AwaitingRefund = true });
 
         BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
             dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
@@ -306,12 +303,8 @@ public class CancelBookingHandlerTests : IDisposable
 
         Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
         transactionReversalMock
-            .Setup(x => x.GetSucceededTransactionAmountAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Money.Of(200m, Currency.KWD));
-        transactionReversalMock
-            .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((TransactionRefundSnapshot?)null);
-
+            .Setup(x => x.GetPaymentStateAsync(booking.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentStateSnapshot { Amount = Money.Of(200m, Currency.KWD), AwaitingRefund = true });
         BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
             dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
             new Mock<IPromotionRedemption>().Object, timeProvider, NullLogger<BookingsOutboxDispatcher>.Instance);
@@ -376,8 +369,8 @@ public class CancelBookingHandlerTests : IDisposable
 
         Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
         transactionReversalMock
-            .Setup(x => x.GetSucceededTransactionAmountAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Money.Of(200m, Currency.KWD));
+            .Setup(x => x.GetPaymentStateAsync(booking.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentStateSnapshot { Amount = Money.Of(200m, Currency.KWD), AwaitingRefund = true });
 
         if (reversalLandsInline)
         {
@@ -385,13 +378,12 @@ public class CancelBookingHandlerTests : IDisposable
             // the old code re-read, a snapshot existed - the exact state that
             // used to flip the response to RefundPending: false.
             transactionReversalMock
-                .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
-                // RefundPending: true, because that is what landing means -
-                // ReverseTransactionAsync moves the transaction to
-                // RefundPending, so a snapshot taken straight afterwards
-                // describes a refund that has been asked for, not one that
-                // has settled.
-                .ReturnsAsync(new TransactionRefundSnapshot
+                .Setup(x => x.GetPaymentStateAsync(booking.Id, It.IsAny<CancellationToken>()))
+                // RefundPending: true, because that is what landing means - the
+                // resolver moves the transaction to RefundPending, so a read
+                // taken straight afterwards describes a refund that has been
+                // asked for, not one that has settled.
+                .ReturnsAsync(new PaymentStateSnapshot
                 {
                     Amount = Money.Of(200m, Currency.KWD),
                     RefundAmount = Money.Of(200m, Currency.KWD),
@@ -403,9 +395,6 @@ public class CancelBookingHandlerTests : IDisposable
             transactionReversalMock
                 .Setup(x => x.ResolveRefundAsync(booking.Id, It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new InvalidOperationException("Transactions is temporarily unreachable."));
-            transactionReversalMock
-                .Setup(x => x.GetRefundSnapshotAsync(booking.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync((TransactionRefundSnapshot?)null);
         }
 
         BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(

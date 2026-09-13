@@ -2,6 +2,9 @@ using Bookings.Contracts;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using Mediator;
+using BuildingBlocks.Persistence;
+using Dapper;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Transactions.Entities;
@@ -48,6 +51,67 @@ public class InitiateTransactionHandler(
         {
             throw new BookingNotPayableException(request.BookingId);
         }
+
+        // Everything from here runs under the booking's payment lock, and that
+        // is the whole of this change.
+        //
+        // The check above and the insert below used to be independent
+        // operations, so a cancellation committing between them produced a
+        // pending payment against a cancelled booking. Untidy on its own - no
+        // money moves - but it also manufactures a state the refund resolver
+        // cannot read: if that cancellation moved an earlier payment to
+        // RefundPending, the active-transaction check below matches nothing,
+        // this insert succeeds, and the booking ends up with a RefundPending
+        // and a Succeeded transaction at once. The active index permits that
+        // pair, and any booking-wide query that assumes one row then throws on
+        // every retry and every sweep pass, forever.
+        //
+        // Ordering is booking then transaction, which is the rule cancellation
+        // and payment confirmation already follow. Nothing new to deadlock on.
+        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
+
+        return await strategy.ExecuteAsync(async () =>
+        {
+            dbContext.ChangeTracker.Clear();
+
+            await using IDbContextTransaction scope =
+                await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+            if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
+            {
+                await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
+                    AdvisoryLock.AcquireExclusiveSql,
+                    new { LockKey = BookingPaymentLock.KeyFor(request.BookingId) },
+                    scope.GetDbTransaction(),
+                    cancellationToken: cancellationToken));
+            }
+
+            // Re-read under the lock. Taking the lock only orders this against
+            // a cancellation - it says nothing about what that cancellation did
+            // before this got here, which is the same lesson the archival path
+            // learned.
+            // Re-read under the lock. Taking the lock only orders this against
+            // a cancellation - it says nothing about what that cancellation did
+            // before this got here, which is the same lesson the archival path
+            // learned.
+            BookingAccessResult? current = await bookingLookup.GetBookingDetailsAsync(
+                request.BookingId, cancellationToken);
+
+            if (current is null || !current.IsPending)
+            {
+                throw new BookingNotPayableException(request.BookingId);
+            }
+
+            InitiateTransactionResponse created = await InsertAsync(request, current, cancellationToken);
+
+            await scope.CommitAsync(cancellationToken);
+            return created;
+        });
+    }
+
+    private async ValueTask<InitiateTransactionResponse> InsertAsync(
+        InitiateTransactionRequest request, BookingAccessResult booking, CancellationToken cancellationToken)
+    {
 
         // A Pending or Succeeded transaction blocks a new one - Failed
         // leaves room for a retry, and the refund states are moot since a

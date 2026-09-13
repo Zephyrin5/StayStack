@@ -147,3 +147,40 @@ The fix is one idea applied twice: query for `Succeeded` **or** `RefundPending`,
 - **That catch also had to widen, and only an intermittent failure revealed it.** Two concurrent resolvers each load the transaction as `Succeeded`, so both pass `MarkRefundPending`'s in-memory guard and the loser is caught by the xmin concurrency token instead - `DbUpdateConcurrencyException`, not `TransactionAlreadyFinalizedException`. It now catches both and, rather than inferring from which arrived, re-reads to confirm a refund exists before marking anything.
 - **A backstop sweep must not be ordered by the event that created its rows.** Both writers record an obligation whether or not a payment succeeded, and an unpaid one correctly resolves to nothing - so ordered by `CancelledAt` and capped per run, a backlog of unpaid rows held the front of the queue permanently and no newer obligation with money behind it was ever reached. That is the ordinary workload, not an error: most cancellations are of unpaid bookings. `NextAttemptAt` with backoff fixes it, and `Attempts` makes the cap warning legible - a capped batch of high-attempt rows means "waiting on payments that may never come", a capped batch of fresh ones means genuinely behind.
 - **Do not resolve an unpaid obligation to clear it.** A late payment is exactly the case the row exists for; marking it settled to tidy the queue throws that case away.
+
+## Amendment: payment-attempt identity, and who may clear a change tracker
+
+Three of the four defects in this round were the same wrong assumption - *one payment attempt per booking* - and nothing in the schema says so.
+
+> **A booking may have multiple payment transactions. Any path that knows which attempt it concerns resolves by transaction id. Any path that is genuinely booking-wide must tolerate several, ordered deterministically. `ix_transactions_booking_id_active` constrains `Pending` and `Succeeded` only and is not a uniqueness guarantee for anything else.**
+
+`ConfirmBookingPaymentOutboxMessage` has carried `TransactionId` since it was written, and the confirmation path scanned by booking anyway - which is what manufactured the ambiguity it then could not read. A `RefundPending` attempt beside a `Succeeded` one is legal, and every `SingleOrDefaultAsync` over "this booking's transactions" threw on it, on every retry and every sweep pass, for as long as both rows existed.
+
+Two supporting notes:
+
+- **Order by `Id`, not `SucceededAt`.** Version-7 GUIDs are already creation-ordered, they are never null - `SucceededAt` is, on rows predating that column - and SQLite cannot `ORDER BY` a `DateTimeOffset` at all, which the unit tests run on.
+- **The pair is reachable, which is why initiation had to be locked.** `InitiateTransactionHandler` checked the booking was payable and inserted as independent operations, so a cancellation committing between them created a payment against a cancelled booking - and if that cancellation had moved an earlier attempt to `RefundPending`, the active-transaction check matched nothing and the pair was born. What was filed as "untidy, no money moves" was manufacturing the state that breaks refund resolution permanently.
+
+### The lock had to be advisory, again
+
+Cancellation locks the booking row with `FOR UPDATE`, which is database-wide and would exclude a payment perfectly well - except that Transactions cannot take it without naming `bookings`, the coupling docs/adr/0004 exists to prevent. `BookingPaymentLock` is the same answer `UnitAvailabilityLock` gave to the same question: a key both sides agree on without either reaching into the other's schema. Taken exclusively by both, since two concurrent initiations are already refused by the active index and there is no parallelism worth preserving.
+
+Ordering is unchanged - booking, then transaction - so nothing new was introduced for a deadlock to form around.
+
+### Only the owner of a transaction may clear its change tracker
+
+> **A component that does not own the transaction does not clear the change tracker. Discard the specific entity you need to discard.**
+
+`TransactionReversal`'s concurrency catch called `ChangeTracker.Clear()` on a scoped `AppTransactionsDbContext` - the same instance `TransactionsOutboxDispatcher` was using to track the `OutboxMessage` it was in the middle of processing. The message was detached, `ProcessedAt` was assigned to a detached entity, `SaveChangesAsync` wrote nothing, and the dispatcher reported success over a message still pending.
+
+It self-healed on redelivery, which is worse rather than better: the reported outcome and the persisted state disagreed and nothing said so. `Entry(entity).ReloadAsync()` discards exactly what needs discarding.
+
+This is the second time a shared-context `Clear()` has caused a problem here; the first was `OutboxDispatcherBase` clearing it out from under a handler.
+
+### One observation, not two reads of moving state
+
+`CancelBookingHandler` asked for the refund snapshot and then for the succeeded amount. A dispatcher or the sweep can move a payment `Succeeded -> RefundPending` between them, and then the first sees no refund and the second sees no payment - so the response reported no refund at all, describing neither the state before nor the state after.
+
+Reordering cannot fix that; there has to be one read. `GetPaymentStateAsync` returns status, original amount and refund amount together, and both branches of cancellation derive from it.
+
+The same drift had appeared inside the resolver: the repair step accepted `RefundPending` alone while the concurrency catch asked `!= Succeeded`. One counted too few - a refund reaching `Refunded` or `RefundFailed` before its marker was written became invisible and its obligation never settled - and the other too many, since `Failed` means no refund was written at all. Both now call one predicate.

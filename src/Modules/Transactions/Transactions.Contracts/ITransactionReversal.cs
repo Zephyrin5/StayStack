@@ -47,6 +47,26 @@ public interface ITransactionReversal
     Task<TransactionRefundSnapshot?> GetRefundSnapshotAsync(Guid bookingId, CancellationToken cancellationToken);
 
     /// <summary>
+    ///     Everything a caller needs to describe this booking's payment, read
+    ///     once.
+    ///     <para>
+    ///         CancelBookingHandler used to call GetRefundSnapshotAsync and then
+    ///         GetSucceededTransactionAmountAsync. A dispatcher or the sweep can
+    ///         move a payment Succeeded -> RefundPending between the two, and
+    ///         then the first read sees no refund and the second sees no
+    ///         succeeded payment - so the response reported no refund at all,
+    ///         describing neither the state before nor the state after.
+    ///     </para>
+    ///     <para>
+    ///         Two reads of moving state cannot be made coherent by ordering
+    ///         them differently; there has to be one. Null means this booking
+    ///         has no payment worth reporting - nothing succeeded and nothing
+    ///         refunded.
+    ///     </para>
+    /// </summary>
+    Task<PaymentStateSnapshot?> GetPaymentStateAsync(Guid bookingId, CancellationToken cancellationToken);
+
+    /// <summary>
     ///     Decides and records the refund a cancelled booking is owed, once.
     ///     <para>
     ///         The single place the amount is chosen, replacing two paths that
@@ -95,6 +115,51 @@ public interface ITransactionReversal
     ///     </para>
     /// </summary>
     Task<decimal?> RefundUnusablePaymentAsync(Guid bookingId, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     The same as <see cref="RefundUnusablePaymentAsync"/>, for a caller
+    ///     that knows <em>which</em> payment attempt it is talking about.
+    ///     <para>
+    ///         A booking may have several transactions. The active-transaction
+    ///         index constrains Pending and Succeeded to one at a time and says
+    ///         nothing about the rest, so a RefundPending attempt and a
+    ///         Succeeded one can coexist perfectly legally - and a booking-wide
+    ///         lookup written as SingleOrDefault then throws on every retry and
+    ///         every sweep pass for as long as both rows exist.
+    ///     </para>
+    ///     <para>
+    ///         ConfirmBookingPaymentOutboxMessage has carried the transaction id
+    ///         all along. Scanning by booking from a path that already knows the
+    ///         answer is what manufactured the ambiguity.
+    ///     </para>
+    /// </summary>
+    Task<decimal?> RefundUnusablePaymentByTransactionAsync(
+        Guid transactionId, CancellationToken cancellationToken);
+}
+
+/// <summary>
+///     One observation of a booking's payment: what was charged, what refund
+///     exists if any, and whether that refund is still outstanding.
+/// </summary>
+public record PaymentStateSnapshot
+{
+    public required Money Amount { get; init; }
+
+    /// <summary>Null when nothing has been refunded against this payment.</summary>
+    public Money? RefundAmount { get; init; }
+
+    /// <summary>
+    ///     True only while the refund is outstanding - RefundPending. Refunded
+    ///     and RefundFailed are both settled outcomes, the second needing
+    ///     intervention rather than waiting.
+    /// </summary>
+    public bool RefundPending { get; init; }
+
+    /// <summary>
+    ///     Whether money was collected and has not been given back - the
+    ///     question "is a refund owed" used to be answered by a second call.
+    /// </summary>
+    public bool AwaitingRefund { get; init; }
 }
 
 public record TransactionRefundSnapshot
