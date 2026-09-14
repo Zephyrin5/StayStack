@@ -69,11 +69,31 @@ internal class PromotionRedemption(
         // rejected duplicate attempt never burns a redemption slot.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
-        Guid redemptionId = await strategy.ExecuteAsync(async () =>
+        // Once, outside the retry (docs/adr/0025). Minted inside, a retry after a
+        // commit that lost its acknowledgement held a different id, re-ran the
+        // cap increment, and met the first attempt's committed row on the
+        // one-per-email index - reporting the guest's own redemption as "already
+        // used by this email address" and failing the checkout it belonged to.
+        Guid redemptionId = Guid.CreateVersion7();
+
+        await strategy.ExecuteAsync(async () =>
         {
             await using IDbContextTransaction transaction =
                 await dbContext.Database.BeginTransactionAsync(cancellationToken);
             IDbConnection connection = dbContext.Database.GetDbConnection();
+
+            // An earlier attempt may already have committed. Asked first, before
+            // the cap increment and the insert, both of which would otherwise
+            // judge this redemption against a table already holding it.
+            bool alreadyRedeemed = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+                """SELECT EXISTS (SELECT 1 FROM promotion_redemptions WHERE id = @Id);""",
+                new { Id = redemptionId }, transaction.GetDbTransaction(), cancellationToken: cancellationToken));
+
+            if (alreadyRedeemed)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return;
+            }
 
             // Every condition that decides whether this redemption is LEGAL
             // lives in this one predicate, evaluated against the row this
@@ -133,8 +153,6 @@ internal class PromotionRedemption(
                 throw new PromotionInvalidException(DescribeRejection(code, state));
             }
 
-            Guid newRedemptionId = Guid.CreateVersion7();
-
             const string insertSql = """
                                      INSERT INTO promotion_redemptions (id, promotion_id, booking_id, guest_email, discount_amount, currency, redeemed_at)
                                      VALUES (@Id, @PromotionId, @BookingId, @GuestEmail, @DiscountAmount, @Currency, @RedeemedAt);
@@ -146,7 +164,7 @@ internal class PromotionRedemption(
                     insertSql,
                     new
                     {
-                        Id = newRedemptionId,
+                        Id = redemptionId,
                         PromotionId = promotion.Id,
                         BookingId = bookingId,
                         GuestEmail = normalizedEmail,
@@ -170,7 +188,6 @@ internal class PromotionRedemption(
             }
 
             await transaction.CommitAsync(cancellationToken);
-            return newRedemptionId;
         });
 
         return new PromotionRedemptionResult { RedemptionId = redemptionId, DiscountAmount = discountAmount };
