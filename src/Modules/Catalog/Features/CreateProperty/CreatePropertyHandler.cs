@@ -1,3 +1,5 @@
+using Persistence;
+using Microsoft.EntityFrameworkCore;
 using BuildingBlocks.Localization;
 using Catalog.Entities;
 using Hosts.Contracts;
@@ -30,7 +32,20 @@ public class CreatePropertyHandler(
         Property property = Property.Create(propertyId, hostId, request.PropertyType, name, request.City, request.TimeZoneId);
 
         dbContext.Properties.Add(property);
-        await dbContext.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf<Property>(dbContext))
+        {
+            // A violation of this row's own primary key means an earlier attempt
+            // committed and lost its acknowledgement - answer with that row
+            // (Persistence.CommittedInsertRecovery). Nothing else is caught here:
+            // no other unique index on this table has a domain answer.
+            Property committed = (await dbContext.FindOwnCommittedInsertAsync<Property>(ex, property.Id, cancellationToken))!;
+            return new CreatePropertyResponse { PropertyId = committed.Id };
+        }
 
         return new CreatePropertyResponse { PropertyId = property.Id };
     }

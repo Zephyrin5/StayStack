@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc.Testing;
 using Bogus;
 using Hosts;
 using Hosts.Entities;
@@ -120,5 +121,33 @@ public class CreateHostTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+    // A bare SaveChangesAsync runs under the execution strategy too. After a lost
+    // acknowledgement it retried into its own committed row on the primary key,
+    // and the caller was told 500 for a host that exists.
+    [Fact]
+    public async Task CreateHost_WhoseSaveLosesItsAcknowledgement_ReturnsTheHostItCreated()
+    {
+        string adminAccessToken = await SignInAsSeededAdminAsync();
+        string contactEmail = $"lost-ack-{Guid.NewGuid():N}@example.com";
+
+        CommitFault<AppHostsDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppHostsDbContext>(context =>
+            context.ChangeTracker.Entries<Host>().Any(e => e.Entity.ContactEmail == contactEmail));
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
+
+        HttpResponseMessage response = await host.CreateClient().SendAsync(
+            CreateHostHttpRequest(new CreateHostRequest { BusinessName = "Lost Ack Stays", ContactEmail = contactEmail }, adminAccessToken),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the save.");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        CreateHostResponse? result = await response.Content
+            .ReadFromJsonAsync<CreateHostResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        Assert.Equal(result.HostId, Assert.Single(await scope.ServiceProvider.GetRequiredService<AppHostsDbContext>()
+            .Hosts.IgnoreQueryFilters().AsNoTracking().Where(h => h.ContactEmail == contactEmail)
+            .ToListAsync(TestContext.Current.CancellationToken)).Id);
     }
 }

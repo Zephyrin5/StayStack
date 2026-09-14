@@ -1,3 +1,5 @@
+using Hosts;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Bogus;
 using Catalog;
 using Catalog.Entities;
@@ -328,5 +330,87 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+    // A bare SaveChangesAsync runs under the execution strategy too. After a lost
+    // acknowledgement it retried into its own committed row on the primary key,
+    // and the caller was told 500 for a property that exists.
+    [Fact]
+    public async Task CreateProperty_WhoseSaveLosesItsAcknowledgement_ReturnsThePropertyItCreated()
+    {
+        string hostAccessToken = await SeedHostUserAsync();
+        string city = $"LostAck-{Guid.NewGuid():N}";
+
+        CommitFault<AppCatalogDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppCatalogDbContext>(context =>
+            context.ChangeTracker.Entries<Property>().Any(e => e.Entity.City == city));
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
+
+        HttpResponseMessage response = await host.CreateClient().SendAsync(
+            AuthorizedPost("/api/catalog/properties", new CreatePropertyRequest
+            {
+                TimeZoneId = "Asia/Kuwait",
+                PropertyType = PropertyType.Hotel,
+                Name = new Dictionary<string, string> { { "en", "Seaside Hotel" } },
+                City = city
+            }, hostAccessToken),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the save.");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        CreatePropertyResponse? result = await response.Content
+            .ReadFromJsonAsync<CreatePropertyResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        Assert.Equal(result.PropertyId, Assert.Single(await scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>()
+            .Properties.IgnoreQueryFilters().AsNoTracking().Where(p => p.City == city)
+            .ToListAsync(TestContext.Current.CancellationToken)).Id);
+    }
+
+    [Fact]
+    public async Task AdminCreateProperty_WhoseSaveLosesItsAcknowledgement_ReturnsThePropertyItCreated()
+    {
+        Guid hostId = Guid.CreateVersion7();
+
+        using (IServiceScope seed = factory.Services.CreateScope())
+        {
+            AppHostsDbContext hosts = seed.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+            hosts.Hosts.Add(global::Hosts.Entities.Host.Create(hostId, "Lost Ack Stays", $"{hostId:N}@example.com", null));
+            await hosts.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        SignInResponse? admin = await (await _client.PostAsJsonAsync("/api/auth/sign-in", new SignInRequest
+        {
+            Email = IntegrationTestAdmin.Email,
+            Password = IntegrationTestAdmin.Password
+        }, TestContext.Current.CancellationToken)).Content
+            .ReadFromJsonAsync<SignInResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(admin?.AccessToken);
+
+        string city = $"LostAck-{Guid.NewGuid():N}";
+        CommitFault<AppCatalogDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppCatalogDbContext>(context =>
+            context.ChangeTracker.Entries<Property>().Any(e => e.Entity.City == city));
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
+
+        HttpResponseMessage response = await host.CreateClient().SendAsync(
+            AuthorizedPost($"/api/hosts/{hostId}/properties", new AdminCreatePropertyRequest
+            {
+                TimeZoneId = "Asia/Kuwait",
+                HostId = hostId,
+                PropertyType = PropertyType.Chalet,
+                Name = new Dictionary<string, string> { { "en", "Desert Chalet" } },
+                City = city
+            }, admin.AccessToken),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the save.");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        CreatePropertyResponse? result = await response.Content
+            .ReadFromJsonAsync<CreatePropertyResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        Assert.Equal(result.PropertyId, Assert.Single(await scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>()
+            .Properties.IgnoreQueryFilters().AsNoTracking().Where(p => p.City == city)
+            .ToListAsync(TestContext.Current.CancellationToken)).Id);
     }
 }

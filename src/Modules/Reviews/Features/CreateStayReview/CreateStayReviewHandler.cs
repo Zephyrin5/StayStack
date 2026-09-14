@@ -1,3 +1,4 @@
+using Persistence;
 using Microsoft.Extensions.Options;
 using Bookings.Contracts;
 using BuildingBlocks.Exceptions;
@@ -94,8 +95,17 @@ public class CreateStayReviewHandler(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
         {
+            // A violation of this row's own primary key means an earlier attempt
+            // committed and lost its acknowledgement - answer with that row
+            // (Persistence.CommittedInsertRecovery). Any other unique index is a
+            // real conflict.
+            if (await dbContext.FindOwnCommittedInsertAsync<StayReview>(ex, review.Id, cancellationToken) is { } committed)
+            {
+                return new CreateStayReviewResponse { StayReviewId = committed.Id };
+            }
+
             throw new StayAlreadyReviewedException(request.BookingId);
         }
 

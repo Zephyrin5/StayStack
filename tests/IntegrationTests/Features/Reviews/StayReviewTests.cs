@@ -718,4 +718,50 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
             .SingleAsync(r => r.Id == created.StayReviewId, TestContext.Current.CancellationToken);
         Assert.Equal(EntityStatus.Archived, archived.Status);
     }
+    // A bare SaveChangesAsync runs under the execution strategy too. After a lost
+    // acknowledgement it retried into its own committed row on the primary key,
+    // and the caller was told "already reviewed" - a confident, wrong domain answer - for a review that exists.
+    [Fact]
+    public async Task CreateStayReview_WhoseSaveLosesItsAcknowledgement_ReturnsTheReviewItCreated()
+    {
+        string hostToken = await SeedHostUserAsync();
+        Guid propertyId = await CreatePropertyAsync(hostToken);
+        Guid unitId = await CreateUnitAsync(propertyId, hostToken);
+        (Guid customerId, string customerToken) = await SeedSignedInCustomerAsync();
+
+        DateOnly today = CatalogSeeding.Today();
+        Guid bookingId = await SeedBookingAsync(unitId, customerId, today.AddDays(-5), today.AddDays(-2));
+
+        CommitFault<AppReviewsDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppReviewsDbContext>(context =>
+            context.ChangeTracker.Entries<StayReview>().Any(e => e.Entity.BookingId == bookingId));
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
+
+        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/reviews/stays")
+        {
+            Content = JsonContent.Create(new CreateStayReviewRequest
+            {
+                BookingId = bookingId,
+                CleanlinessRating = 5,
+                CommunicationRating = 5,
+                LocationRating = 5,
+                ValueRating = 5,
+                AccuracyRating = 5,
+                Comment = "Lovely stay."
+            })
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", customerToken);
+
+        HttpResponseMessage response = await host.CreateClient().SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the save.");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        CreateStayReviewResponse? result = await response.Content
+            .ReadFromJsonAsync<CreateStayReviewResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        Assert.Equal(result.StayReviewId, Assert.Single(await scope.ServiceProvider.GetRequiredService<AppReviewsDbContext>()
+            .StayReviews.IgnoreQueryFilters().AsNoTracking().Where(r => r.BookingId == bookingId)
+            .ToListAsync(TestContext.Current.CancellationToken)).Id);
+    }
 }

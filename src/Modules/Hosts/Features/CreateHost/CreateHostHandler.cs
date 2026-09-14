@@ -1,3 +1,5 @@
+using Persistence;
+using Microsoft.EntityFrameworkCore;
 using BuildingBlocks.Localization;
 using Hosts.Entities;
 using Mediator;
@@ -17,14 +19,28 @@ public class CreateHostHandler(AppHostsDbContext dbContext, IOptions<Localizatio
             ? LocalizedText.Create(request.DisplayName, localizationSettings.Value.DefaultCulture)
             : null;
 
-        // Generated here: this is the admin-facing create, with no cross-module
-        // retry story to make idempotent - unlike BecomeHost, whose id comes
-        // from a PendingHostLinkIntent recorded before the call.
+        // The admin-facing create, with no cross-module intent to recover by -
+        // unlike BecomeHost, whose id comes from a PendingHostLinkIntent. It still
+        // retries: the save below runs under the execution strategy, so a lost
+        // acknowledgement is recovered by the id minted above.
         Host host = Host.Create(
             hostId, request.BusinessName, request.ContactEmail, request.ContactPhone, displayName);
 
         dbContext.Hosts.Add(host);
-        await dbContext.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf<Host>(dbContext))
+        {
+            // A violation of this row's own primary key means an earlier attempt
+            // committed and lost its acknowledgement - answer with that row
+            // (Persistence.CommittedInsertRecovery). Nothing else is caught here:
+            // no other unique index on this table has a domain answer.
+            Host committed = (await dbContext.FindOwnCommittedInsertAsync<Host>(ex, host.Id, cancellationToken))!;
+            return new CreateHostResponse { HostId = committed.Id };
+        }
 
         return new CreateHostResponse { HostId = host.Id };
     }

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc.Testing;
 using Bogus;
 using BuildingBlocks.Pagination;
 using Identity.Entities;
@@ -417,5 +418,89 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+    // A bare SaveChangesAsync runs under the execution strategy too. After a lost
+    // acknowledgement it retried into its own committed row on the primary key,
+    // and the caller was told "code already in use" - a confident, wrong domain answer - for a promotion that exists.
+    [Fact]
+    public async Task Create_WhoseSaveLosesItsAcknowledgement_ReturnsThePromotionItCreated()
+    {
+        (_, string hostToken) = await SeedHostUserAsync();
+        string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
+
+        CommitFault<AppPromotionsDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppPromotionsDbContext>(context =>
+            context.ChangeTracker.Entries<Promotion>().Any(e => e.Entity.Code == code));
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
+
+        HttpResponseMessage response = await host.CreateClient().SendAsync(
+            Authorized(HttpMethod.Post, "/api/promotions", hostToken, new CreatePromotionRequest
+            {
+                Code = code,
+                DiscountType = PromotionDiscountType.Percentage,
+                DiscountValue = 10m
+            }),
+            TestContext.Current.CancellationToken);
+
+        await AssertTheOneCommittedPromotionIsReturnedAsync(lostAck, response, code);
+    }
+
+    [Fact]
+    public async Task AdminCreate_WhoseSaveLosesItsAcknowledgement_ReturnsThePromotionItCreated()
+    {
+        string adminToken = await SignInAsSeededAdminAsync();
+        string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
+
+        CommitFault<AppPromotionsDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppPromotionsDbContext>(context =>
+            context.ChangeTracker.Entries<Promotion>().Any(e => e.Entity.Code == code));
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
+
+        HttpResponseMessage response = await host.CreateClient().SendAsync(
+            Authorized(HttpMethod.Post, "/api/promotions/admin", adminToken, new AdminCreatePromotionRequest
+            {
+                HostId = null,
+                Code = code,
+                DiscountType = PromotionDiscountType.Percentage,
+                DiscountValue = 10m
+            }),
+            TestContext.Current.CancellationToken);
+
+        await AssertTheOneCommittedPromotionIsReturnedAsync(lostAck, response, code);
+    }
+
+    private async Task AssertTheOneCommittedPromotionIsReturnedAsync(
+        CommitFault<AppPromotionsDbContext> lostAck, HttpResponseMessage response, string code)
+    {
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the save.");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        CreatePromotionResponse? created = await response.Content
+            .ReadFromJsonAsync<CreatePromotionResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(created);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        Assert.Equal(created.PromotionId, Assert.Single(await scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>()
+            .Promotions.IgnoreQueryFilters().AsNoTracking().Where(p => p.Code == code)
+            .ToListAsync(TestContext.Current.CancellationToken)).Id);
+    }
+
+    [Fact]
+    public async Task Create_ForACodeAnotherPromotionHolds_IsStillRejected_NotRecovered()
+    {
+        // The other half of matching by constraint name: a real conflict on the
+        // code index is not this operation's own row, and must keep its answer.
+        (_, string hostToken) = await SeedHostUserAsync();
+        string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
+        await CreateHostPromotionAsync(hostToken, code);
+
+        (_, string otherHostToken) = await SeedHostUserAsync();
+        HttpResponseMessage response = await _client.SendAsync(
+            Authorized(HttpMethod.Post, "/api/promotions", otherHostToken, new CreatePromotionRequest
+            {
+                Code = code,
+                DiscountType = PromotionDiscountType.Percentage,
+                DiscountValue = 10m
+            }),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 }

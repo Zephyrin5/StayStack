@@ -8,13 +8,15 @@ using System.Data.Common;
 namespace IntegrationTests;
 
 /// <summary>
-///     The only way a test here injects a failure around a commit - and it offers
-///     exactly two, named for what they mean.
+///     The only way a test here injects a failure around a commit, with one entry
+///     point per case, named for what it means.
 ///     <para>
-///         <see cref="FailAfterCommit{TContext}"/> is a lost acknowledgement: the
-///         work is durable and the caller is told it is not. <see
-///         cref="FailBeforeCommit{TContext}"/> is a failed commit: nothing was
-///         written. An execution strategy retries both identically, which is why
+///         <see cref="FailAfterCommit{TContext}(Func{TContext, bool}, int)"/> is a
+///         lost acknowledgement: the work is durable and the caller is told it is
+///         not. <see cref="FailAfterAutocommit{TContext}"/> is the same for a
+///         single statement EF sent with no transaction, which never reaches a
+///         commit hook. <see cref="FailBeforeCommit{TContext}"/> is a failed
+///         commit: nothing was written. An execution strategy retries both identically, which is why
 ///         the difference is invisible from inside a test - and six tests in this
 ///         suite ended up on the wrong side of it, most of them silently, when an
 ///         explicit transaction was added around the code they exercised and a
@@ -23,7 +25,7 @@ namespace IntegrationTests;
 ///     <para>
 ///         So no test names an interceptor. The hook lives here, and the entry
 ///         point a test calls is its statement of which case it proves.
-///         RetryFaultInjectionProtocolTests fails any test file that reaches for
+///         FaultInjectionProtocolTests fails any test file that reaches for
 ///         a transaction or command interceptor directly.
 ///     </para>
 ///     <para>
@@ -46,12 +48,12 @@ public static class CommitFaults
     public static CommitFault<TContext> FailAfterCommit<TContext>(
         Func<TContext, CancellationToken, Task<bool>> when, int times = 1)
         where TContext : DbContext =>
-        new CommitFault<TContext>(afterCommit: true, when, times);
+        new CommitFault<TContext>(CommitFault<TContext>.Point.AfterCommit, when, times);
 
     /// <inheritdoc cref="FailAfterCommit{TContext}(Func{TContext, CancellationToken, Task{bool}}, int)"/>
     public static CommitFault<TContext> FailAfterCommit<TContext>(Func<TContext, bool> when, int times = 1)
         where TContext : DbContext =>
-        new CommitFault<TContext>(afterCommit: true, (context, _) => Task.FromResult(when(context)), times);
+        new CommitFault<TContext>(CommitFault<TContext>.Point.AfterCommit, (context, _) => Task.FromResult(when(context)), times);
 
     /// <summary>
     ///     Throws a transient error (40001) as a matching commit is about to run,
@@ -60,7 +62,22 @@ public static class CommitFaults
     /// </summary>
     public static CommitFault<TContext> FailBeforeCommit<TContext>(Func<TContext, bool> when, int times = 1)
         where TContext : DbContext =>
-        new CommitFault<TContext>(afterCommit: false, (context, _) => Task.FromResult(when(context)), times);
+        new CommitFault<TContext>(CommitFault<TContext>.Point.BeforeCommit, (context, _) => Task.FromResult(when(context)), times);
+
+    /// <summary>
+    ///     Throws a transient error (40001) after a matching statement has run
+    ///     outside any transaction - so it autocommitted and is already durable.
+    ///     <para>
+    ///         The lost acknowledgement of a plain single-statement
+    ///         <c>SaveChangesAsync</c>, which EF sends without a transaction, so
+    ///         <see cref="FailAfterCommit{TContext}(Func{TContext, bool}, int)"/>
+    ///         never fires for it. <paramref name="when"/> sees the change tracker,
+    ///         where the entity being saved is still Added.
+    ///     </para>
+    /// </summary>
+    public static CommitFault<TContext> FailAfterAutocommit<TContext>(Func<TContext, bool> when, int times = 1)
+        where TContext : DbContext =>
+        new CommitFault<TContext>(CommitFault<TContext>.Point.AfterAutocommit, (context, _) => Task.FromResult(when(context)), times);
 
     /// <summary>A host whose <typeparamref name="TContext"/> carries the fault.</summary>
     public static WebApplicationFactory<Program> WithCommitFault<TContext>(
@@ -92,18 +109,25 @@ public static class CommitFaults
 /// <summary>A targeted commit fault. Created through <see cref="CommitFaults"/>.</summary>
 public sealed class CommitFault<TContext> where TContext : DbContext
 {
-    private readonly bool _afterCommit;
+    internal enum Point
+    {
+        BeforeCommit,
+        AfterCommit,
+        AfterAutocommit
+    }
+
+    private readonly Point _point;
     private readonly Func<TContext, CancellationToken, Task<bool>> _when;
     private readonly int _times;
     private int _armed = 1;
     private int _fired;
 
-    internal CommitFault(bool afterCommit, Func<TContext, CancellationToken, Task<bool>> when, int times)
+    internal CommitFault(Point point, Func<TContext, CancellationToken, Task<bool>> when, int times)
     {
-        _afterCommit = afterCommit;
+        _point = point;
         _when = when;
         _times = times;
-        Interceptor = new Hook(this);
+        Interceptor = point == Point.AfterAutocommit ? new AutocommitHook(this) : new Hook(this);
     }
 
     internal IInterceptor Interceptor { get; }
@@ -134,7 +158,7 @@ public sealed class CommitFault<TContext> where TContext : DbContext
         }
 
         throw new PostgresException(
-            _afterCommit ? "simulated lost acknowledgement after commit" : "simulated transient failure before commit",
+            _point == Point.BeforeCommit ? "simulated transient failure before commit" : "simulated lost acknowledgement after commit",
             "ERROR", "ERROR", "40001");
     }
 
@@ -144,7 +168,7 @@ public sealed class CommitFault<TContext> where TContext : DbContext
             DbTransaction transaction, TransactionEventData eventData, InterceptionResult result,
             CancellationToken cancellationToken = default)
         {
-            if (!fault._afterCommit)
+            if (fault._point == Point.BeforeCommit)
             {
                 await fault.ThrowIfMatchesAsync(eventData.Context, cancellationToken);
             }
@@ -155,10 +179,36 @@ public sealed class CommitFault<TContext> where TContext : DbContext
         public override async Task TransactionCommittedAsync(
             DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
         {
-            if (fault._afterCommit)
+            if (fault._point == Point.AfterCommit)
             {
                 await fault.ThrowIfMatchesAsync(eventData.Context, cancellationToken);
             }
         }
+    }
+
+    // A statement run with no transaction open autocommits as it executes, so
+    // "after the command" is "after the commit" for exactly those statements.
+    // A command inside a transaction is ignored: its commit has not happened.
+    private sealed class AutocommitHook(CommitFault<TContext> fault) : DbCommandInterceptor
+    {
+        public override async ValueTask<int> NonQueryExecutedAsync(
+            DbCommand command, CommandExecutedEventData eventData, int result, CancellationToken cancellationToken = default)
+        {
+            await ThrowIfAutocommittedAsync(eventData, cancellationToken);
+            return result;
+        }
+
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(
+            DbCommand command, CommandExecutedEventData eventData, DbDataReader result,
+            CancellationToken cancellationToken = default)
+        {
+            await ThrowIfAutocommittedAsync(eventData, cancellationToken);
+            return result;
+        }
+
+        private Task ThrowIfAutocommittedAsync(CommandExecutedEventData eventData, CancellationToken cancellationToken) =>
+            eventData.Context is { Database.CurrentTransaction: null } context
+                ? fault.ThrowIfMatchesAsync(context, cancellationToken)
+                : Task.CompletedTask;
     }
 }

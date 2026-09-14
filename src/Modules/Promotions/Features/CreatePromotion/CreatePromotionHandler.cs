@@ -1,3 +1,4 @@
+using Persistence;
 using BuildingBlocks.Exceptions;
 using Hosts.Contracts;
 using Mediator;
@@ -37,8 +38,17 @@ public class CreatePromotionHandler(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
         {
+            // A violation of this row's own primary key means an earlier attempt
+            // committed and lost its acknowledgement - answer with that row
+            // (Persistence.CommittedInsertRecovery). Any other unique index is a
+            // real conflict.
+            if (await dbContext.FindOwnCommittedInsertAsync<Promotion>(ex, promotion.Id, cancellationToken) is { } committed)
+            {
+                return new CreatePromotionResponse { PromotionId = committed.Id };
+            }
+
             throw new ValidationException(nameof(request.Code), $"Promo code '{request.Code}' is already in use.");
         }
 
