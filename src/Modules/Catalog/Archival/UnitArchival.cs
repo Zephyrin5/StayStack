@@ -62,7 +62,7 @@ public static class UnitArchival
         if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
         {
             await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
-                AdvisoryLock.AcquireExclusiveSql,
+                UnitAvailabilityLock.AcquireForArchivalSql,
                 new { LockKey = UnitAvailabilityLock.KeyFor(unitId) },
                 transaction.GetDbTransaction(),
                 cancellationToken: cancellationToken));

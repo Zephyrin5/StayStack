@@ -1,4 +1,4 @@
-// AUDIT 2026-09-14: Unforced bursts at one range; asserts persisted rows through a fresh scope. The decider is the exclusion constraint, which cannot be removed without a migration, so this was not mutation-probed.
+// AUDIT 2026-09-14: Unforced bursts at one range; asserts persisted rows through a fresh scope. The decider is the exclusion constraint; its fast, many-iteration evidence is HoldExclusionConstraintTests. These bursts took 17-58s while holds took UnitAvailabilityLock shared (a deadlock storm - 43 in one run); with the lock exclusive they run in under 5s with 0 deadlocks, so they stay in every build.
 using Bookings;
 using Bookings.Features.HoldAvailability;
 using Catalog;

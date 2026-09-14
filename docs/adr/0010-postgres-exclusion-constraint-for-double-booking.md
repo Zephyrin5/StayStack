@@ -31,3 +31,36 @@ Two related, load-bearing details:
 - `HoldAvailabilityConcurrencyTests` is the highest-value test in the system for this reason - it's the only test that actually exercises genuine concurrent writes against the constraint, rather than asserting behavior a single-threaded test can't disprove. The same reasoning generalizes past this one constraint: every other genuinely concurrency-dependent claim in the codebase (`CreatePricingRuleHandler`/`UpdatePricingRuleHandler`'s Serializable transactions, `PromotionRedemption`'s guarded redemption-cap `UPDATE`, the hold-session cap inside this same handler's transaction) needed its own concurrent test copying this file's pattern, not just this one - see `PricingRuleConcurrencyTests` and the sibling test added directly alongside this one, both added specifically because a single-threaded test had been quietly standing in for concurrency coverage that didn't actually exist. Two of those three uncovered a real bug on first run, not just confirmed existing correctness (see [ADR-0012](0012-single-pricing-rule-entity-with-write-time-overlap-rejection.md) and this ADR's own hold-cap fix).
 - Revisit the Npgsql/EF Core fluent-API gap periodically ([npgsql/efcore.pg#1975](https://github.com/npgsql/efcore.pg/issues/1975)) - if it's ever implemented, moving the constraint into the model would close the squash-loses-the-constraint risk above, the same way [ADR-0011](0011-prefer-model-config-over-migration-sql.md) already did for the transactions partial unique index.
 - **The constraint's own strength was, until recently, its exploit surface.** Everything above describes how faithfully the constraint enforces `(unit_id, stay_range)` non-overlap - but nothing here ever bounded *how large* a range, or *how many* ranges, an anonymous caller could ask it to enforce. `HoldAvailabilityRequestValidator`/`HoldAvailabilityHandler` had no cap on stay length or lead time, and `UnitAvailabilityHold` had no owner column at all, so a single unauthenticated request could hold `[today, today+3650)` and the constraint would faithfully block that entire decade for every other caller. This is now closed by stay-length/lead-time caps and a rate-limited, session-capped hold flow - see [ADR-0016](0016-trust-model-for-anonymous-endpoints.md), which is the trust-boundary analysis this ADR never did on its own.
+
+## Amendment: concurrent holds queue per unit, because arbitration by deadlock is too slow
+
+The second load-bearing detail above records that concurrent holds on one range
+deadlock, and treats `40P01` in the retry policy as the answer. It is correct -
+nothing was ever double-booked - and it is far too slow, which nothing measured
+until the audit asked why `HoldAvailabilityConcurrencyTests` sometimes took a
+minute.
+
+**What happens.** A GiST exclusion constraint is checked after each inserter
+writes its own index entry, so concurrent overlapping inserters each find the
+other's uncommitted entry and wait on it. Postgres only breaks that cycle after
+`deadlock_timeout`, and the victim's execution strategy retries with backoff -
+into the next cycle. One burst of ten hold requests for one unit took 73 seconds
+with 43 deadlocks in the server log. Driven at the database directly, ten races of
+eight inserters produced 70 deadlocks in 70 seconds: every single loser was a
+deadlock victim, not a clean rejection.
+
+**The fix is `UnitAvailabilityLock` taken exclusively by holds**, which already
+took it shared to exclude archival. Holds for one unit now queue for one short
+transaction each, so the constraint always checks against committed rows and
+rejects at once. A hundred eight-way races take about two seconds with no
+deadlocks, and the handler-level concurrency tests dropped from 17-58 seconds to
+under five.
+
+**This does not reverse "Alternatives considered".** That entry rejected a lock
+*instead of* the constraint, because a lock is a discipline every writer must
+remember. The constraint is still the only thing that makes double-booking
+impossible; the lock only removes the deadlock storm on the path that takes it.
+`HoldExclusionConstraintTests` pins both halves: exactly one winner and no
+deadlock victims through the handler's protocol (whose lock mode it reads from
+`UnitAvailabilityLock.AcquireForHoldSql`, so it cannot drift), and never two
+winners with no lock at all - the writer that forgets.

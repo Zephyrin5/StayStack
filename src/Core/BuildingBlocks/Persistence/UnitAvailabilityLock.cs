@@ -20,15 +20,28 @@ namespace BuildingBlocks.Persistence;
 ///         the other's schema.
 ///     </para>
 ///     <para>
-///         <b>Archival takes it exclusively</b>
-///         (<see cref="AdvisoryLock.AcquireExclusiveSql"/>), waiting for every
-///         in-flight hold on the unit and excluding new ones until the archive
-///         commits. <b>Taking a hold takes it shared</b>
-///         (<see cref="AdvisoryLock.AcquireSharedSql"/>): holds on one unit do
-///         not block each other - that path already arbitrates through the
-///         exclusion constraint, and serialising it would put a queue on the
-///         hottest write in the system to defend against an operation a host
-///         performs by hand.
+///         <b>Both sides take it exclusively</b>, and holds used not to. Archival
+///         waits for every in-flight hold on the unit and excludes new ones until
+///         the archive commits. Holds on one unit also exclude each other, so they
+///         queue per unit for the length of one short transaction.
+///     </para>
+///     <para>
+///         Holds took it shared, on the reasoning that the insert "already
+///         arbitrates through the exclusion constraint" and a queue would slow the
+///         hottest write in the system. The arbitration is what was slow.
+///         Concurrent inserters into a GiST exclusion constraint each write their
+///         index entry before checking, see each other's uncommitted entry, and
+///         wait on each other - a deadlock Postgres only breaks after
+///         deadlock_timeout. Measured: ten concurrent hold requests for one unit
+///         took over a minute with 43 deadlocks and retry backoff, and at the
+///         database directly 10 races produced 70 deadlocks in 70 seconds, every
+///         losing inserter a deadlock victim rather than a clean rejection.
+///         Serialised, the constraint sees committed rows and rejects at once.
+///         HoldExclusionConstraintTests pins both the exactly-one outcome and the
+///         absence of deadlocks.
+///     </para>
+///     <para>
+///         Per unit, not global: holds for different units never share a key.
 ///     </para>
 ///     <para>
 ///         The mechanics - transaction scope, why the scope string is part of
@@ -39,6 +52,16 @@ namespace BuildingBlocks.Persistence;
 public static class UnitAvailabilityLock
 {
     public static long KeyFor(Guid unitId) => AdvisoryLock.KeyFor(Scope, unitId);
+
+    /// <summary>
+    ///     The mode taking a hold acquires this lock in - exclusive, see above. One
+    ///     definition, shared with HoldExclusionConstraintTests so the test cannot
+    ///     drift from the handler.
+    /// </summary>
+    public const string AcquireForHoldSql = AdvisoryLock.AcquireExclusiveSql;
+
+    /// <summary>The mode archiving a unit acquires this lock in.</summary>
+    public const string AcquireForArchivalSql = AdvisoryLock.AcquireExclusiveSql;
 
     // Part of the key rather than a label, so it is a wire format between
     // deployments - see AdvisoryLock.KeyFor.

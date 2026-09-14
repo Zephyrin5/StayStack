@@ -155,16 +155,21 @@ public class HoldAvailabilityHandler(
 
             DateTimeOffset now = timeProvider.GetUtcNow();
 
-            // Shared, so concurrent holds on one unit still run in parallel -
-            // they arbitrate through the exclusion constraint below, and
-            // queueing them would slow the hottest write in the system to
-            // defend against an operation a host performs by hand. What it
-            // does block is archival, which takes the same lock exclusively:
-            // without it, DeleteUnitHandler can check "no active holds", this
-            // handler can insert one, and the unit is archived with live
-            // inventory against it. See BuildingBlocks.UnitAvailabilityLock.
+            // Exclusive, so concurrent holds on one unit queue for the length of
+            // one short transaction. They used to take it shared and arbitrate
+            // through the exclusion constraint below, and under contention that
+            // arbitration was a deadlock storm: concurrent inserters wait on each
+            // other's uncommitted index entries until deadlock_timeout breaks the
+            // cycle, and the execution strategy retries with backoff - ten
+            // requests for one unit took over a minute. Serialised, the
+            // constraint sees committed rows and answers at once.
+            //
+            // It also blocks archival, which takes the same lock: without it,
+            // DeleteUnitHandler can check "no active holds", this handler can
+            // insert one, and the unit is archived with live inventory against
+            // it. See BuildingBlocks.UnitAvailabilityLock.
             await connection.ExecuteAsync(new CommandDefinition(
-                AdvisoryLock.AcquireSharedSql,
+                UnitAvailabilityLock.AcquireForHoldSql,
                 new { LockKey = UnitAvailabilityLock.KeyFor(request.UnitId) },
                 transaction.GetDbTransaction(),
                 cancellationToken: cancellationToken));
