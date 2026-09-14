@@ -1,3 +1,4 @@
+// AUDIT 2026-09-14: Injects no fault - it simulates a retry by leaving a dirty tracked copy on the context, then asserts through a fresh scope. Probed: fails without the dispatcher's ChangeTracker.Clear().
 using Bookings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

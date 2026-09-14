@@ -1,3 +1,4 @@
+// AUDIT 2026-09-14: Injects post-commit (TransactionCommittedAsync), targeted by a durable redemption for the booking; fresh-scope asserts. Reproduced the exact rejection before bef3fb7 fixed it.
 using BuildingBlocks.Identity;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;

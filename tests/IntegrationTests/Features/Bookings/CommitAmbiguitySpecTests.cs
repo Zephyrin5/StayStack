@@ -1,3 +1,4 @@
+// AUDIT 2026-09-14: The header is stale - all four pass. Test 1 is named for a lost answer, but ConfirmHoldAsync joins the confirmation's transaction, so its throw lands pre-commit (its biconditional holds either way); test 2 is pre-commit by design; test 3 is genuinely post-commit (BookingPaymentConfirmation commits its own transaction); test 4 forces overlap by loading both sides first. Fresh-scope asserts. Not mutation-probed.
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;

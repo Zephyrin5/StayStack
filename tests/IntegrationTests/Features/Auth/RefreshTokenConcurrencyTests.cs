@@ -1,3 +1,4 @@
+// AUDIT 2026-09-14: Unforced 10-request burst, no injection; asserts status codes, not token rows. Probed: a read-then-write consume fails it 3/3. Does NOT cover a lost commit acknowledgement - probed separately, a retried refresh answers 401 'reuse detected' and revokes the family (0 of 2 tokens left live); untested and unfixed.
 using Bogus;
 using Identity.Entities;
 using Identity.Features.RefreshToken;

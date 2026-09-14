@@ -1,3 +1,4 @@
+// AUDIT 2026-09-14: Gate-driven: pauses after both checks, or at whichever check runs first, inside the archive's transaction; asserts through fresh scopes. The header's 'confirmed to fail with the locks removed' was not re-probed this round.
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;

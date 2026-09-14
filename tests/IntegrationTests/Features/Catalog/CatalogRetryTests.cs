@@ -1,3 +1,4 @@
+// AUDIT 2026-09-14: Two tests inject pre-commit (TransactionCommittingAsync), three post-commit (TransactionCommittedAsync), each targeted by a tracked entity; fresh-scope asserts. Probed: the pre-commit pair fail without ChangeTracker.Clear(); the pricing-rule create fails without its recovery lookup.
 using Catalog;
 using Catalog.Entities;
 using Catalog.Enums;

@@ -1,3 +1,4 @@
+// AUDIT 2026-09-14: All three inject in TransactionCommittedAsync (post-commit), targeted at the commit under test since ff7062c; fresh-scope asserts. Probed: each fails with its handler's recovery disabled, including with a stray background commit taking the first shot.
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;

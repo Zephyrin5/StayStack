@@ -1,3 +1,4 @@
+// AUDIT 2026-09-14: Unforced bursts at one range; asserts persisted rows through a fresh scope. The decider is the exclusion constraint, which cannot be removed without a migration, so this was not mutation-probed.
 using Bookings;
 using Bookings.Features.HoldAvailability;
 using Catalog;

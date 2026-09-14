@@ -1,3 +1,4 @@
+// AUDIT 2026-09-14: Unforced bursts; fresh-scope row counts. Probed: PASSES 3/3 with both handlers lowered to ReadCommitted, so it proves the overlap constraints hold, not the Serializable isolation this header credits.
 using Bogus;
 using Catalog;
 using Catalog.Entities;

@@ -1,3 +1,4 @@
+// AUDIT 2026-09-14: Injects in TransactionCommittingAsync - pre-commit, the rollback case, as named; targeted by the tracked booking; asserts through a fresh scope. Probed: fails without ChangeTracker.Clear(). Gap: nothing injects after the commit, so the handler's already-Cancelled recovery branch never runs.
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;

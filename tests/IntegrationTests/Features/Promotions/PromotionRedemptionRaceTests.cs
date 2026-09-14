@@ -1,3 +1,4 @@
+// AUDIT 2026-09-14: Deterministic, not raced: an auto-advancing clock puts the expiry between snapshot and write, and the archive runs inside the pre-transaction GetUnitAsync - both inside the window claimed. Count read through a fresh scope. Not mutation-probed.
 using Catalog;
 using Catalog.Contracts;
 using Catalog.Entities;

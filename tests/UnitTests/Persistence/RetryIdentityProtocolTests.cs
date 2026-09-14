@@ -1,3 +1,7 @@
+// PROVES COVERAGE, NOT CORRECTNESS. A green run means every participant it can find is present - not that any of them is right; the behavioural tests are the evidence.
+// It cannot tell that the recovery lookup exists, runs first, or finds the row; and it cannot see ids minted by instance methods or object initialisers in other files (RefreshTokenHandler's new token is one).
+// Evidence that recovery works: the lost-acknowledgement tests in CreationAmbiguityTests, CatalogRetryTests and PromotionRedemptionRetryTests.
+
 using System.Text.RegularExpressions;
 namespace UnitTests.Persistence;
 

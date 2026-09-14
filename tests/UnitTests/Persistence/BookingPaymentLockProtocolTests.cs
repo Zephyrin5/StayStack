@@ -1,3 +1,7 @@
+// PROVES COVERAGE, NOT CORRECTNESS. A green run means every participant it can find is present - not that any of them is right; the behavioural tests are the evidence.
+// It cannot tell that the lock is taken on the same connection and transaction as the cancellation, before the read it protects, or in the right mode - TryAcquireExclusiveSql matches as well as the blocking form.
+// Evidence that the lock works: PaymentInitiationRaceTests.AnExpiryDuringInitiationsLockedSection_StepsOverTheBooking.
+
 using System.Text.RegularExpressions;
 namespace UnitTests.Persistence;
 

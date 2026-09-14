@@ -1,3 +1,4 @@
+// AUDIT 2026-09-14: Probed with BookingPaymentLock removed: the cancellation test still PASSES - it pauses before the lock and proves only the re-read; the expiry test fails - it pauses inside the lock and is the one that proves it. Fresh-scope asserts.
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;
