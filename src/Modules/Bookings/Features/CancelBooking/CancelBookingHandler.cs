@@ -356,7 +356,7 @@ public class CancelBookingHandler(
                     recorded.Amount,
                     recorded.Currency,
                     payment.Amount.Amount == 0m ? null : recorded.Amount / payment.Amount.Amount * 100m,
-                    refundPending: payment.RefundPending);
+                    payment.RefundStatus);
             }
 
             if (payment is not { AwaitingRefund: true })
@@ -366,7 +366,7 @@ public class CancelBookingHandler(
                 // here would promise money to every guest who cancels an unpaid
                 // booking.
                 return BuildResponse(
-                    outcome.Booking, refundAmount: null, currency: null, refundPercent: null, refundPending: false);
+                    outcome.Booking, refundAmount: null, currency: null, refundPercent: null, RefundStatus.None);
             }
 
             // Owed but not yet settled - reported as the resolver will settle it,
@@ -418,7 +418,7 @@ public class CancelBookingHandler(
             // when it had only been asked for.
             return BuildResponse(
                 booking, settledRefund.Amount, settledRefund.Currency,
-                refundPercent, refundPending: paymentState.RefundPending);
+                refundPercent, paymentState.RefundStatus);
         }
 
         // No snapshot yet - either there was never anything to refund, or a
@@ -429,7 +429,7 @@ public class CancelBookingHandler(
         // happens to land inline.
         if (paymentState is not { AwaitingRefund: true })
         {
-            return BuildResponse(booking, refundAmount: null, currency: null, refundPercent: null, refundPending: false);
+            return BuildResponse(booking, refundAmount: null, currency: null, refundPercent: null, RefundStatus.None);
         }
 
         // A Succeeded transaction exists but nothing has reversed it yet - a
@@ -480,7 +480,7 @@ public class CancelBookingHandler(
         // either. Guarded for the reason given there.
         decimal? percent = payment.Amount.Amount == 0m ? null : amount.Amount / payment.Amount.Amount * 100m;
 
-        return BuildResponse(booking, amount.Amount, amount.Currency, percent, refundPending: true);
+        return BuildResponse(booking, amount.Amount, amount.Currency, percent, RefundStatus.Pending);
     }
 
     /// <summary>
@@ -537,7 +537,7 @@ public class CancelBookingHandler(
         decimal? refundAmount,
         Currency? currency,
         decimal? refundPercent,
-        bool refundPending) =>
+        RefundStatus refundStatus) =>
         new CancelBookingResponse
         {
             BookingId = booking.Id,
@@ -545,6 +545,6 @@ public class CancelBookingHandler(
             RefundAmount = refundAmount,
             Currency = currency,
             RefundPercent = refundPercent,
-            RefundPending = refundPending
+            RefundStatus = refundStatus
         };
 }

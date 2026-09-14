@@ -142,8 +142,13 @@ public class CancelBookingHandlerTests : IDisposable
         Assert.False(response.RefundPending);
     }
 
-    [Fact]
-    public async Task Handle_OnRecancelOfAnAlreadyRefundedBooking_ReportsTheRealRefund_NotNull()
+    // Both settled outcomes, and they must be told apart. The response used to
+    // carry RefundPending alone, false for each, so a refund that reached the
+    // card and one the provider refused read back identically.
+    [Theory]
+    [InlineData(RefundStatus.Refunded)]
+    [InlineData(RefundStatus.Failed)]
+    public async Task Handle_OnRecancelOfAnAlreadyRefundedBooking_ReportsTheRealRefund_NotNull(RefundStatus settled)
     {
         // Arrange - a booking that was already cancelled and whose refund
         // already reached the refund sub-lifecycle (transaction moved past
@@ -156,15 +161,15 @@ public class CancelBookingHandlerTests : IDisposable
         await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
-        // Refunded and settled - the transaction has moved past Succeeded, so
-        // the single read reports the refund rather than "nothing to refund".
+        // Settled - the transaction has moved past Succeeded, so the single read
+        // reports the refund rather than "nothing to refund".
         transactionReversalMock
             .Setup(x => x.GetPaymentStateAsync(booking.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PaymentStateSnapshot
             {
                 Amount = Money.Of(200m, Currency.KWD),
                 RefundAmount = Money.Of(100m, Currency.KWD),
-                RefundPending = false
+                RefundStatus = settled
             });
 
         BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
@@ -189,6 +194,7 @@ public class CancelBookingHandlerTests : IDisposable
         Assert.Equal(100m, response.RefundAmount);
         Assert.NotNull(response.Currency);
         Assert.Equal(50m, response.RefundPercent);
+        Assert.Equal(settled, response.RefundStatus);
         Assert.False(response.RefundPending);
     }
 
@@ -387,7 +393,7 @@ public class CancelBookingHandlerTests : IDisposable
                 {
                     Amount = Money.Of(200m, Currency.KWD),
                     RefundAmount = Money.Of(200m, Currency.KWD),
-                    RefundPending = true
+                    RefundStatus = RefundStatus.Pending
                 });
         }
         else

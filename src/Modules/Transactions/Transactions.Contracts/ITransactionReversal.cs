@@ -149,11 +149,12 @@ public record PaymentStateSnapshot
     public Money? RefundAmount { get; init; }
 
     /// <summary>
-    ///     True only while the refund is outstanding - RefundPending. Refunded
-    ///     and RefundFailed are both settled outcomes, the second needing
-    ///     intervention rather than waiting.
+    ///     Where the recorded refund stands. None when nothing has been refunded
+    ///     against this payment - including while one is still owed, which is
+    ///     <see cref="AwaitingRefund"/>. Refunded and Failed used to share
+    ///     "not pending", which told a caller neither.
     /// </summary>
-    public bool RefundPending { get; init; }
+    public RefundStatus RefundStatus { get; init; }
 
     /// <summary>
     ///     Whether money was collected and has not been given back - the

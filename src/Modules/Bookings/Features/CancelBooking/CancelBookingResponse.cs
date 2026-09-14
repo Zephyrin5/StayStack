@@ -1,5 +1,6 @@
 using Bookings.Entities;
 using SeedWork.Enums;
+using Transactions.Contracts;
 namespace Bookings.Features.CancelBooking;
 
 public record CancelBookingResponse
@@ -26,13 +27,18 @@ public record CancelBookingResponse
     public Currency? Currency { get; init; }
     public decimal? RefundPercent { get; init; }
 
-    // True only in the narrow window where a Succeeded transaction exists
-    // but ITransactionReversal.GetRefundSnapshotAsync can't yet confirm the
-    // reversal landed - on the overwhelmingly common path, where the
-    // inline dispatch attempt succeeds within this same request, this is
-    // already false by the time the caller sees it. Also false (with
-    // RefundAmount/Currency/RefundPercent all null) when there was nothing
-    // to refund in the first place - not to be confused with "still
-    // pending".
-    public bool RefundPending { get; init; }
+    // Where the refund stands: None (nothing to refund - RefundAmount,
+    // Currency and RefundPercent are null alongside it), Pending (owed or
+    // requested, not settled), Refunded, or Failed.
+    //
+    // Failed is the reason this exists. The boolean below was false for a
+    // refund that had gone back to the card and for one the provider had
+    // refused, so a guest reading it could not tell a finished refund from a
+    // stuck one - and only one of those means their money is back.
+    public RefundStatus RefundStatus { get; init; }
+
+    // Kept for existing clients, and now derived rather than set, so it cannot
+    // disagree with RefundStatus. Prefer RefundStatus: false here still covers
+    // None, Refunded and Failed alike.
+    public bool RefundPending => RefundStatus == RefundStatus.Pending;
 }

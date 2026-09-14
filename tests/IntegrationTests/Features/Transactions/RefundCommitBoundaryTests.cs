@@ -427,7 +427,7 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
         // whichever of the two the response happened to trust decided the
         // answer.
         Assert.Equal(100m, state.RefundAmount!.Value.Amount);
-        Assert.True(state.RefundPending);
+        Assert.Equal(RefundStatus.Pending, state.RefundStatus);
 
         // And it is not simultaneously reported as still awaiting one, which is
         // the contradiction the two separate reads could produce.

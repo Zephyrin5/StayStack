@@ -280,7 +280,13 @@ internal class TransactionReversal(
             {
                 Amount = transaction.Amount,
                 RefundAmount = transaction.RefundAmount,
-                RefundPending = transaction.TransactionStatus == TransactionStatus.RefundPending,
+                RefundStatus = transaction.TransactionStatus switch
+                {
+                    TransactionStatus.RefundPending => RefundStatus.Pending,
+                    TransactionStatus.Refunded => RefundStatus.Refunded,
+                    TransactionStatus.RefundFailed => RefundStatus.Failed,
+                    _ => RefundStatus.None
+                },
                 AwaitingRefund = transaction.TransactionStatus == TransactionStatus.Succeeded,
                 SucceededAt = transaction.SucceededAt
             };
