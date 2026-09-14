@@ -50,7 +50,7 @@ ASP.NET Core / FastEndpoints, Mediator, EF Core (Npgsql) + Dapper.AOT for hot-pa
    ```
 3. **Apply migrations - in this order.** Each module owns its own set and its own history table, but they are *not* independent of each other, and the list was previously both incomplete and described as though they were:
    ```
-   dotnet ef database update --project src/Infrastructure/Identity/Identity.csproj --startup-project src/Web/Api/Api.csproj --context AppIdentityDbContext
+   dotnet ef database update --project src/Modules/Identity/Identity.csproj     --startup-project src/Web/Api/Api.csproj --context AppIdentityDbContext
    dotnet ef database update --project src/Modules/Catalog/Catalog.csproj      --startup-project src/Web/Api/Api.csproj --context AppCatalogDbContext
    dotnet ef database update --project src/Modules/Hosts/Hosts.csproj          --startup-project src/Web/Api/Api.csproj --context AppHostsDbContext
    dotnet ef database update --project src/Modules/Promotions/Promotions.csproj --startup-project src/Web/Api/Api.csproj --context AppPromotionsDbContext
