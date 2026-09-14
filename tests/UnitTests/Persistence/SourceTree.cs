@@ -19,7 +19,7 @@ internal static partial class SourceTree
         "\"\"\"[\\s\\S]*?\"\"\"|@\"(?:\"\"|[^\"])*\"|\"(?:\\\\.|[^\"\\\\\\n])*\"|'(?:\\\\.|[^'\\\\\\n])+'|//[^\\n]*|/\\*[\\s\\S]*?\\*/")]
     private static partial Regex CommentOrStringPattern();
 
-    public static string FindSourceRoot()
+    public static string FindRepositoryRoot()
     {
         DirectoryInfo? directory = new DirectoryInfo(AppContext.BaseDirectory);
 
@@ -29,14 +29,20 @@ internal static partial class SourceTree
         }
 
         Assert.NotNull(directory);
-        return Path.Combine(directory.FullName, "src");
+        return directory.FullName;
     }
 
-    /// <summary>Every hand-written .cs file under src, build output excluded.</summary>
-    public static IEnumerable<string> SourceFiles()
-    {
-        string root = FindSourceRoot();
+    public static string FindSourceRoot() => Path.Combine(FindRepositoryRoot(), "src");
 
+    /// <summary>Every hand-written .cs file under src, build output excluded.</summary>
+    public static IEnumerable<string> SourceFiles() => FilesUnder(FindSourceRoot());
+
+    /// <summary>Every hand-written .cs file under tests/IntegrationTests.</summary>
+    public static IEnumerable<string> IntegrationTestFiles() =>
+        FilesUnder(Path.Combine(FindRepositoryRoot(), "tests", "IntegrationTests"));
+
+    private static IEnumerable<string> FilesUnder(string root)
+    {
         return Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
             .Where(path =>
             {

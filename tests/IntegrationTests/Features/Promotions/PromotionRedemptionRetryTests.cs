@@ -1,19 +1,13 @@
-// AUDIT 2026-09-14: Injects post-commit (TransactionCommittedAsync), targeted by a durable redemption for the booking; fresh-scope asserts. Reproduced the exact rejection before bef3fb7 fixed it.
-using BuildingBlocks.Identity;
-using Microsoft.AspNetCore.Hosting;
+// AUDIT 2026-09-14: Injects post-commit (CommitFaults.FailAfterCommit), targeted by a durable redemption for the booking; fresh-scope asserts. Reproduced the exact rejection before bef3fb7 fixed it.
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
-using Npgsql;
-using Persistence.Interceptors;
 using Promotions;
 using Promotions.Contracts;
 using Promotions.Entities;
 using Promotions.Enums;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
-using System.Data.Common;
 namespace IntegrationTests.Features.Promotions;
 
 // The sixth instance of docs/adr/0025's identity rule, and the first one found by
@@ -27,56 +21,6 @@ namespace IntegrationTests.Features.Promotions;
 [Collection("Integration Tests")]
 public class PromotionRedemptionRetryTests(IntegrationTestWebApplicationFactory factory)
 {
-    // After the commit, and only a commit that made a redemption for the target
-    // booking durable. The insert is Dapper, so there is nothing in the change
-    // tracker to recognise it by; a separate connection can see the committed
-    // row. Targeted because this host runs TickerQ, whose jobs commit on their
-    // own schedule.
-    private sealed class LoseTheAckOnFirstRedemptionCommitFor(ICurrentUserProvider currentUser, TimeProvider timeProvider)
-        : AuditableEntitySaveChangesInterceptor(currentUser, timeProvider), IDbTransactionInterceptor
-    {
-        private static Guid _bookingId;
-        private static int _fired;
-
-        public static void ArmFor(Guid bookingId)
-        {
-            Interlocked.Exchange(ref _fired, 0);
-            _bookingId = bookingId;
-        }
-
-        public static void Disarm() => _bookingId = Guid.Empty;
-
-        public static bool Fired => Volatile.Read(ref _fired) > 0;
-
-        public async Task TransactionCommittedAsync(
-            DbTransaction transaction, TransactionEndEventData eventData,
-            CancellationToken cancellationToken = default)
-        {
-            Guid bookingId = _bookingId;
-
-            if (bookingId == Guid.Empty
-                || eventData.Context is not AppPromotionsDbContext context
-                || Volatile.Read(ref _fired) != 0)
-            {
-                return;
-            }
-
-            await using NpgsqlConnection probe = new NpgsqlConnection(context.Database.GetConnectionString());
-            await probe.OpenAsync(cancellationToken);
-
-            await using NpgsqlCommand command = new NpgsqlCommand(
-                "SELECT EXISTS (SELECT 1 FROM promotion_redemptions WHERE booking_id = @BookingId)", probe);
-            command.Parameters.AddWithValue("BookingId", bookingId);
-
-            if ((bool)(await command.ExecuteScalarAsync(cancellationToken))!
-                && Interlocked.Increment(ref _fired) == 1)
-            {
-                throw new PostgresException(
-                    "simulated lost acknowledgement after commit", "ERROR", "ERROR", "40001");
-            }
-        }
-    }
-
     [Fact]
     public async Task ARedemptionWhoseCommitLosesItsAcknowledgement_ReturnsTheRedemptionItAlreadyMade()
     {
@@ -96,30 +40,27 @@ public class PromotionRedemptionRetryTests(IntegrationTestWebApplicationFactory 
             await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
-            builder.ConfigureServices(services =>
-                services.AddScoped<AuditableEntitySaveChangesInterceptor, LoseTheAckOnFirstRedemptionCommitFor>()));
-
         Guid bookingId = Guid.CreateVersion7();
+
+        // After the commit that made a redemption for this booking durable. The
+        // insert is Dapper, so it is recognised by the committed row rather than
+        // by the change tracker.
+        CommitFault<AppPromotionsDbContext> lostAck = CommitFaults.FailAfterCommit<AppPromotionsDbContext>(
+            (context, ct) => CommitFaults.CommittedRowExistsAsync(
+                context, "SELECT 1 FROM promotion_redemptions WHERE booking_id = @BookingId", "BookingId", bookingId, ct));
+
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
+
         PromotionRedemptionResult result;
 
         using (IServiceScope scope = host.Services.CreateScope())
         {
-            LoseTheAckOnFirstRedemptionCommitFor.ArmFor(bookingId);
-
-            try
-            {
-                result = await scope.ServiceProvider.GetRequiredService<IPromotionRedemption>().RedeemAsync(
-                    promotion.Code, Guid.NewGuid(), "guest@example.com",
-                    Money.Of(200m, Currency.KWD), bookingId, TestContext.Current.CancellationToken);
-            }
-            finally
-            {
-                LoseTheAckOnFirstRedemptionCommitFor.Disarm();
-            }
+            result = await scope.ServiceProvider.GetRequiredService<IPromotionRedemption>().RedeemAsync(
+                promotion.Code, Guid.NewGuid(), "guest@example.com",
+                Money.Of(200m, Currency.KWD), bookingId, TestContext.Current.CancellationToken);
         }
 
-        Assert.True(LoseTheAckOnFirstRedemptionCommitFor.Fired, "The lost acknowledgement never reached the redemption.");
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the redemption.");
 
         using IServiceScope assertScope = factory.Services.CreateScope();
         AppPromotionsDbContext db = assertScope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();

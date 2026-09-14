@@ -1,4 +1,4 @@
-// AUDIT 2026-09-14: The header is stale - all four pass. Test 1 is named for a lost answer, but ConfirmHoldAsync joins the confirmation's transaction, so its throw lands pre-commit (its biconditional holds either way); test 2 is pre-commit by design; test 3 is genuinely post-commit (BookingPaymentConfirmation commits its own transaction); test 4 forces overlap by loading both sides first. Fresh-scope asserts. Not mutation-probed.
+// AUDIT 2026-09-14: All four pass. Test 1 now says what it injects: a failure inside the confirmation's transaction, before its commit (ConfirmHoldAsync joins that transaction) - the lost acknowledgement of that commit is ConfirmRetryTests'. Test 2 is pre-commit by design; test 3 is genuinely post-commit (BookingPaymentConfirmation commits its own transaction); test 4 forces overlap by loading both sides first. Fresh-scope asserts. Not mutation-probed.
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;
@@ -33,9 +33,9 @@ using Transactions.Outbox;
 using Transactions.Features.MarkTransactionSucceeded;
 namespace IntegrationTests.Features.Bookings;
 
-// A specification, not a regression suite. Three of these four fail against
-// the code as it stands, and they are meant to: they describe what the
-// booking lifecycle must guarantee, not what it currently does.
+// A specification, not a regression suite: these describe what the booking
+// lifecycle must guarantee. All four pass today. They were written when three of
+// them failed, and the header said so for some time after it stopped being true.
 //
 // Every one of them is the same shape - a write commits, and then the caller
 // never learns that it did. That is not an exotic failure. It is what a
@@ -128,17 +128,21 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
         return request;
     }
 
-    // ---- 1: the hold transition commits, the caller never finds out ------
+    // ---- 1: the hold transition is written, then its transaction fails -----
 
-    // Delegates to the real implementation and then throws, so the UPDATE ...
-    // RETURNING has committed by the time the caller sees a failure. That is
-    // a lost acknowledgement, not a failed write.
-    private sealed class ConfirmHoldThenLoseTheAnswer(IHoldConfirmation inner) : IHoldConfirmation
+    // Delegates to the real implementation and then throws. This used to say the
+    // UPDATE ... RETURNING had committed by then, making it a lost
+    // acknowledgement. It stopped being true when HoldConfirmation began joining
+    // the caller's transaction: the transition is written but not committed, so
+    // the throw rolls it back. What this exercises is a failure after the write
+    // and before the commit. The genuine lost acknowledgement of the confirmation
+    // commit is ConfirmRetryTests', on CommitFaults.FailAfterCommit.
+    private sealed class ConfirmHoldThenFailTheTransaction(IHoldConfirmation inner) : IHoldConfirmation
     {
         public async Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken)
         {
             await inner.ConfirmHoldAsync(holdId, cancellationToken);
-            throw new InvalidOperationException("Connection lost after the hold transition committed.");
+            throw new InvalidOperationException("Failure after the hold transition was written, before the commit.");
         }
 
         public Task<ConfirmedHold?> GetConfirmedHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
@@ -152,7 +156,7 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
     }
 
     [Fact]
-    public async Task AHoldTransitionThatCommitsButLosesItsAnswer_LeavesSomethingThatCanRecoverIt()
+    public async Task AHoldTransitionWhoseTransactionFailsBeforeCommitting_LeavesNoHoldMovedWithoutAMarker()
     {
         // The marker and the transition must agree. ConfirmBookingHandler
         // used to open a PendingBookingIntent and confirm the hold in two
@@ -176,7 +180,7 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
             {
                 ServiceDescriptor original = services.Single(d => d.ServiceType == typeof(IHoldConfirmation));
                 services.Remove(original);
-                services.AddScoped<IHoldConfirmation>(sp => new ConfirmHoldThenLoseTheAnswer(
+                services.AddScoped<IHoldConfirmation>(sp => new ConfirmHoldThenFailTheTransaction(
                     (IHoldConfirmation)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!)));
             })).CreateClient();
 

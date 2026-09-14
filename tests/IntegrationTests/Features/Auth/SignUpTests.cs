@@ -8,13 +8,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Npgsql;
-using Persistence;
-using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
@@ -212,29 +206,6 @@ public class SignUpTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
     }
 
-    // After the commit, and only the commit that registered this email - matched
-    // on the tracked account, since Identity registers no audit interceptor to
-    // substitute and its context is otherwise quiet in this host.
-    private sealed class LoseTheAckOnRegistrationOf(string email) : DbTransactionInterceptor
-    {
-        private int _fired;
-
-        public bool Fired => Volatile.Read(ref _fired) > 0;
-
-        public override Task TransactionCommittedAsync(
-            DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
-        {
-            if (eventData.Context is AppIdentityDbContext context
-                && context.ChangeTracker.Entries<ApplicationUser>().Any(e => e.Entity.Email == email)
-                && Interlocked.Increment(ref _fired) == 1)
-            {
-                throw new PostgresException("simulated lost acknowledgement after commit", "ERROR", "ERROR", "40001");
-            }
-
-            return Task.CompletedTask;
-        }
-    }
-
     [Fact]
     public async Task SignUp_WhoseCommitLosesItsAcknowledgement_ReturnsTheAccountItCreated()
     {
@@ -244,26 +215,19 @@ public class SignUpTests(IntegrationTestWebApplicationFactory factory)
         // validation error to someone who had just registered - with a refresh
         // token minted inside the retry that no row would ever match.
         string email = _faker.Internet.Email();
-        LoseTheAckOnRegistrationOf interceptor = new LoseTheAckOnRegistrationOf(email);
-        string connection = factory.Services.GetRequiredService<IConfiguration>().GetConnectionString("AppConnection")!;
+        // After the commit that registered this email, matched on the tracked
+        // account.
+        CommitFault<AppIdentityDbContext> lostAck = CommitFaults.FailAfterCommit<AppIdentityDbContext>(context =>
+            context.ChangeTracker.Entries<ApplicationUser>().Any(e => e.Entity.Email == email));
 
-        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
-            builder.ConfigureServices(services =>
-            {
-                services.RemoveAll<DbContextOptions<AppIdentityDbContext>>();
-                services.AddDbContext<AppIdentityDbContext>(options =>
-                {
-                    options.ConfigureStayStackDefaults(connection, "identity", false);
-                    options.AddInterceptors(interceptor);
-                });
-            }));
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
         // Act
         HttpResponseMessage response = await host.CreateClient().PostAsJsonAsync(
             "/api/auth/register", CreateValidRequest(email), TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.True(interceptor.Fired, "The lost acknowledgement never reached the registration.");
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the registration.");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         SignUpResponse? result = await response.Content

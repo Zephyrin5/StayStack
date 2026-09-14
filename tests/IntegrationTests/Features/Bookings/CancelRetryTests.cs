@@ -1,22 +1,17 @@
-// AUDIT 2026-09-14: Injects in TransactionCommittingAsync - pre-commit, the rollback case, as named; targeted by the tracked booking; asserts through a fresh scope. Probed: fails without ChangeTracker.Clear(). Gap: nothing injects after the commit, so the handler's already-Cancelled recovery branch never runs.
+// AUDIT 2026-09-14: Injects through CommitFaults.FailBeforeCommit - pre-commit, the rollback case, as named; targeted by the tracked booking; asserts through a fresh scope. Probed: fails without ChangeTracker.Clear(). Gap: nothing injects after the commit, so the handler's already-Cancelled recovery branch never runs.
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
 using Bookings.Features.CreateBookingSession;
 using Bookings.Features.HoldAvailability;
-using BuildingBlocks.Identity;
-using Persistence.Interceptors;
 using Catalog;
 using Catalog.Entities;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
-using Npgsql;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
-using System.Data.Common;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -33,56 +28,12 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
 {
     private readonly List<Property> _pendingProperties = [];
 
-    // Fails the first commit that is carrying one specific booking, with a
-    // SqlState the retrying strategy treats as transient (40001 is in this
-    // app's errorCodesToAdd), so the delegate is re-run exactly as a real
-    // serialization failure would make it.
-    //
-    // Targeted rather than "the first commit I see": this host runs TickerQ,
-    // whose relay and sweep jobs commit on their own schedule, and a stolen
-    // injection would leave the test green while proving nothing. The booking
-    // is still in the tracker after SaveChangesAsync - accepted, but tracked -
-    // which is exactly the state that makes a retry write nothing.
-    //
-    // Substituted for AuditableEntitySaveChangesInterceptor rather than
-    // registered as a loose IInterceptor. Each module hands EF that one
-    // interceptor by name in its AddDbContext options, so a bare
-    // IInterceptor registration is simply never consulted - the first
-    // version of this test recorded zero commits and passed for that reason.
-    // EF honours every interceptor interface a registered instance
-    // implements, so extending that type is the seam that exists.
-    private sealed class FailFirstCommitFor(ICurrentUserProvider currentUser, TimeProvider timeProvider)
-        : AuditableEntitySaveChangesInterceptor(currentUser, timeProvider), IDbTransactionInterceptor
-    {
-        private static Guid _target;
-        private static int _fired;
-
-        public static void ArmFor(Guid bookingId)
-        {
-            _target = bookingId;
-            Interlocked.Exchange(ref _fired, 0);
-        }
-
-        public static bool Fired => Volatile.Read(ref _fired) > 0;
-
-        public ValueTask<InterceptionResult> TransactionCommittingAsync(
-            DbTransaction transaction, TransactionEventData eventData, InterceptionResult result,
-            CancellationToken cancellationToken = default)
-        {
-            bool carriesTarget = _target != Guid.Empty
-                                 && eventData.Context is AppBookingsDbContext
-                                 && eventData.Context.ChangeTracker.Entries<Booking>()
-                                     .Any(entry => entry.Entity.Id == _target);
-
-            if (carriesTarget && Interlocked.Increment(ref _fired) == 1)
-            {
-                throw new PostgresException(
-                    "simulated transient failure on commit", "ERROR", "ERROR", "40001");
-            }
-
-            return ValueTask.FromResult(result);
-        }
-    }
+    // Before the commit carrying this booking: the rollback case, where nothing
+    // was written and the retry must write it. Targeted at the tracked booking
+    // because TickerQ's jobs commit on this context too.
+    private static CommitFault<AppBookingsDbContext> FailTheCommitCarrying(Guid bookingId) =>
+        CommitFaults.FailBeforeCommit<AppBookingsDbContext>(context =>
+            context.ChangeTracker.Entries<Booking>().Any(entry => entry.Entity.Id == bookingId));
 
     private Unit CreateTestUnit()
     {
@@ -144,11 +95,8 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
     {
         (Guid bookingId, string managementToken, Guid holdId) = await CreateGuestBookingAsync();
 
-        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
-            builder.ConfigureServices(services =>
-                // EF picks up IInterceptor registrations from the application
-                // service provider, so this needs no DbContext re-registration.
-                services.AddScoped<AuditableEntitySaveChangesInterceptor, FailFirstCommitFor>()));
+        CommitFault<AppBookingsDbContext> commitFailure = FailTheCommitCarrying(bookingId);
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(commitFailure);
 
         using HttpClient client = host.CreateClient();
 
@@ -168,8 +116,6 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
                 TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(session);
 
-        FailFirstCommitFor.ArmFor(bookingId);
-
         HttpRequestMessage cancel = new HttpRequestMessage(HttpMethod.Post, $"/api/bookings/{bookingId}/cancel")
         {
             Content = JsonContent.Create(new { bookingId, guestEmail = "jane@example.com" })
@@ -183,7 +129,7 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
         // Without this the whole test is vacuous: a failure that never fired,
         // or fired on some background job's transaction instead, leaves every
         // assertion below passing for the wrong reason.
-        Assert.True(FailFirstCommitFor.Fired, "The commit failure never reached the cancellation.");
+        Assert.True(commitFailure.HasFired, "The commit failure never reached the cancellation.");
 
         // Asserted through a fresh scope, never the context the request used.
         // A handler that accepted its changes and then failed to commit leaves

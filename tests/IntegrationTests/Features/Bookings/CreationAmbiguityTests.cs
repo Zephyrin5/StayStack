@@ -1,22 +1,17 @@
-// AUDIT 2026-09-14: All three inject in TransactionCommittedAsync (post-commit), targeted at the commit under test since ff7062c; fresh-scope asserts. Probed: each fails with its handler's recovery disabled, including with a stray background commit taking the first shot.
+// AUDIT 2026-09-14: All three inject post-commit (CommitFaults.FailAfterCommit), targeted at the commit under test since ff7062c; fresh-scope asserts. Probed: each fails with its handler's recovery disabled, including with a stray background commit taking the first shot.
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
 using Bookings.Features.CreateBookingSession;
 using Bookings.Features.HoldAvailability;
-using BuildingBlocks.Identity;
 using Catalog;
 using Catalog.Entities;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Npgsql;
-using Persistence.Interceptors;
 using SeedWork.ValueObjects;
-using System.Data.Common;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -37,123 +32,20 @@ namespace IntegrationTests.Features.Bookings;
 [Collection("Integration Tests")]
 public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory)
 {
-    // Lets the commit land and then throws, which is what a dropped
-    // acknowledgement looks like from inside the process.
-    //
-    // Armed for one unit, and it has to actually check. This comment used to
-    // say so while the code checked only the context type, so the first
-    // Bookings commit of any kind took the injection - and this host runs
-    // TickerQ, whose relay and expiry jobs commit on that context every minute.
-    // A stolen injection leaves the request running clean, Fired true, and the
-    // test green with the recovery it exists for disabled: that was
-    // demonstrated, not supposed.
-    //
-    // The hold is inserted through Dapper, so there is nothing in the change
-    // tracker to recognise it by. The commit has landed by the time this runs,
-    // though, so a separate connection can see whether it made a hold for the
-    // target unit durable - which is exactly the property that makes it the
-    // commit under test.
-    private sealed class LoseTheAckOnFirstBookingsCommitFor(ICurrentUserProvider currentUser, TimeProvider timeProvider)
-        : AuditableEntitySaveChangesInterceptor(currentUser, timeProvider), IDbTransactionInterceptor
-    {
-        private static Guid _unitId;
-        private static int _fired;
+    // After the commit that made a hold for this unit durable. Holds are
+    // inserted through Dapper, so the commit is recognised by the row it left
+    // rather than by the change tracker - and targeted at all because TickerQ's
+    // jobs commit on this context too, and one of them taking the injection
+    // left this test green with recovery disabled.
+    private static CommitFault<AppBookingsDbContext> LoseTheAckOnTheHoldFor(Guid unitId) =>
+        CommitFaults.FailAfterCommit<AppBookingsDbContext>((context, ct) => CommitFaults.CommittedRowExistsAsync(
+            context, "SELECT 1 FROM unit_availability_holds WHERE unit_id = @UnitId", "UnitId", unitId, ct));
 
-        public static void ArmFor(Guid unitId)
-        {
-            Interlocked.Exchange(ref _fired, 0);
-            _unitId = unitId;
-        }
-
-        public static void Disarm() => _unitId = Guid.Empty;
-
-        public static bool Fired => Volatile.Read(ref _fired) > 0;
-
-        public async Task TransactionCommittedAsync(
-            DbTransaction transaction, TransactionEndEventData eventData,
-            CancellationToken cancellationToken = default)
-        {
-            Guid unitId = _unitId;
-
-            if (unitId == Guid.Empty
-                || eventData.Context is not AppBookingsDbContext context
-                || Volatile.Read(ref _fired) != 0)
-            {
-                return;
-            }
-
-            await using NpgsqlConnection probe = new NpgsqlConnection(context.Database.GetConnectionString());
-            await probe.OpenAsync(cancellationToken);
-
-            await using NpgsqlCommand command = new NpgsqlCommand(
-                "SELECT EXISTS (SELECT 1 FROM unit_availability_holds WHERE unit_id = @UnitId)", probe);
-            command.Parameters.AddWithValue("UnitId", unitId);
-
-            if ((bool)(await command.ExecuteScalarAsync(cancellationToken))!
-                && Interlocked.Increment(ref _fired) == 1)
-            {
-                throw new PostgresException(
-                    "simulated lost acknowledgement after commit", "ERROR", "ERROR", "40001");
-            }
-        }
-    }
-
-    // After the commit, not after the INSERT command, and the difference is the
-    // whole test.
-    //
-    // This used to hook ReaderExecutedAsync, back when initiation had no
-    // explicit transaction and the INSERT's implicit one committed with the
-    // statement. Initiation now runs inside a transaction it opens to hold
-    // BookingPaymentLock, so throwing after the command threw *before* the
-    // commit: disposal rolled the insert back, the retry inserted a fresh row,
-    // and the test passed while proving only that a rollback is retried. The
-    // lost acknowledgement it is named for went unexercised - the same trap
-    // CatalogRetryTests fell into.
-    //
-    // TransactionCommittedAsync runs once the row is durable and inside the
-    // region the execution strategy retries: the row is in the database and the
-    // caller is about to be told it is not.
-    //
-    // Armed for one booking, and matched on the payment the commit is carrying
-    // rather than on the context alone: TransactionsOutboxDispatcher's relay
-    // commits on AppTransactionsDbContext on its own schedule in this host, and
-    // would otherwise take the injection and leave this test green over a
-    // request that never lost anything. The payment is still tracked here -
-    // SaveChangesAsync accepts it, it does not detach it.
-    private sealed class LoseTheAckOnFirstTransactionsCommit(ICurrentUserProvider currentUser, TimeProvider timeProvider)
-        : AuditableEntitySaveChangesInterceptor(currentUser, timeProvider), IDbTransactionInterceptor
-    {
-        private static Guid _bookingId;
-        private static int _fired;
-
-        public static void ArmFor(Guid bookingId)
-        {
-            Interlocked.Exchange(ref _fired, 0);
-            _bookingId = bookingId;
-        }
-
-        public static void Disarm() => _bookingId = Guid.Empty;
-
-        public static bool Fired => Volatile.Read(ref _fired) > 0;
-
-        public Task TransactionCommittedAsync(
-            DbTransaction transaction, TransactionEndEventData eventData,
-            CancellationToken cancellationToken = default)
-        {
-            Guid bookingId = _bookingId;
-
-            if (bookingId != Guid.Empty
-                && eventData.Context is AppTransactionsDbContext
-                && eventData.Context.ChangeTracker.Entries<Transaction>().Any(e => e.Entity.BookingId == bookingId)
-                && Interlocked.Increment(ref _fired) == 1)
-            {
-                throw new PostgresException(
-                    "simulated lost acknowledgement after commit", "ERROR", "ERROR", "40001");
-            }
-
-            return Task.CompletedTask;
-        }
-    }
+    // After the commit carrying a payment for this booking - still tracked,
+    // since SaveChangesAsync accepts it rather than detaching it.
+    private static CommitFault<AppTransactionsDbContext> LoseTheAckOnThePaymentFor(Guid bookingId) =>
+        CommitFaults.FailAfterCommit<AppTransactionsDbContext>(context =>
+            context.ChangeTracker.Entries<Transaction>().Any(e => e.Entity.BookingId == bookingId));
 
     private readonly List<Property> _pendingProperties = [];
 
@@ -194,13 +86,10 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         Unit unit = await SeedUnitAsync();
         DateOnly checkIn = CatalogSeeding.Today().AddDays(140);
 
-        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
-            builder.ConfigureServices(services =>
-                services.AddScoped<AuditableEntitySaveChangesInterceptor, LoseTheAckOnFirstBookingsCommitFor>()));
+        CommitFault<AppBookingsDbContext> lostAck = LoseTheAckOnTheHoldFor(unit.Id);
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
         using HttpClient client = host.CreateClient();
-
-        LoseTheAckOnFirstBookingsCommitFor.ArmFor(unit.Id);
 
         HttpResponseMessage response;
 
@@ -216,11 +105,11 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         }
         finally
         {
-            LoseTheAckOnFirstBookingsCommitFor.Disarm();
+            lostAck.Disarm();
         }
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.True(LoseTheAckOnFirstBookingsCommitFor.Fired, "The lost acknowledgement never reached the hold.");
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the hold.");
 
         HoldAvailabilityResponse? hold = await response.Content
             .ReadFromJsonAsync<HoldAvailabilityResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
@@ -253,6 +142,8 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         Unit unit = await SeedUnitAsync();
         DateOnly checkIn = CatalogSeeding.Today().AddDays(142);
 
+        CommitFault<AppBookingsDbContext> lostAck = LoseTheAckOnTheHoldFor(unit.Id);
+
         using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, configuration) =>
@@ -265,14 +156,9 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
                     // without ever reaching the cap.
                     ["App:Holds:MaxActiveHoldsPerClient"] = "1"
                 }));
-
-            builder.ConfigureServices(services =>
-                services.AddScoped<AuditableEntitySaveChangesInterceptor, LoseTheAckOnFirstBookingsCommitFor>());
-        });
+        }).WithCommitFault(lostAck);
 
         using HttpClient client = host.CreateClient();
-
-        LoseTheAckOnFirstBookingsCommitFor.ArmFor(unit.Id);
 
         HttpResponseMessage response;
 
@@ -304,13 +190,13 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         }
         finally
         {
-            LoseTheAckOnFirstBookingsCommitFor.Disarm();
+            lostAck.Disarm();
         }
 
         // 200, not 429. The retry recognises its own committed hold before the
         // cap gets a chance to count it.
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.True(LoseTheAckOnFirstBookingsCommitFor.Fired, "The lost acknowledgement never reached the hold.");
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the hold.");
 
         HoldAvailabilityResponse? recovered = await response.Content
             .ReadFromJsonAsync<HoldAvailabilityResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
@@ -377,13 +263,10 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         Assert.NotNull(session);
         string sessionToken = session.SessionToken;
 
-        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
-            builder.ConfigureServices(services =>
-                services.AddScoped<AuditableEntitySaveChangesInterceptor, LoseTheAckOnFirstTransactionsCommit>()));
+        CommitFault<AppTransactionsDbContext> lostAck = LoseTheAckOnThePaymentFor(booking.BookingId);
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
         using HttpClient client = host.CreateClient();
-
-        LoseTheAckOnFirstTransactionsCommit.ArmFor(booking.BookingId);
 
         HttpResponseMessage response;
 
@@ -399,11 +282,11 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         }
         finally
         {
-            LoseTheAckOnFirstTransactionsCommit.Disarm();
+            lostAck.Disarm();
         }
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.True(LoseTheAckOnFirstTransactionsCommit.Fired, "The lost acknowledgement never reached the transaction.");
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the transaction.");
 
         InitiateTransactionResponse? initiated = await response.Content
             .ReadFromJsonAsync<InitiateTransactionResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);

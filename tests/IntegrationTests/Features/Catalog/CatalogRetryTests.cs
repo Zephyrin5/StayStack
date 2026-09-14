@@ -1,21 +1,16 @@
-// AUDIT 2026-09-14: Two tests inject pre-commit (TransactionCommittingAsync), three post-commit (TransactionCommittedAsync), each targeted by a tracked entity; fresh-scope asserts. Probed: the pre-commit pair fail without ChangeTracker.Clear(); the pricing-rule create fails without its recovery lookup.
+// AUDIT 2026-09-14: Two tests inject pre-commit (CommitFaults.FailBeforeCommit), three post-commit (CommitFaults.FailAfterCommit), each targeted by a tracked entity; fresh-scope asserts. Probed: the pre-commit pair fail without ChangeTracker.Clear(); the pricing-rule create fails without its recovery lookup.
 using Catalog;
 using Catalog.Entities;
 using Catalog.Enums;
 using Catalog.Features.CreatePricingRule;
 using Catalog.Features.UpdatePricingRule;
-using BuildingBlocks.Identity;
 using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
-using Npgsql;
-using Persistence.Interceptors;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
-using System.Data.Common;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -36,108 +31,28 @@ namespace IntegrationTests.Features.Catalog;
 [Collection("Integration Tests")]
 public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
 {
-    // Fails the first Catalog commit carrying one specific entity id, with a
-    // SqlState this app classifies as transient, so the delegate re-runs
-    // exactly as a real serialization failure would make it.
-    //
-    // Targeted rather than "the first commit I see": the test host runs
-    // TickerQ, and a stolen injection leaves the test green while proving
-    // nothing. Substituted for AuditableEntitySaveChangesInterceptor rather
-    // than registered as a loose IInterceptor, because each module hands EF
-    // that one interceptor by name - a bare IInterceptor registration is never
-    // consulted.
-    private sealed class FailFirstCatalogCommitFor(ICurrentUserProvider currentUser, TimeProvider timeProvider)
-        : AuditableEntitySaveChangesInterceptor(currentUser, timeProvider), IDbTransactionInterceptor
-    {
-        private static Guid _target;
-        private static int _fired;
-
-        public static void ArmFor(Guid entityId)
+    // Whether a commit carries the entity under test - matched on the tracker,
+    // because this host runs TickerQ and a stolen injection leaves the test
+    // green while proving nothing. A pricing rule matches by its unit too: a
+    // create's rule id is the handler's, unknown to the test.
+    private static bool Carries(AppCatalogDbContext context, Guid entityId) =>
+        context.ChangeTracker.Entries().Any(entry => entry.Entity switch
         {
-            _target = entityId;
-            Interlocked.Exchange(ref _fired, 0);
-        }
+            Unit unit => unit.Id == entityId,
+            Property property => property.Id == entityId,
+            PricingRule rule => rule.Id == entityId || rule.UnitId == entityId,
+            _ => false
+        });
 
-        public static bool Fired => Volatile.Read(ref _fired) > 0;
+    // Two cases, and an execution strategy cannot tell them apart. Before the
+    // commit, nothing was written and the retry writes it. After it, the work is
+    // durable and the caller never finds out - so a handler that assumes a clean
+    // slate reports failure for work that succeeded.
+    private static CommitFault<AppCatalogDbContext> FailTheCommitCarrying(Guid entityId) =>
+        CommitFaults.FailBeforeCommit<AppCatalogDbContext>(context => Carries(context, entityId));
 
-        public ValueTask<InterceptionResult> TransactionCommittingAsync(
-            DbTransaction transaction, TransactionEventData eventData, InterceptionResult result,
-            CancellationToken cancellationToken = default)
-        {
-            bool carriesTarget = _target != Guid.Empty
-                                 && eventData.Context is AppCatalogDbContext
-                                 && eventData.Context.ChangeTracker.Entries()
-                                     .Any(entry => entry.Entity switch
-                                     {
-                                         Unit unit => unit.Id == _target,
-                                         PricingRule rule => rule.Id == _target,
-                                         _ => false
-                                     });
-
-            if (carriesTarget && Interlocked.Increment(ref _fired) == 1)
-            {
-                throw new PostgresException(
-                    "simulated transient failure on commit", "ERROR", "ERROR", "40001");
-            }
-
-            return ValueTask.FromResult(result);
-        }
-    }
-
-    // The other half of the same failure, and the one that matters more.
-    //
-    // FailFirstCatalogCommitFor throws from TransactionCommittingAsync -
-    // *before* the commit - so it proves the rollback case: nothing was
-    // written, the retry writes it. This one throws from
-    // TransactionCommittedAsync, after the commit has landed, which is a lost
-    // acknowledgement: the work is durable and the caller never finds out.
-    //
-    // An execution strategy cannot tell the two apart. It re-runs the delegate
-    // either way, so the retry meets a world its own previous attempt already
-    // changed - and a handler that assumes a clean slate reports failure for
-    // work that succeeded.
-    private sealed class LoseTheAckOnFirstCatalogCommitFor(ICurrentUserProvider currentUser, TimeProvider timeProvider)
-        : AuditableEntitySaveChangesInterceptor(currentUser, timeProvider), IDbTransactionInterceptor
-    {
-        private static Guid _target;
-        private static int _fired;
-
-        public static void ArmFor(Guid entityId)
-        {
-            _target = entityId;
-            Interlocked.Exchange(ref _fired, 0);
-        }
-
-        public static bool Fired => Volatile.Read(ref _fired) > 0;
-
-        public Task TransactionCommittedAsync(
-            DbTransaction transaction, TransactionEndEventData eventData,
-            CancellationToken cancellationToken = default)
-        {
-            // The tracker is checked the same targeted way, and for the same
-            // reason: TickerQ commits on its own schedule in this host.
-            bool carriesTarget = _target != Guid.Empty
-                                 && eventData.Context is AppCatalogDbContext
-                                 && eventData.Context.ChangeTracker.Entries()
-                                     .Any(entry => entry.Entity switch
-                                     {
-                                         Unit unit => unit.Id == _target,
-                                         Property property => property.Id == _target,
-                                         // By unit too: a create's rule id is the
-                                         // handler's, unknown to the test arming it.
-                                         PricingRule rule => rule.Id == _target || rule.UnitId == _target,
-                                         _ => false
-                                     });
-
-            if (carriesTarget && Interlocked.Increment(ref _fired) == 1)
-            {
-                throw new PostgresException(
-                    "simulated lost acknowledgement after commit", "ERROR", "ERROR", "40001");
-            }
-
-            return Task.CompletedTask;
-        }
-    }
+    private static CommitFault<AppCatalogDbContext> LoseTheAckOnTheCommitCarrying(Guid entityId) =>
+        CommitFaults.FailAfterCommit<AppCatalogDbContext>(context => Carries(context, entityId));
 
     private readonly List<Property> _pendingProperties = [];
 
@@ -177,16 +92,6 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         return admin.AccessToken;
     }
 
-    private static WebApplicationFactory<Program> HostWithFailingFirstCommit(IntegrationTestWebApplicationFactory factory) =>
-        factory.WithWebHostBuilder(builder =>
-            builder.ConfigureServices(services =>
-                services.AddScoped<AuditableEntitySaveChangesInterceptor, FailFirstCatalogCommitFor>()));
-
-    private static WebApplicationFactory<Program> HostLosingTheFirstAck(IntegrationTestWebApplicationFactory factory) =>
-        factory.WithWebHostBuilder(builder =>
-            builder.ConfigureServices(services =>
-                services.AddScoped<AuditableEntitySaveChangesInterceptor, LoseTheAckOnFirstCatalogCommitFor>()));
-
     [Fact]
     public async Task AUnitArchiveWhoseCommitFailsOnce_IsStillArchivedAfterTheRetry()
     {
@@ -195,10 +100,9 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
 
         string adminToken = await SignInAsAdministratorAsync();
 
-        using WebApplicationFactory<Program> host = HostWithFailingFirstCommit(factory);
+        CommitFault<AppCatalogDbContext> commitFailure = FailTheCommitCarrying(unit.Id);
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(commitFailure);
         using HttpClient client = host.CreateClient();
-
-        FailFirstCatalogCommitFor.ArmFor(unit.Id);
 
         HttpRequestMessage archive = new HttpRequestMessage(HttpMethod.Delete, $"/api/catalog/units/{unit.Id}");
         archive.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
@@ -210,7 +114,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         // Without this the test is vacuous: an injection that never fired, or
         // fired on a background job's transaction, leaves everything below
         // passing for the wrong reason.
-        Assert.True(FailFirstCatalogCommitFor.Fired, "The commit failure never reached the archive.");
+        Assert.True(commitFailure.HasFired, "The commit failure never reached the archive.");
 
         // A fresh scope, never the one the request used. A handler that
         // accepted its changes and then failed to commit leaves an in-memory
@@ -262,10 +166,9 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
             .ReadFromJsonAsync<CreatePricingRuleResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(rule);
 
-        using WebApplicationFactory<Program> host = HostWithFailingFirstCommit(factory);
+        CommitFault<AppCatalogDbContext> commitFailure = FailTheCommitCarrying(rule.PricingRuleId);
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(commitFailure);
         using HttpClient client = host.CreateClient();
-
-        FailFirstCatalogCommitFor.ArmFor(rule.PricingRuleId);
 
         HttpRequestMessage update =
             new HttpRequestMessage(HttpMethod.Put, $"/api/catalog/units/{unit.Id}/pricing-rules/{rule.PricingRuleId}")
@@ -285,7 +188,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         HttpResponseMessage response = await client.SendAsync(update, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.True(FailFirstCatalogCommitFor.Fired, "The commit failure never reached the update.");
+        Assert.True(commitFailure.HasFired, "The commit failure never reached the update.");
 
         using IServiceScope assertScope = factory.Services.CreateScope();
         AppCatalogDbContext db = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
@@ -312,10 +215,9 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
 
         string adminToken = await SignInAsAdministratorAsync();
 
-        using WebApplicationFactory<Program> host = HostLosingTheFirstAck(factory);
+        CommitFault<AppCatalogDbContext> lostAck = LoseTheAckOnTheCommitCarrying(unit.Id);
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
         using HttpClient client = host.CreateClient();
-
-        LoseTheAckOnFirstCatalogCommitFor.ArmFor(unit.Id);
 
         DateOnly start = CatalogSeeding.Today().AddDays(210);
 
@@ -335,7 +237,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         HttpResponseMessage response = await client.SendAsync(create, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.True(LoseTheAckOnFirstCatalogCommitFor.Fired, "The lost acknowledgement never reached the create.");
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the create.");
 
         CreatePricingRuleResponse? rule = await response.Content
             .ReadFromJsonAsync<CreatePricingRuleResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
@@ -367,10 +269,9 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
 
         string adminToken = await SignInAsAdministratorAsync();
 
-        using WebApplicationFactory<Program> host = HostLosingTheFirstAck(factory);
+        CommitFault<AppCatalogDbContext> lostAck = LoseTheAckOnTheCommitCarrying(unit.Id);
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
         using HttpClient client = host.CreateClient();
-
-        LoseTheAckOnFirstCatalogCommitFor.ArmFor(unit.Id);
 
         HttpRequestMessage archive = new HttpRequestMessage(HttpMethod.Delete, $"/api/catalog/units/{unit.Id}");
         archive.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
@@ -378,7 +279,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         HttpResponseMessage response = await client.SendAsync(archive, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.True(LoseTheAckOnFirstCatalogCommitFor.Fired, "The lost acknowledgement never reached the archive.");
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the archive.");
 
         using IServiceScope assertScope = factory.Services.CreateScope();
         AppCatalogDbContext db = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
@@ -400,10 +301,9 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
 
         string adminToken = await SignInAsAdministratorAsync();
 
-        using WebApplicationFactory<Program> host = HostLosingTheFirstAck(factory);
+        CommitFault<AppCatalogDbContext> lostAck = LoseTheAckOnTheCommitCarrying(propertyId);
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
         using HttpClient client = host.CreateClient();
-
-        LoseTheAckOnFirstCatalogCommitFor.ArmFor(propertyId);
 
         HttpRequestMessage archive =
             new HttpRequestMessage(HttpMethod.Delete, $"/api/catalog/properties/{propertyId}");
@@ -412,7 +312,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         HttpResponseMessage response = await client.SendAsync(archive, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.True(LoseTheAckOnFirstCatalogCommitFor.Fired, "The lost acknowledgement never reached the archive.");
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the archive.");
 
         using IServiceScope assertScope = factory.Services.CreateScope();
         AppCatalogDbContext db = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();

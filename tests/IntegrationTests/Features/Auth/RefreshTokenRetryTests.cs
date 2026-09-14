@@ -2,17 +2,10 @@ using Identity;
 using Identity.Entities;
 using Identity.Features.RefreshToken;
 using Identity.Features.SignIn;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Npgsql;
-using Persistence;
-using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Auth;
@@ -33,29 +26,12 @@ namespace IntegrationTests.Features.Auth;
 [Collection("Integration Tests")]
 public class RefreshTokenRetryTests(IntegrationTestWebApplicationFactory factory)
 {
-    // After the commit, and only a commit carrying a new refresh token for the
-    // target user. Identity registers no audit interceptor to substitute, so
-    // this is attached to the context's options directly.
-    private sealed class LoseTheAckOnFirstRotationFor(Guid userId) : DbTransactionInterceptor
-    {
-        private int _fired;
-
-        public bool Fired => Volatile.Read(ref _fired) > 0;
-
-        public override Task TransactionCommittedAsync(
-            DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
-        {
-            if (eventData.Context is AppIdentityDbContext context
-                && context.ChangeTracker.Entries<RefreshToken>()
-                    .Any(e => e.Entity.UserId == userId && e.Entity.ParentTokenId != null)
-                && Interlocked.Increment(ref _fired) == 1)
-            {
-                throw new PostgresException("simulated lost acknowledgement after commit", "ERROR", "ERROR", "40001");
-            }
-
-            return Task.CompletedTask;
-        }
-    }
+    // After the commit carrying a rotation for this user - a new token with a
+    // parent, which a sign-in's token does not have.
+    private static CommitFault<AppIdentityDbContext> LoseTheAckOnTheRotationFor(Guid userId) =>
+        CommitFaults.FailAfterCommit<AppIdentityDbContext>(context =>
+            context.ChangeTracker.Entries<RefreshToken>()
+                .Any(e => e.Entity.UserId == userId && e.Entity.ParentTokenId != null));
 
     private async Task<(Guid UserId, string RefreshToken)> SignInAsync()
     {
@@ -78,22 +54,6 @@ public class RefreshTokenRetryTests(IntegrationTestWebApplicationFactory factory
         return (userId, signIn.RefreshToken);
     }
 
-    private WebApplicationFactory<Program> HostLosingTheFirstRotationAck(LoseTheAckOnFirstRotationFor interceptor)
-    {
-        string connection = factory.Services.GetRequiredService<IConfiguration>().GetConnectionString("AppConnection")!;
-
-        return factory.WithWebHostBuilder(builder =>
-            builder.ConfigureServices(services =>
-            {
-                services.RemoveAll<DbContextOptions<AppIdentityDbContext>>();
-                services.AddDbContext<AppIdentityDbContext>(options =>
-                {
-                    options.ConfigureStayStackDefaults(connection, "identity", false);
-                    options.AddInterceptors(interceptor);
-                });
-            }));
-    }
-
     private Task<HttpResponseMessage> RefreshAsync(HttpClient client, string refreshToken) =>
         client.PostAsJsonAsync("/api/auth/refresh-token",
             new RefreshTokenRequest { RefreshToken = refreshToken }, TestContext.Current.CancellationToken);
@@ -112,14 +72,14 @@ public class RefreshTokenRetryTests(IntegrationTestWebApplicationFactory factory
     {
         (Guid userId, string original) = await SignInAsync();
 
-        LoseTheAckOnFirstRotationFor interceptor = new LoseTheAckOnFirstRotationFor(userId);
-        using WebApplicationFactory<Program> host = HostLosingTheFirstRotationAck(interceptor);
+        CommitFault<AppIdentityDbContext> lostAck = LoseTheAckOnTheRotationFor(userId);
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
         // Act
         HttpResponseMessage response = await RefreshAsync(host.CreateClient(), original);
 
         // Assert - a rotation, not a revocation.
-        Assert.True(interceptor.Fired, "The lost acknowledgement never reached the rotation.");
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the rotation.");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         RefreshTokenResponse? rotated = await response.Content
@@ -148,11 +108,11 @@ public class RefreshTokenRetryTests(IntegrationTestWebApplicationFactory factory
         // with a new id, so it has to fall through to the reuse path.
         (Guid userId, string original) = await SignInAsync();
 
-        LoseTheAckOnFirstRotationFor interceptor = new LoseTheAckOnFirstRotationFor(userId);
-        using WebApplicationFactory<Program> host = HostLosingTheFirstRotationAck(interceptor);
+        CommitFault<AppIdentityDbContext> lostAck = LoseTheAckOnTheRotationFor(userId);
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
         HttpResponseMessage recovered = await RefreshAsync(host.CreateClient(), original);
-        Assert.True(interceptor.Fired);
+        Assert.True(lostAck.HasFired);
         Assert.Equal(HttpStatusCode.OK, recovered.StatusCode);
 
         // Act - the original token, presented again.
