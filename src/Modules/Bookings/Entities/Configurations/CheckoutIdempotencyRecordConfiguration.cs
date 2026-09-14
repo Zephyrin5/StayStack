@@ -4,6 +4,9 @@ namespace Bookings.Entities.Configurations;
 
 public class CheckoutIdempotencyRecordConfiguration : IEntityTypeConfiguration<CheckoutIdempotencyRecord>
 {
+    /// <summary>One record per idempotency key.</summary>
+    public const string KeyHashIndex = "ix_checkout_idempotency_key_hash";
+
     public void Configure(EntityTypeBuilder<CheckoutIdempotencyRecord> builder)
     {
         builder.HasKey(r => r.BookingId);
@@ -20,9 +23,9 @@ public class CheckoutIdempotencyRecordConfiguration : IEntityTypeConfiguration<C
         // Plain, not partial: an unresolved record is deleted rather than
         // flagged, so there is no resolved state to filter out. Named
         // explicitly per ADR-0011's gotcha.
-        builder.HasIndex(r => r.KeyHash, "ix_checkout_idempotency_key_hash")
+        builder.HasIndex(r => r.KeyHash, KeyHashIndex)
             .IsUnique()
-            .HasDatabaseName("ix_checkout_idempotency_key_hash");
+            .HasDatabaseName(KeyHashIndex);
 
         // What the purge job scans by.
         builder.HasIndex(r => r.CompletedAt, "ix_checkout_idempotency_completed_at")

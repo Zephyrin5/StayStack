@@ -49,7 +49,7 @@ public class PrimaryKeyConstraintTests(IntegrationTestWebApplicationFactory fact
     private static (DbContext, string) Model<TContext, TEntity>(IServiceProvider services) where TContext : DbContext
     {
         TContext context = services.GetRequiredService<TContext>();
-        return (context, CommittedInsertRecovery.PrimaryKeyNameOf<TEntity>(context));
+        return (context, ConstraintViolations.PrimaryKeyNameOf<TEntity>(context));
     }
 
     [Theory]

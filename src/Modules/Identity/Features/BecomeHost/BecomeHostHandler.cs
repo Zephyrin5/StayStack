@@ -1,3 +1,5 @@
+using Identity.Entities.Configurations;
+using Persistence;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using Hosts.Contracts;
@@ -308,8 +310,14 @@ public class BecomeHostHandler(
             return intent;
         }
         catch (DbUpdateException ex)
-            when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+            when (ex.IsViolationOf(PendingHostLinkIntentConfiguration.UserIndex)
+                  || ex.IsPrimaryKeyViolationOf<PendingHostLinkIntent>(dbContext))
         {
+            // The primary key as well as the user index: this save runs under the
+            // execution strategy, and after a lost acknowledgement the retry
+            // re-inserts this intent, which Postgres reports on the primary key.
+            // Either way the read below finds the committed intent.
+            //
             // Another attempt for this user inserted between the read above
             // and this save - a double-click, or a client retrying a request
             // still in flight. Unhandled this surfaced as a bare

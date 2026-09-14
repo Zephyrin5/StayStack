@@ -4,6 +4,9 @@ namespace Reviews.Entities.Configurations;
 
 public class StayReviewConfiguration : IEntityTypeConfiguration<StayReview>
 {
+    /// <summary>One stay review per booking.</summary>
+    public const string BookingIndex = "ix_stay_reviews_booking_id";
+
     public void Configure(EntityTypeBuilder<StayReview> builder)
     {
         builder.HasKey(r => r.Id);
@@ -15,9 +18,9 @@ public class StayReviewConfiguration : IEntityTypeConfiguration<StayReview>
         // One review per stay - the actual guarantee "already reviewed
         // this booking" relies on, not an app-level check-then-insert.
         // Named explicitly per ADR-0011's gotcha.
-        builder.HasIndex(r => r.BookingId, "ix_stay_reviews_booking_id")
+        builder.HasIndex(r => r.BookingId, BookingIndex)
             .IsUnique()
-            .HasDatabaseName("ix_stay_reviews_booking_id");
+            .HasDatabaseName(BookingIndex);
 
         // What GetPropertyReviewsHandler filters/aggregates by.
         builder.HasIndex(r => r.PropertyId, "ix_stay_reviews_property_id")

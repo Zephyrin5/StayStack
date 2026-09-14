@@ -5,6 +5,12 @@ namespace Bookings.Entities.Configurations;
 
 public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAvailabilityHold>
 {
+    /// <summary>
+    ///     No overlapping holds per unit. Created by raw SQL in Catalog's Initial
+    ///     migration, which EF cannot express; SchemaInvariantsTests pins it.
+    /// </summary>
+    public const string OverlapExclusionConstraint = "unit_availability_holds_overlap_excl";
+
     public void Configure(EntityTypeBuilder<UnitAvailabilityHold> builder)
     {
         builder.HasKey(h => h.Id);

@@ -1,9 +1,9 @@
+using Promotions.Entities.Configurations;
 using Persistence;
 using BuildingBlocks.Exceptions;
 using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using Promotions.Entities;
 using Promotions.Features.CreatePromotion;
 namespace Promotions.Features.AdminCreatePromotion;
@@ -46,17 +46,15 @@ public class AdminCreatePromotionHandler(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
+        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf<Promotion>(dbContext))
         {
-            // A violation of this row's own primary key means an earlier attempt
-            // committed and lost its acknowledgement - answer with that row
-            // (Persistence.CommittedInsertRecovery). Any other unique index is a
-            // real conflict.
-            if (await dbContext.FindOwnCommittedInsertAsync<Promotion>(ex, promotion.Id, cancellationToken) is { } committed)
-            {
-                return new CreatePromotionResponse { PromotionId = committed.Id };
-            }
-
+            // An earlier attempt committed and lost its acknowledgement - answer
+            // with that row (Persistence.CommittedInsertRecovery).
+            Promotion committed = await dbContext.FindOwnCommittedInsertAsync<Promotion>(promotion.Id, cancellationToken);
+            return new CreatePromotionResponse { PromotionId = committed.Id };
+        }
+        catch (DbUpdateException ex) when (ex.IsViolationOf(PromotionConfiguration.CodeIndex))
+        {
             throw new ValidationException(nameof(request.Code), $"Promo code '{request.Code}' is already in use.");
         }
 

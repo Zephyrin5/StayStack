@@ -6,6 +6,9 @@ namespace Transactions.Entities.Configurations;
 
 public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
 {
+    /// <summary>At most one Pending or Succeeded transaction per booking.</summary>
+    public const string ActiveTransactionIndex = "ix_transactions_booking_id_active";
+
     public void Configure(EntityTypeBuilder<Transaction> builder)
     {
         builder.HasKey(t => t.Id);
@@ -45,9 +48,9 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
         // stop two concurrent requests both passing it and both inserting -
         // see the handler's DbUpdateException catch, which turns a
         // violation of this index into TransactionAlreadyInProgressException.
-        builder.HasIndex(t => t.BookingId, "ix_transactions_booking_id_active")
+        builder.HasIndex(t => t.BookingId, ActiveTransactionIndex)
             .IsUnique()
-            .HasDatabaseName("ix_transactions_booking_id_active")
+            .HasDatabaseName(ActiveTransactionIndex)
             .HasFilter("transaction_status IN ('Pending', 'Succeeded')");
     }
 }

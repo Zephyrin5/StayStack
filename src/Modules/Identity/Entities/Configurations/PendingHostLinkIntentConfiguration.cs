@@ -4,6 +4,9 @@ namespace Identity.Entities.Configurations;
 
 public class PendingHostLinkIntentConfiguration : IEntityTypeConfiguration<PendingHostLinkIntent>
 {
+    /// <summary>One intent per user.</summary>
+    public const string UserIndex = "ix_pending_host_link_intents_user_id";
+
     public void Configure(EntityTypeBuilder<PendingHostLinkIntent> builder)
     {
         builder.HasKey(i => i.Id);
@@ -18,9 +21,9 @@ public class PendingHostLinkIntentConfiguration : IEntityTypeConfiguration<Pendi
         // Plain, not partial - resolving an intent deletes the row, so there
         // is no resolved state left to filter out. Named explicitly per
         // ADR-0011's gotcha.
-        builder.HasIndex(i => i.UserId, "ix_pending_host_link_intents_user_id")
+        builder.HasIndex(i => i.UserId, UserIndex)
             .IsUnique()
-            .HasDatabaseName("ix_pending_host_link_intents_user_id");
+            .HasDatabaseName(UserIndex);
 
         // What the reconcile job scans by.
         builder.HasIndex(i => i.CreatedAt, "ix_pending_host_link_intents_created_at")

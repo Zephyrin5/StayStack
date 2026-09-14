@@ -1,3 +1,5 @@
+using Bookings.Entities.Configurations;
+using Persistence;
 using Bookings.Entities;
 using Bookings.Exceptions;
 using BuildingBlocks.Exceptions;
@@ -318,8 +320,8 @@ public class HoldAvailabilityHandler(
                     transaction.GetDbTransaction(),
                     cancellationToken: cancellationToken));
             }
-            catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.ExclusionViolation
-                                                   or PostgresErrorCodes.UniqueViolation)
+            catch (PostgresException ex) when (ex.IsViolationOf(UnitAvailabilityHoldConfiguration.OverlapExclusionConstraint)
+                                                   || ex.IsPrimaryKeyViolationOf<UnitAvailabilityHold>(dbContext))
             {
                 // Two very different things arrive here, and telling them apart
                 // is the whole of it.

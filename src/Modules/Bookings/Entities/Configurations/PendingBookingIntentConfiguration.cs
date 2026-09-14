@@ -4,6 +4,9 @@ namespace Bookings.Entities.Configurations;
 
 public class PendingBookingIntentConfiguration : IEntityTypeConfiguration<PendingBookingIntent>
 {
+    /// <summary>One intent per hold.</summary>
+    public const string HoldIndex = "ix_pending_booking_intents_hold_id";
+
     public void Configure(EntityTypeBuilder<PendingBookingIntent> builder)
     {
         builder.HasKey(i => i.Id);
@@ -19,9 +22,9 @@ public class PendingBookingIntentConfiguration : IEntityTypeConfiguration<Pendin
         // Plain, not partial - resolving an intent deletes the row, so there
         // is no resolved state left behind to filter out. Named explicitly per
         // ADR-0011's gotcha.
-        builder.HasIndex(i => i.HoldId, "ix_pending_booking_intents_hold_id")
+        builder.HasIndex(i => i.HoldId, HoldIndex)
             .IsUnique()
-            .HasDatabaseName("ix_pending_booking_intents_hold_id");
+            .HasDatabaseName(HoldIndex);
 
         // What the reconcile job scans by.
         builder.HasIndex(i => i.CreatedAt, "ix_pending_booking_intents_created_at")

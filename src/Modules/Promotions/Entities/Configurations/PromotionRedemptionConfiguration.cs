@@ -5,6 +5,9 @@ namespace Promotions.Entities.Configurations;
 
 public class PromotionRedemptionConfiguration : IEntityTypeConfiguration<PromotionRedemption>
 {
+    /// <summary>One unreversed redemption per promotion and guest email.</summary>
+    public const string PromotionEmailIndex = "ix_promotion_redemptions_promotion_email";
+
     public void Configure(EntityTypeBuilder<PromotionRedemption> builder)
     {
         builder.HasKey(r => r.Id);
@@ -22,10 +25,10 @@ public class PromotionRedemptionConfiguration : IEntityTypeConfiguration<Promoti
         // from redeeming the same code again, while the row itself survives
         // as history (see ReversedAt's own doc comment) - same partial-
         // index pattern as UnitAvailabilityHold's holder-token index.
-        builder.HasIndex(r => new { r.PromotionId, r.GuestEmail }, "ix_promotion_redemptions_promotion_email")
+        builder.HasIndex(r => new { r.PromotionId, r.GuestEmail }, PromotionEmailIndex)
             .IsUnique()
             .HasFilter("reversed_at IS NULL")
-            .HasDatabaseName("ix_promotion_redemptions_promotion_email");
+            .HasDatabaseName(PromotionEmailIndex);
 
         builder.HasIndex(r => r.BookingId, "ix_promotion_redemptions_booking_id")
             .HasDatabaseName("ix_promotion_redemptions_booking_id");

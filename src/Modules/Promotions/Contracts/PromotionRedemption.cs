@@ -1,3 +1,5 @@
+using Promotions.Entities.Configurations;
+using Persistence;
 using BuildingBlocks.Exceptions;
 using Catalog.Contracts;
 using Dapper;
@@ -177,7 +179,7 @@ internal class PromotionRedemption(
                     transaction.GetDbTransaction(),
                     cancellationToken: cancellationToken));
             }
-            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+            catch (PostgresException ex) when (ex.IsViolationOf(PromotionRedemptionConfiguration.PromotionEmailIndex))
             {
                 // The one-per-guest-email index rejected the insert - this
                 // guest already redeemed this code. Not classified as

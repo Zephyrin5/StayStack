@@ -4,6 +4,15 @@ namespace Catalog.Entities.Configurations;
 
 public class PricingRuleConfiguration : IEntityTypeConfiguration<PricingRule>
 {
+    /// <summary>One active length-of-stay discount per unit.</summary>
+    public const string LengthOfStayIndex = "ix_pricing_rules_unit_length_of_stay_active";
+
+    /// <summary>
+    ///     No overlapping active date-range overrides per unit. Created by raw SQL in
+    ///     the AddPricingRuleOverlapConstraints migration, which EF cannot express.
+    /// </summary>
+    public const string DateRangeOverlapConstraint = "pricing_rules_date_range_overlap_excl";
+
     public void Configure(EntityTypeBuilder<PricingRule> builder)
     {
         builder.HasKey(r => r.Id);
@@ -57,10 +66,10 @@ public class PricingRuleConfiguration : IEntityTypeConfiguration<PricingRule>
         //
         // rule_type is compared as text because it is stored via
         // HasConversion<string>(), unlike status.
-        builder.HasIndex(r => r.UnitId, "ix_pricing_rules_unit_length_of_stay_active")
+        builder.HasIndex(r => r.UnitId, LengthOfStayIndex)
             .IsUnique()
             .HasFilter("rule_type = 'LengthOfStayDiscount' AND status <> 2")
-            .HasDatabaseName("ix_pricing_rules_unit_length_of_stay_active");
+            .HasDatabaseName(LengthOfStayIndex);
 
         // "At most one active day-of-week multiplier per unit per weekday" - the
         // third overlap invariant, and until these the only one with nothing in

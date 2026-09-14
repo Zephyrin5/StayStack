@@ -1,6 +1,6 @@
+using Persistence;
 using Hosts.Entities;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 namespace Hosts.Contracts;
 
 // internal, same reasoning as HostLookup/HostAuthorization - Catalog/Identity
@@ -34,12 +34,11 @@ internal class HostRegistrar(AppHostsDbContext dbContext) : IHostRegistrar
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException
-                                           { SqlState: PostgresErrorCodes.UniqueViolation })
+        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf<Host>(dbContext))
         {
-            // Two callers raced the check above with the same id. The row
-            // exists, which is all this method promises - the loser detaches
-            // its own copy and reports success rather than a spurious error.
+            // Two callers raced the check above with the same id, or this save's
+            // own retry met its committed row. The row exists, which is all this
+            // method promises - detach the copy and report success.
             dbContext.ChangeTracker.Clear();
         }
     }

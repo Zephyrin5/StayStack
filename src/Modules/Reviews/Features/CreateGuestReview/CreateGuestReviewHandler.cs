@@ -1,3 +1,4 @@
+using Reviews.Entities.Configurations;
 using Persistence;
 using Microsoft.Extensions.Options;
 using Bookings.Contracts;
@@ -7,7 +8,6 @@ using Catalog.Contracts;
 using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using Reviews.Entities;
 using Reviews.Exceptions;
 namespace Reviews.Features.CreateGuestReview;
@@ -85,17 +85,15 @@ public class CreateGuestReviewHandler(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
+        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf<GuestReview>(dbContext))
         {
-            // A violation of this row's own primary key means an earlier attempt
-            // committed and lost its acknowledgement - answer with that row
-            // (Persistence.CommittedInsertRecovery). Any other unique index is a
-            // real conflict.
-            if (await dbContext.FindOwnCommittedInsertAsync<GuestReview>(ex, review.Id, cancellationToken) is { } committed)
-            {
-                return new CreateGuestReviewResponse { GuestReviewId = committed.Id };
-            }
-
+            // An earlier attempt committed and lost its acknowledgement - answer
+            // with that row (Persistence.CommittedInsertRecovery).
+            GuestReview committed = await dbContext.FindOwnCommittedInsertAsync<GuestReview>(review.Id, cancellationToken);
+            return new CreateGuestReviewResponse { GuestReviewId = committed.Id };
+        }
+        catch (DbUpdateException ex) when (ex.IsViolationOf(GuestReviewConfiguration.BookingIndex))
+        {
             throw new GuestAlreadyReviewedException(request.BookingId);
         }
 

@@ -43,7 +43,7 @@ public class CreatePropertyHandler(
             // committed and lost its acknowledgement - answer with that row
             // (Persistence.CommittedInsertRecovery). Nothing else is caught here:
             // no other unique index on this table has a domain answer.
-            Property committed = (await dbContext.FindOwnCommittedInsertAsync<Property>(ex, property.Id, cancellationToken))!;
+            Property committed = await dbContext.FindOwnCommittedInsertAsync<Property>(property.Id, cancellationToken);
             return new CreatePropertyResponse { PropertyId = committed.Id };
         }
 

@@ -1,3 +1,4 @@
+using Bookings.Entities.Configurations;
 using Bookings;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
@@ -36,6 +37,6 @@ public class SchemaInvariantsTests(IntegrationTestWebApplicationFactory factory)
 
         string? constraintName = await connection.QueryFirstOrDefaultAsync<string>(sql);
 
-        Assert.Equal("unit_availability_holds_overlap_excl", constraintName);
+        Assert.Equal(UnitAvailabilityHoldConfiguration.OverlapExclusionConstraint, constraintName);
     }
 }

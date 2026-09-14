@@ -38,7 +38,7 @@ public class CreateHostHandler(AppHostsDbContext dbContext, IOptions<Localizatio
             // committed and lost its acknowledgement - answer with that row
             // (Persistence.CommittedInsertRecovery). Nothing else is caught here:
             // no other unique index on this table has a domain answer.
-            Host committed = (await dbContext.FindOwnCommittedInsertAsync<Host>(ex, host.Id, cancellationToken))!;
+            Host committed = await dbContext.FindOwnCommittedInsertAsync<Host>(host.Id, cancellationToken);
             return new CreateHostResponse { HostId = committed.Id };
         }
 

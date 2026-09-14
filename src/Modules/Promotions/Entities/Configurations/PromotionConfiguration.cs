@@ -4,6 +4,9 @@ namespace Promotions.Entities.Configurations;
 
 public class PromotionConfiguration : IEntityTypeConfiguration<Promotion>
 {
+    /// <summary>One active promotion per code.</summary>
+    public const string CodeIndex = "ix_promotions_code";
+
     public void Configure(EntityTypeBuilder<Promotion> builder)
     {
         builder.HasKey(p => p.Id);
@@ -37,10 +40,10 @@ public class PromotionConfiguration : IEntityTypeConfiguration<Promotion>
         // already makes them invisible to every ordinary lookup. Same
         // partial-index pattern as UnitAvailabilityHold's holder-token
         // index and PromotionRedemption's own promotion+email index.
-        builder.HasIndex(p => p.Code, "ix_promotions_code")
+        builder.HasIndex(p => p.Code, CodeIndex)
             .IsUnique()
             .HasFilter("status <> 2")
-            .HasDatabaseName("ix_promotions_code");
+            .HasDatabaseName(CodeIndex);
 
         builder.HasIndex(p => p.HostId, "ix_promotions_host_id")
             .HasDatabaseName("ix_promotions_host_id");

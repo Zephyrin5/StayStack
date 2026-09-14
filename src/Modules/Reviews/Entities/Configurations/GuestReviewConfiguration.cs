@@ -4,6 +4,9 @@ namespace Reviews.Entities.Configurations;
 
 public class GuestReviewConfiguration : IEntityTypeConfiguration<GuestReview>
 {
+    /// <summary>One guest review per booking.</summary>
+    public const string BookingIndex = "ix_guest_reviews_booking_id";
+
     public void Configure(EntityTypeBuilder<GuestReview> builder)
     {
         builder.HasKey(r => r.Id);
@@ -12,9 +15,9 @@ public class GuestReviewConfiguration : IEntityTypeConfiguration<GuestReview>
 
         // One guest-review per booking - same reasoning as
         // StayReview's own BookingId uniqueness.
-        builder.HasIndex(r => r.BookingId, "ix_guest_reviews_booking_id")
+        builder.HasIndex(r => r.BookingId, BookingIndex)
             .IsUnique()
-            .HasDatabaseName("ix_guest_reviews_booking_id");
+            .HasDatabaseName(BookingIndex);
 
         builder.HasIndex(r => r.HostId, "ix_guest_reviews_host_id")
             .HasDatabaseName("ix_guest_reviews_host_id");

@@ -529,6 +529,33 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task BecomeHost_WhoseIntentInsertLosesItsAcknowledgement_StillMakesTheUserAHost()
+    {
+        // The intent is a single-row save, retried by the execution strategy.
+        // After a lost acknowledgement the retry re-inserts the same intent and
+        // Postgres reports its primary key - so the adopt-the-committed-intent
+        // catch has to match the primary key as well as the user index.
+        (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
+
+        CommitFault<AppIdentityDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppIdentityDbContext>(context =>
+            context.ChangeTracker.Entries<PendingHostLinkIntent>().Any(e => e.Entity.UserId == userId));
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
+
+        HttpResponseMessage response = await host.CreateClient().SendAsync(
+            CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken);
+
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the intent insert.");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        ApplicationUser user = await scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>().Users.AsNoTracking()
+            .SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(user.HostId);
+        Assert.True(await HostExistsAsync(user.HostId!.Value));
+    }
+
+    [Fact]
     public async Task BecomeHost_OnSuccess_LeavesNoIntentBehind()
     {
         // The success path deletes the intent in the same SaveChanges that

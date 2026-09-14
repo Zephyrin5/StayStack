@@ -1,3 +1,5 @@
+using Bookings.Entities.Configurations;
+using Persistence;
 using Bookings.Contracts;
 using Bookings.Entities;
 using Bookings.Outbox;
@@ -662,7 +664,7 @@ public class ConfirmBookingHandler(
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
             catch (DbUpdateException ex)
-                when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+                when (ex.IsViolationOfAny(PendingBookingIntentConfiguration.HoldIndex, CheckoutIdempotencyRecordConfiguration.KeyHashIndex))
             {
                 // Two indexes can fire here, and neither means a race for the
                 // hold - the UPDATE above already settled that.

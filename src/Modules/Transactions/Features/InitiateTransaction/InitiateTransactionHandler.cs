@@ -6,8 +6,9 @@ using BuildingBlocks.Persistence;
 using Dapper;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using Transactions.Entities;
+using Transactions.Entities.Configurations;
+using Persistence;
 using Transactions.Exceptions;
 namespace Transactions.Features.InitiateTransaction;
 
@@ -176,43 +177,17 @@ public class InitiateTransactionHandler(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex)
-            when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } violation)
+        catch (DbUpdateException ex) when (ex.IsViolationOf(TransactionConfiguration.ActiveTransactionIndex))
         {
-            // By constraint name, never by SqlState alone: a unique violation
-            // is only a conflict when it is the index that means one.
-            //
-            // ix_transactions_booking_id_active is the real conflict: another
-            // transaction for this booking is already Pending or Succeeded.
-            // Anything else is a violation nobody anticipated, and guessing what
-            // it means would report an outcome for a write that never happened.
-            // Let it surface.
-            //
-            // That includes the primary key. There used to be a recovery branch
-            // for it - "the retry re-inserted our own committed row, read it
-            // back" - and it was unreachable twice over: first because the id
-            // was minted per attempt, so no retry could collide on it; now
-            // because the lookup at the top of the delegate finds that row under
-            // the payment lock before an insert is attempted. Recovery that
-            // cannot run reads as a case handled, so it is gone rather than kept
-            // as a backstop. It would also have been broken: the violation
-            // aborts this explicit transaction, and the read-back it issued next
-            // would have failed with 25P02.
-            if (violation.ConstraintName != ActiveTransactionIndex)
-            {
-                throw;
-            }
-
+            // Another transaction for this booking is already Pending or
+            // Succeeded. Any other violation propagates: this request's own
+            // committed row is found by the lookup at the top of the delegate,
+            // under the payment lock, before an insert is attempted.
             throw new TransactionAlreadyInProgressException(request.BookingId);
         }
 
         return BuildResponse(transaction);
     }
-
-    // The index name from the migration that created it. A literal, because the
-    // catch above has to compare against it and EF exposes no strongly-typed
-    // handle on a constraint name.
-    private const string ActiveTransactionIndex = "ix_transactions_booking_id_active";
 
     private static InitiateTransactionResponse BuildResponse(Transaction transaction) =>
         new InitiateTransactionResponse
