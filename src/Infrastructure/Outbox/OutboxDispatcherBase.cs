@@ -331,6 +331,11 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
 
             bool succeeded;
 
+            // The handler runs inside this claim transaction. Its writes through
+            // this DbContext do not commit until the claim commits below, and roll
+            // back with it; its calls into other modules commit on their own
+            // transactions immediately. Every outbox ordering rule follows from
+            // that asymmetry - see TryHandleAsync.
             try
             {
                 await TryHandleAsync(candidate, cancellationToken);
@@ -441,6 +446,15 @@ public abstract partial class OutboxDispatcherBase<TDbContext>(
     }
 
     /// <summary>
+    ///     <para>
+    ///         Runs inside the claim transaction. A write through this module's
+    ///         DbContext commits only when the claim commits, together with the
+    ///         message's ProcessedAt; a call into another module commits
+    ///         independently and immediately, and stays committed if the claim
+    ///         then rolls back. So a cross-module effect can happen more than once
+    ///         while the local record of it is lost, and must be verified from the
+    ///         other module's state rather than inferred from this module's.
+    ///     </para>
     ///     Module-specific: switch over message.Type, deserialize via the
     ///     module's own JsonSerializerContext, call the matching Contracts
     ///     method(s). Returning normally means done - there is no

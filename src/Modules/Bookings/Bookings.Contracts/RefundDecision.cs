@@ -2,19 +2,18 @@ using SeedWork.ValueObjects;
 namespace Bookings.Contracts;
 
 /// <summary>
-///     How much a cancelled booking's payment is owed back. The one definition.
+///     How much a cancelled booking's payment is owed back - the single owner of
+///     that decision.
 ///     <para>
-///         The refund obligation exists so that this number is computed in one
-///         place from committed facts, rather than guessed independently by two
-///         parties. The resolver was converted; the cancellation response was
-///         not, and went on recomputing guest policy - so an expired booking,
-///         or a payment that succeeded after the cancellation, reported a
-///         policy percentage while its obligation settled at the full amount.
-///         Both callers now ask this.
+///         TransactionReversal records the refund from it, and CancelBookingHandler
+///         reports a pending refund from it; the two must agree exactly, so neither
+///         computes the amount any other way. Guest cancellation policy is applied
+///         once, when the obligation is written, and reaches this only as the
+///         obligation's amount.
 ///     </para>
 ///     <para>
-///         Pure, and in Bookings.Contracts because both sides can see it: the
-///         obligation is Bookings' and the resolver is Transactions'.
+///         In Bookings.Contracts because both modules call it: the obligation is
+///         Bookings' and the resolver is Transactions'.
 ///     </para>
 /// </summary>
 public sealed record RefundDecision(Money Amount, bool PaidAfterTheCancellation)

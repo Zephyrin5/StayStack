@@ -71,11 +71,8 @@ internal class PromotionRedemption(
         // rejected duplicate attempt never burns a redemption slot.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
-        // Once, outside the retry (docs/adr/0025). Minted inside, a retry after a
-        // commit that lost its acknowledgement held a different id, re-ran the
-        // cap increment, and met the first attempt's committed row on the
-        // one-per-email index - reporting the guest's own redemption as "already
-        // used by this email address" and failing the checkout it belonged to.
+        // Chosen outside the retry, so a retry can recognise its own committed
+        // redemption (docs/adr/0025).
         Guid redemptionId = Guid.CreateVersion7();
 
         await strategy.ExecuteAsync(async () =>
@@ -84,9 +81,14 @@ internal class PromotionRedemption(
                 await dbContext.Database.BeginTransactionAsync(cancellationToken);
             IDbConnection connection = dbContext.Database.GetDbConnection();
 
-            // An earlier attempt may already have committed. Asked first, before
-            // the cap increment and the insert, both of which would otherwise
-            // judge this redemption against a table already holding it.
+            // An earlier attempt may already have committed and lost its
+            // acknowledgement. This lookup must run before the cap increment:
+            // the increment and the insert commit together, so finding the row
+            // means the slot was already counted, and running the increment again
+            // would burn a second slot or reject the guest's own redemption on the
+            // one-per-email index. It is the lookup, not idempotent writes, that
+            // makes the retry safe - neither the increment nor the insert is
+            // idempotent.
             bool alreadyRedeemed = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
                 """SELECT EXISTS (SELECT 1 FROM promotion_redemptions WHERE id = @Id);""",
                 new { Id = redemptionId }, transaction.GetDbTransaction(), cancellationToken: cancellationToken));

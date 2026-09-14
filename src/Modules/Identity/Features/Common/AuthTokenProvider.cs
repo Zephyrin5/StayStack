@@ -138,12 +138,14 @@ public class AuthTokenProvider(
         string incomingTokenHash = SecureToken.Hash(refreshToken);
         DateTime now = timeProvider.GetUtcNow().UtcDateTime;
 
-        // A single conditional UPDATE, not SELECT-then-check-then-UPDATE -
-        // two concurrent callers presenting the same token can no longer
-        // both observe IsRevoked == false and both rotate it. Only one
-        // UPDATE can match `!rt.IsRevoked` before the other commits, so the
-        // loser lands in the rows == 0 branch below and is correctly
-        // classified as reuse.
+        // Consume-once: a single conditional UPDATE, so of two callers presenting
+        // one token exactly one matches and the other reaches rows == 0.
+        //
+        // rows == 0 cannot tell reuse from this request's own retry - a retry
+        // after a lost acknowledgement finds the token already consumed by its
+        // first attempt. That is why RefreshTokenHandler calls
+        // FindCommittedRotationAsync before this, and before its commit-on-catch
+        // makes the family revocation below durable (docs/adr/0025).
         int rowsUpdated = await dbContext.RefreshTokens
             .Where(rt => rt.TokenHash == incomingTokenHash && !rt.IsRevoked && rt.ExpiresAt > now)
             .ExecuteUpdateAsync(s => s

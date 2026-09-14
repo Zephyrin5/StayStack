@@ -37,31 +37,18 @@ internal class TransactionReversal(
     private async Task<decimal?> ResolveAsync(
         Guid bookingId, Guid? transactionId, bool refundWithoutAnObligation, CancellationToken cancellationToken)
     {
-        // Step 1 - what does the ledger say? RefundPending is included
-        // deliberately: it is the only durable proof that a refund was
-        // recorded, and this method has to be able to tell "already done" from
-        // "not done yet" without trusting a flag that commits somewhere else.
+        // Step 1 - the ledger. The transaction's own status is the authority on
+        // whether a refund exists; the obligation's ResolvedAt is bookkeeping
+        // committed separately (docs/adr/0025). So the query accepts every status
+        // a recorded refund can be in, not only Succeeded: step 2 needs to see
+        // "already refunded" to finish the bookkeeping.
         //
-        // Everything excluded here is genuinely nothing to do: still Pending at
-        // the gateway, Failed, or already past the refund sub-lifecycle.
-        // By transaction id when the caller knows it, and ordered-then-first
-        // when it does not. Never SingleOrDefault over a booking: a booking may
-        // have several transactions, and the active-transaction index
-        // constrains only Pending and Succeeded - so a RefundPending attempt
-        // alongside a Succeeded one is a state the database permits and this
-        // query used to throw on, every retry and every sweep pass, for as long
-        // as both rows existed.
-        //
-        // Ordered by Id, not SucceededAt. Ids are version-7 GUIDs so they are
-        // already creation-ordered, they are never null - SucceededAt is, on
-        // rows predating that column - and SQLite cannot ORDER BY a
-        // DateTimeOffset at all, which the unit tests run on.
-        //
-        // Succeeded first, then newest, so a booking-wide reversal refunds the
-        // payment that is actually outstanding. A RefundPending sibling has
-        // already been dealt with and needs no second refund; it is included
-        // here only so step 2 below can finish that attempt's bookkeeping when
-        // it is the only one left.
+        // First matching row, never SingleOrDefault: a booking can have several
+        // transactions, and the active index constrains only Pending and
+        // Succeeded. Succeeded sorts first, so a booking-wide call refunds the
+        // outstanding payment. Ordered by Id (version-7, creation-ordered, never
+        // null) rather than SucceededAt, which is null on older rows and which
+        // SQLite - the unit tests' provider - cannot order.
         IQueryable<Transaction> candidates = dbContext.Transactions
             .Where(t => t.BookingId == bookingId
                         && (t.TransactionStatus == TransactionStatus.Succeeded
@@ -84,14 +71,9 @@ internal class TransactionReversal(
             return null;
         }
 
-        // Step 2 - the refund is already recorded, so only the bookkeeping can
-        // still be outstanding. Finish it and stop.
-        //
-        // This is the half of the fix that closes the *mirror* failure: the
-        // refund commits, the process dies before the marker, and the old code
-        // - which queried for Succeeded alone - then found nothing on every
-        // later run and returned at step 1. The obligation stayed unresolved
-        // forever and the sweep re-processed it every cycle, permanently.
+        // Step 2 - a refund is already recorded, so only the obligation's
+        // bookkeeping can be outstanding. Finish it; a crash between the refund
+        // commit and the marker lands here on the next run.
         if (HasRecordedARefund(transaction.TransactionStatus))
         {
             await bookingLookup.MarkRefundObligationResolvedAsync(
@@ -100,33 +82,20 @@ internal class TransactionReversal(
             return null;
         }
 
-        // Step 3 - was it cancelled? The obligation is the answer, not the
-        // booking's own CancelledAt. It is written in the cancellation's own
-        // transaction, so it is visible if and only if the cancellation
-        // committed; reading the booking instead could see a null for a
-        // cancellation already in flight and conclude the payment came second.
+        // Step 3 - was it cancelled? The obligation answers that, because it is
+        // written in the cancellation's own transaction: visible if and only if
+        // the cancellation committed. The booking's CancelledAt, read through
+        // another module, could be null for a cancellation still in flight.
         RefundObligationSnapshot? obligation =
             await bookingLookup.GetRefundObligationAsync(bookingId, cancellationToken);
 
-        // Deliberately NO early return on obligation.IsResolved, and this is
-        // the other half of the fix.
-        //
-        // The marker and the refund commit separately, and which one is inside
-        // a transaction depends on which dispatcher called this - the two are
-        // mirror images. OutboxDispatcherBase runs TryHandleAsync *inside* its
-        // claim transaction, so from TransactionsOutboxDispatcher the refund
-        // write joins that uncommitted transaction while the Bookings marker
-        // autocommits on its own connection; from BookingsOutboxDispatcher it
-        // is the reverse.
-        //
-        // So a dispatcher transaction that fails after this ran could leave the
-        // obligation marked resolved with the refund rolled back. Treating that
-        // flag as authority made the retry return here, the dispatcher mark the
-        // message processed, and the sweep skip the row on ResolvedAt != null -
-        // a refund silently lost with every mechanism reporting success.
-        //
-        // The transaction's own status is the authority. The flag is bookkeeping
-        // that lets the sweep skip cheaply when it agrees, and nothing more.
+        // Deliberately no early return on obligation.IsResolved, and adding one
+        // loses refunds. The refund and the marker commit in different
+        // transactions, and which one is inside the caller's transaction
+        // depends on the dispatcher (OutboxDispatcherBase runs handlers inside
+        // its claim transaction). A claim that rolls back after this ran can
+        // leave the marker set with no refund behind it. The transaction status,
+        // read in step 1, is the authority; the marker only lets the sweep skip.
         if (obligation is null)
         {
             // No cancellation explains this payment. For a caller triggered by
@@ -145,13 +114,8 @@ internal class TransactionReversal(
             return transaction.Amount.Amount;
         }
 
-        // Step 3 - how much. Both inputs are committed facts by now, which is
-        // the entire point of resolving here rather than at either writer.
-        //
-        // RefundDecision, not an inline rule: CancelBookingHandler reports the
-        // pending amount from the same function, and when the two computed it
-        // separately they disagreed on every expiry and every payment that
-        // landed after its cancellation.
+        // Step 4 - how much, from two committed facts. RefundDecision owns the
+        // rule; CancelBookingHandler reports pending refunds from the same call.
         RefundDecision decision = RefundDecision.For(transaction.Amount, transaction.SucceededAt, obligation);
 
         Money amount = decision.Amount;
