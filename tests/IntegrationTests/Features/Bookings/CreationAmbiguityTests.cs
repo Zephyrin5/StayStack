@@ -37,37 +37,63 @@ namespace IntegrationTests.Features.Bookings;
 public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory)
 {
     // Lets the commit land and then throws, which is what a dropped
-    // acknowledgement looks like from inside the process. Armed for one unit so
-    // TickerQ's own commits cannot steal it.
+    // acknowledgement looks like from inside the process.
+    //
+    // Armed for one unit, and it has to actually check. This comment used to
+    // say so while the code checked only the context type, so the first
+    // Bookings commit of any kind took the injection - and this host runs
+    // TickerQ, whose relay and expiry jobs commit on that context every minute.
+    // A stolen injection leaves the request running clean, Fired true, and the
+    // test green with the recovery it exists for disabled: that was
+    // demonstrated, not supposed.
+    //
+    // The hold is inserted through Dapper, so there is nothing in the change
+    // tracker to recognise it by. The commit has landed by the time this runs,
+    // though, so a separate connection can see whether it made a hold for the
+    // target unit durable - which is exactly the property that makes it the
+    // commit under test.
     private sealed class LoseTheAckOnFirstBookingsCommitFor(ICurrentUserProvider currentUser, TimeProvider timeProvider)
         : AuditableEntitySaveChangesInterceptor(currentUser, timeProvider), IDbTransactionInterceptor
     {
-        private static int _armed;
+        private static Guid _unitId;
         private static int _fired;
 
-        public static void Arm()
+        public static void ArmFor(Guid unitId)
         {
-            Interlocked.Exchange(ref _armed, 1);
             Interlocked.Exchange(ref _fired, 0);
+            _unitId = unitId;
         }
 
-        public static void Disarm() => Interlocked.Exchange(ref _armed, 0);
+        public static void Disarm() => _unitId = Guid.Empty;
 
         public static bool Fired => Volatile.Read(ref _fired) > 0;
 
-        public Task TransactionCommittedAsync(
+        public async Task TransactionCommittedAsync(
             DbTransaction transaction, TransactionEndEventData eventData,
             CancellationToken cancellationToken = default)
         {
-            if (Volatile.Read(ref _armed) == 1
-                && eventData.Context is AppBookingsDbContext
+            Guid unitId = _unitId;
+
+            if (unitId == Guid.Empty
+                || eventData.Context is not AppBookingsDbContext context
+                || Volatile.Read(ref _fired) != 0)
+            {
+                return;
+            }
+
+            await using NpgsqlConnection probe = new NpgsqlConnection(context.Database.GetConnectionString());
+            await probe.OpenAsync(cancellationToken);
+
+            await using NpgsqlCommand command = new NpgsqlCommand(
+                "SELECT EXISTS (SELECT 1 FROM unit_availability_holds WHERE unit_id = @UnitId)", probe);
+            command.Parameters.AddWithValue("UnitId", unitId);
+
+            if ((bool)(await command.ExecuteScalarAsync(cancellationToken))!
                 && Interlocked.Increment(ref _fired) == 1)
             {
                 throw new PostgresException(
                     "simulated lost acknowledgement after commit", "ERROR", "ERROR", "40001");
             }
-
-            return Task.CompletedTask;
         }
     }
 
@@ -86,19 +112,26 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
     // TransactionCommittedAsync runs once the row is durable and inside the
     // region the execution strategy retries: the row is in the database and the
     // caller is about to be told it is not.
+    //
+    // Armed for one booking, and matched on the payment the commit is carrying
+    // rather than on the context alone: TransactionsOutboxDispatcher's relay
+    // commits on AppTransactionsDbContext on its own schedule in this host, and
+    // would otherwise take the injection and leave this test green over a
+    // request that never lost anything. The payment is still tracked here -
+    // SaveChangesAsync accepts it, it does not detach it.
     private sealed class LoseTheAckOnFirstTransactionsCommit(ICurrentUserProvider currentUser, TimeProvider timeProvider)
         : AuditableEntitySaveChangesInterceptor(currentUser, timeProvider), IDbTransactionInterceptor
     {
-        private static int _armed;
+        private static Guid _bookingId;
         private static int _fired;
 
-        public static void Arm()
+        public static void ArmFor(Guid bookingId)
         {
-            Interlocked.Exchange(ref _armed, 1);
             Interlocked.Exchange(ref _fired, 0);
+            _bookingId = bookingId;
         }
 
-        public static void Disarm() => Interlocked.Exchange(ref _armed, 0);
+        public static void Disarm() => _bookingId = Guid.Empty;
 
         public static bool Fired => Volatile.Read(ref _fired) > 0;
 
@@ -106,8 +139,11 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
             DbTransaction transaction, TransactionEndEventData eventData,
             CancellationToken cancellationToken = default)
         {
-            if (Volatile.Read(ref _armed) == 1
+            Guid bookingId = _bookingId;
+
+            if (bookingId != Guid.Empty
                 && eventData.Context is AppTransactionsDbContext
+                && eventData.Context.ChangeTracker.Entries<Transaction>().Any(e => e.Entity.BookingId == bookingId)
                 && Interlocked.Increment(ref _fired) == 1)
             {
                 throw new PostgresException(
@@ -163,7 +199,7 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
 
         using HttpClient client = host.CreateClient();
 
-        LoseTheAckOnFirstBookingsCommitFor.Arm();
+        LoseTheAckOnFirstBookingsCommitFor.ArmFor(unit.Id);
 
         HttpResponseMessage response;
 
@@ -235,7 +271,7 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
 
         using HttpClient client = host.CreateClient();
 
-        LoseTheAckOnFirstBookingsCommitFor.Arm();
+        LoseTheAckOnFirstBookingsCommitFor.ArmFor(unit.Id);
 
         HttpResponseMessage response;
 
@@ -346,7 +382,7 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
 
         using HttpClient client = host.CreateClient();
 
-        LoseTheAckOnFirstTransactionsCommit.Arm();
+        LoseTheAckOnFirstTransactionsCommit.ArmFor(booking.BookingId);
 
         HttpResponseMessage response;
 
