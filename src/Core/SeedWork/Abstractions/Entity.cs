@@ -19,6 +19,17 @@ public abstract class Entity
     // entity's own business API. Internal, not private: the interceptor
     // lives in a different project (Persistence) and needs access without
     // exposing these publicly (see InternalsVisibleTo in Domain.csproj).
+    //
+    // Id is deliberately not set here, and this will be asked again.
+    // CreatedAt and CreatedBy are facts about the save - unknown until
+    // SavingChanges. Id is a fact about the operation: it has to exist before
+    // the first attempt, so a retry after a lost acknowledgement can find the
+    // row that attempt committed. The interceptor runs inside every retried
+    // delegate, so minting here would put the retry-identity defect behind
+    // every entity at once, at the one layer RetryIdentityProtocolTests cannot
+    // see. Factories take the id from the caller instead (docs/adr/0025,
+    // EntityIdentityProtocolTests) and guard it against Guid.Empty - which
+    // also keeps EF from quietly generating a Guid key of its own on Add.
     internal void SetCreated(DateTimeOffset createdAt, Guid? createdBy)
     {
         CreatedAt = createdAt;

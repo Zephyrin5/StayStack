@@ -29,6 +29,13 @@ namespace UnitTests.Persistence;
 // did, through an interface, from another file); or `new T` where T mints in a
 // field or property initializer or its constructor (RefreshToken's Id did).
 //
+// Entity factories no longer mint at all (EntityIdentityProtocolTests checks that
+// by direct match), which removes one route here but not the need to follow
+// calls: three of the real violations went through a same-file helper or a
+// service method, never an entity factory, and a scan of delegate bodies alone
+// misses all three. That was probed against the pre-fix sources before this
+// resolution was kept.
+//
 // Crude by design - a regex over brace-matched bodies - so it carries an
 // allow-list. Every entry is a deliberate decision with a reason attached, which
 // is exactly what the violations never had.

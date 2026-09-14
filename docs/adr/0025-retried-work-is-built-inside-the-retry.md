@@ -196,3 +196,14 @@ This is the second time a shared-context `Clear()` has caused a problem here; th
 Reordering cannot fix that; there has to be one read. `GetPaymentStateAsync` returns status, original amount and refund amount together, and both branches of cancellation derive from it.
 
 The same drift had appeared inside the resolver: the repair step accepted `RefundPending` alone while the concurrency catch asked `!= Succeeded`. One counted too few - a refund reaching `Refunded` or `RefundFailed` before its marker was written became invisible and its obligation never settled - and the other too many, since `Failed` means no refund was written at all. Both now call one predicate.
+
+### Entities never mint their own identity
+
+> **Every entity factory takes a caller-supplied `Guid id`. The creating handler mints it on the first line of `Handle`, before anything that could retry.**
+
+Five factories minted, and every caller happened to call them outside its retry delegate - correct by line order alone. `EntityIdentityProtocolTests` now checks the convention by direct match, with ASP.NET Identity's `ApplicationUser` and `RefreshToken`'s initializer named as exemptions. `Entity.SetCreated` records why `Id` is not assigned there: the interceptor runs inside every retried delegate.
+
+Converting the factories did **not** make `RetryIdentityProtocolTests`' call resolution redundant. Against the pre-fix sources, a delegate-body-only scan missed `InitiateTransactionHandler` (through a helper), `RefreshTokenHandler` and `SignUpHandler` (through a service method), and caught only `PromotionRedemption`.
+
+**"No retry delegate" is not "no retry".** `EnableRetryOnFailure` wraps a plain `SaveChangesAsync` in the execution strategy too. Probed: a lost acknowledgement on a single-insert save retries into its own committed row and surfaces `23505`. `CreateUnitHandler`, which does have a delegate, now recovers; the create handlers built on a bare `SaveChangesAsync` - `CreateProperty`, `AdminCreateProperty`, both promotion creates, both review creates and `CreateHost` - would still answer an error for a row that exists, and are left as a decision rather than fixed speculatively.
+
