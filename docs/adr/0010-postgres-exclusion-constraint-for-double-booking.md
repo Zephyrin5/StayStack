@@ -1,66 +1,37 @@
 # 0010 - Postgres exclusion constraint for double-booking prevention
 
-**Status:** Accepted; amended by [ADR-0020](0020-a-checkout-is-a-claim-with-a-deadline-not-a-sale.md), table now owned by Bookings per [ADR-0021](0021-availability-is-part-of-bookings.md)
-
-> The constraint itself is untouched - same table, same `EXCLUDE USING gist`, same absence of a status predicate. Only the owning module changed.
+**Status:** Accepted. Table owned by Bookings per [ADR-0021](0021-availability-is-part-of-bookings.md); hold lifecycle per [ADR-0020](0020-a-checkout-is-a-claim-with-a-deadline-not-a-sale.md).
 
 ## Context
 
-Preventing two overlapping bookings for the same unit is the one invariant this application cannot get wrong. The naive approaches - checking for an overlap in application code before inserting, or an application-level lock - both have the same fatal flaw under real concurrency: a check-then-insert has a window between the check and the write where a second concurrent request can pass the same check before either commits, and an application-level lock only works if every code path that could conflict goes through the same lock, in the same process, forever.
+Two overlapping holds or bookings for one unit is the one invariant this application cannot get wrong. A check-then-insert in application code has a window in which a second request passes the same check before either commits, and a lock alone holds only for the writers that remember to take it.
 
 ## Decision
 
-The actual guarantee is a Postgres **GIST exclusion constraint** on `unit_availability_holds (unit_id, stay_range)`, added via hand-written SQL in a migration (`EXCLUDE USING gist (unit_id WITH =, stay_range WITH &&)`) - not expressed through EF Core's fluent API, because there isn't one: confirmed against a real, still-open, ~5-year-stale upstream feature request ([npgsql/efcore.pg#1975](https://github.com/npgsql/efcore.pg/issues/1975)) with no signal it's coming soon.
+**The exclusion constraint enforces non-overlap.** `unit_availability_holds_overlap_excl` is `EXCLUDE USING gist (unit_id WITH =, stay_range WITH &&)` on `unit_availability_holds`, with no status predicate. It is hand-written SQL in a migration because EF Core has no fluent API for exclusion constraints ([npgsql/efcore.pg#1975](https://github.com/npgsql/efcore.pg/issues/1975)); its name is `UnitAvailabilityHoldConfiguration.OverlapExclusionConstraint`. `HoldAvailabilityHandler` does not check for overlap itself: it inserts, and translates a violation of that constraint (matched by name) into `UnitUnavailableException`.
 
-`HoldAvailabilityHandler` doesn't check for overlap itself - it just attempts the insert and catches the exclusion-violation error the database raises. No rows-affected check, no manual locking: the constraint is what actually makes double-booking impossible, and the application code's job is only to translate the database's rejection into a clean `UnitUnavailableException`.
+**`UnitAvailabilityLock` coordinates the writers the constraint cannot.** Taking a hold and archiving a unit both take the unit's advisory lock exclusively, inside their transactions and before the checks it protects (`UnitAvailabilityLock.AcquireForHoldSql`, `AcquireForArchivalSql`; archival takes it in `UnitArchival.EnsureArchivableAsync`, per unit, after `PropertyUnitsLock` when a whole property is archived). It serves two purposes the constraint cannot:
 
-Two related, load-bearing details:
+- **Archival.** Archiving writes `units` in Catalog, a different table and module. The constraint cannot see it, so without the lock an archive's "no active holds" check and a hold insert can interleave, leaving an archived unit with live inventory. A row lock on `units` would do the same job but require Bookings to name a Catalog table ([ADR-0004](0004-module-boundaries-via-contracts-projects.md)); an advisory key needs no shared schema.
+- **Concurrent holds on one unit.** A GiST exclusion constraint is checked after each inserter writes its own index entry, so concurrent overlapping inserters wait on each other's uncommitted entries and deadlock until `deadlock_timeout` breaks the cycle. Every loser becomes a deadlock victim and is retried with backoff instead of being rejected. Serialised per unit, each insert checks committed rows and a loser is rejected at once. Holds for different units never share a key.
 
-- **A stale `held` row doesn't self-expire from the constraint's perspective.** The constraint has no `WHERE` clause - it applies to every row regardless of status or expiry. An abandoned hold that nobody ever confirmed or retried would block that range forever unless something actively deletes it. `HoldAvailabilityHandler` deletes this unit's own stale rows right before the insert that would otherwise be blocked by them; `ExpiredHoldsSweepJob` ([ADR-0002](0002-tickerq-for-background-jobs.md)) is the backstop for ranges nobody ever retries. The read path (`GetPriceCalendarHandler`) separately treats an expired `held` row as available for *display* purposes without needing it deleted first - the constraint and the calendar display are two different concerns with two different fixes.
-- **A manually-started transaction bypasses EF's connection-retry policy.** `HoldAvailabilityHandler` wraps its explicit `BeginTransactionAsync` block in `CreateExecutionStrategy().ExecuteAsync(...)` and the app's retry policy explicitly includes Postgres deadlocks (`40P01`) - confirmed necessary by `HoldAvailabilityConcurrencyTests` reproducing a real deadlock under genuine concurrent contention on the same range (two transactions can each be waiting on the other while the exclusion constraint checks their not-yet-committed rows against each other).
+The lock is a performance and coordination mechanism, not the guarantee. A writer that skips it still cannot commit an overlap; it can only deadlock.
+
+Supporting details:
+
+- **Stale `held` rows block ranges until deleted.** The constraint applies to every row regardless of status or expiry. `HoldAvailabilityHandler` deletes the unit's expired `held` rows under the lock before inserting, and `ExpiredHoldsSweepJob` ([ADR-0002](0002-tickerq-for-background-jobs.md)) deletes ranges nobody retries. `GetPriceCalendarHandler` treats an expired `held` row as available for display without deleting it.
+- **The explicit transaction runs inside the execution strategy.** A manually started transaction is not retried per operation, so the handler wraps it in `CreateExecutionStrategy().ExecuteAsync(...)`, and the retry policy includes `40P01` and `40001`. The transaction is Serializable for the per-client hold cap, a count-then-insert across units that the per-unit lock does not cover.
 
 ## Alternatives considered
 
-- **Check-for-overlap-then-insert in application code.** Rejected outright: this is exactly the race the constraint exists to close, not an alternative to it.
-- **`SELECT ... FOR UPDATE` / advisory locks scoped to the unit.** Would work, but requires every write path to remember to take the lock, in the right order, forever - a discipline requirement instead of a database-enforced invariant. The exclusion constraint can't be forgotten by a future contributor the way a manual locking convention can.
-- **Application-level distributed lock (Redis, etc.).** Adds real infrastructure for a guarantee Postgres already provides natively, with a weaker failure mode (the lock provider itself becoming unavailable) than a database constraint has.
+- **Check-for-overlap-then-insert in application code.** Rejected: that is the race the constraint closes.
+- **A per-unit lock instead of the constraint.** Rejected as the guarantee: every write path would have to remember the lock forever, and one that forgot could double-book. The lock is used alongside the constraint for coordination and throughput, never in place of it.
+- **The constraint alone.** Rejected: it cannot exclude archival, and under contention it arbitrates by deadlock - ten concurrent hold requests for one unit took over a minute.
+- **Application-level distributed lock (Redis, etc.).** Rejected: new infrastructure for a guarantee Postgres provides, with the lock provider as an added failure mode.
 
 ## Consequences
 
-- The double-booking guarantee lives in a migration's raw SQL, not in the C# model - anyone regenerating migrations from scratch (a squash, a fresh `Initial`) would silently lose it, since nothing in the EF model represents it for the diff engine to reproduce. `SchemaInvariantsTests` exists specifically as the safety net for this: it asserts the constraint exists in the live schema, so losing it in a future squash fails CI immediately instead of silently reopening this bug.
-- `HoldAvailabilityConcurrencyTests` is the highest-value test in the system for this reason - it's the only test that actually exercises genuine concurrent writes against the constraint, rather than asserting behavior a single-threaded test can't disprove. The same reasoning generalizes past this one constraint: every other genuinely concurrency-dependent claim in the codebase (`CreatePricingRuleHandler`/`UpdatePricingRuleHandler`'s Serializable transactions, `PromotionRedemption`'s guarded redemption-cap `UPDATE`, the hold-session cap inside this same handler's transaction) needed its own concurrent test copying this file's pattern, not just this one - see `PricingRuleConcurrencyTests` and the sibling test added directly alongside this one, both added specifically because a single-threaded test had been quietly standing in for concurrency coverage that didn't actually exist. Two of those three uncovered a real bug on first run, not just confirmed existing correctness (see [ADR-0012](0012-single-pricing-rule-entity-with-write-time-overlap-rejection.md) and this ADR's own hold-cap fix).
-- Revisit the Npgsql/EF Core fluent-API gap periodically ([npgsql/efcore.pg#1975](https://github.com/npgsql/efcore.pg/issues/1975)) - if it's ever implemented, moving the constraint into the model would close the squash-loses-the-constraint risk above, the same way [ADR-0011](0011-prefer-model-config-over-migration-sql.md) already did for the transactions partial unique index.
-- **The constraint's own strength was, until recently, its exploit surface.** Everything above describes how faithfully the constraint enforces `(unit_id, stay_range)` non-overlap - but nothing here ever bounded *how large* a range, or *how many* ranges, an anonymous caller could ask it to enforce. `HoldAvailabilityRequestValidator`/`HoldAvailabilityHandler` had no cap on stay length or lead time, and `UnitAvailabilityHold` had no owner column at all, so a single unauthenticated request could hold `[today, today+3650)` and the constraint would faithfully block that entire decade for every other caller. This is now closed by stay-length/lead-time caps and a rate-limited, session-capped hold flow - see [ADR-0016](0016-trust-model-for-anonymous-endpoints.md), which is the trust-boundary analysis this ADR never did on its own.
-
-## Amendment: concurrent holds queue per unit, because arbitration by deadlock is too slow
-
-The second load-bearing detail above records that concurrent holds on one range
-deadlock, and treats `40P01` in the retry policy as the answer. It is correct -
-nothing was ever double-booked - and it is far too slow, which nothing measured
-until the audit asked why `HoldAvailabilityConcurrencyTests` sometimes took a
-minute.
-
-**What happens.** A GiST exclusion constraint is checked after each inserter
-writes its own index entry, so concurrent overlapping inserters each find the
-other's uncommitted entry and wait on it. Postgres only breaks that cycle after
-`deadlock_timeout`, and the victim's execution strategy retries with backoff -
-into the next cycle. One burst of ten hold requests for one unit took 73 seconds
-with 43 deadlocks in the server log. Driven at the database directly, ten races of
-eight inserters produced 70 deadlocks in 70 seconds: every single loser was a
-deadlock victim, not a clean rejection.
-
-**The fix is `UnitAvailabilityLock` taken exclusively by holds**, which already
-took it shared to exclude archival. Holds for one unit now queue for one short
-transaction each, so the constraint always checks against committed rows and
-rejects at once. A hundred eight-way races take about two seconds with no
-deadlocks, and the handler-level concurrency tests dropped from 17-58 seconds to
-under five.
-
-**This does not reverse "Alternatives considered".** That entry rejected a lock
-*instead of* the constraint, because a lock is a discipline every writer must
-remember. The constraint is still the only thing that makes double-booking
-impossible; the lock only removes the deadlock storm on the path that takes it.
-`HoldExclusionConstraintTests` pins both halves: exactly one winner and no
-deadlock victims through the handler's protocol (whose lock mode it reads from
-`UnitAvailabilityLock.AcquireForHoldSql`, so it cannot drift), and never two
-winners with no lock at all - the writer that forgets.
+- The guarantee lives in raw migration SQL, which a migration squash regenerated from the model would lose. `SchemaInvariantsTests` asserts the constraint exists in the live schema.
+- `HoldExclusionConstraintTests` drives concurrent inserts at the database directly: through the handler's lock protocol it requires one winner and clean rejections for every loser, and with no lock it requires that two overlapping holds never both commit. `HoldAvailabilityConcurrencyTests` covers the same invariant through the handler.
+- The constraint bounds overlap, not how much inventory a caller can hold. Stay-length and lead-time caps and the per-client hold cap bound that; see [ADR-0016](0016-trust-model-for-anonymous-endpoints.md).
+- If npgsql/efcore.pg#1975 is implemented, the constraint can move into the model, as [ADR-0011](0011-prefer-model-config-over-migration-sql.md) did for the transactions partial unique index.
