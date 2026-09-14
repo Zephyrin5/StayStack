@@ -31,40 +31,14 @@ public partial class BookingPaymentLockProtocolTests
     [GeneratedRegex(@"FOR UPDATE")]
     private static partial Regex RowLock();
 
-    // Comments go first: this codebase explains its locks at length, and
-    // "FOR UPDATE" or "BookingPaymentLock.KeyFor(" appearing in prose must not
-    // satisfy - or reorder - anything.
-    [GeneratedRegex(@"/\*.*?\*/|//[^\n]*", RegexOptions.Singleline)]
-    private static partial Regex Comments();
-
-    private static string FindSourceRoot()
-    {
-        DirectoryInfo? directory = new DirectoryInfo(AppContext.BaseDirectory);
-
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "StayStack.slnx")))
-        {
-            directory = directory.Parent;
-        }
-
-        Assert.NotNull(directory);
-        return Path.Combine(directory.FullName, "src");
-    }
-
-    private static IEnumerable<(string Path, string Code)> CancellingPaths()
-    {
-        string root = FindSourceRoot();
-
-        return Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
-            .Where(path =>
-            {
-                string relative = Path.GetRelativePath(root, path).Replace('\\', '/');
-                return !relative.StartsWith("artifacts/", StringComparison.Ordinal)
-                       && !relative.Contains("/bin/", StringComparison.Ordinal)
-                       && !relative.Contains("/obj/", StringComparison.Ordinal);
-            })
-            .Select(path => (Path: path, Code: Comments().Replace(File.ReadAllText(path), string.Empty)))
+    // Comments are stripped first (SourceTree.WithoutComments): this codebase
+    // explains its locks at length, and "FOR UPDATE" or
+    // "BookingPaymentLock.KeyFor(" appearing in prose must not satisfy - or
+    // reorder - anything. Strings are kept, since the row lock is SQL.
+    private static IEnumerable<(string Path, string Code)> CancellingPaths() =>
+        SourceTree.SourceFiles()
+            .Select(path => (Path: path, Code: SourceTree.WithoutComments(File.ReadAllText(path))))
             .Where(file => BookingCancelCall().IsMatch(file.Code));
-    }
 
     [Fact]
     public void EveryPathThatCancelsABooking_TakesThePaymentLock_BeforeTheRowLockAndTheCancel()
@@ -72,7 +46,9 @@ public partial class BookingPaymentLockProtocolTests
         List<(string Path, string Code)> paths = CancellingPaths().ToList();
 
         // Not vacuous: a scan that found nothing would pass every assertion
-        // below. The two known paths must be among what it found.
+        // below. The two known paths must be among what it found - and the loop
+        // then asserts over every path discovered, so a third cancelling path
+        // is checked without anyone adding it here.
         Assert.Contains(paths, p => Path.GetFileName(p.Path) == "CancelBookingHandler.cs");
         Assert.Contains(paths, p => Path.GetFileName(p.Path) == "ExpireUnpaidBookingsJob.cs");
 
