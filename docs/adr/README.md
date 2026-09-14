@@ -26,9 +26,9 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 
 | # | Title | Status |
 |---|---|---|
-| [0001](0001-native-aot-compatibility.md) | Native AOT compatibility as a design constraint | Superseded (goal dropped, library choices kept) |
+| [0001](0001-native-aot-compatibility.md) | Source-generated libraries, without a Native AOT goal | Accepted |
 | [0002](0002-tickerq-for-background-jobs.md) | TickerQ for background jobs | Accepted |
-| [0003](0003-compensating-actions-over-distributed-transactions.md) | Compensating actions and a transactional outbox for cross-module writes | Accepted; partially superseded by [0017](0017-durable-intent-records-for-cross-module-writes.md) |
+| [0003](0003-compensating-actions-over-distributed-transactions.md) | Compensating actions and a transactional outbox for cross-module writes | Accepted |
 | [0004](0004-module-boundaries-via-contracts-projects.md) | Module boundaries via per-module Contracts projects | Accepted |
 | [0005](0005-host-is-a-capability-not-a-separate-account.md) | Host is a capability on an account, not a separate account type | Accepted |
 | [0006](0006-materialize-then-map-for-jsonb-value-objects.md) | Materialize-then-map for JSONB-converted value objects | Accepted |
@@ -47,8 +47,10 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 | [0019](0019-total-count-is-opt-in-on-expensive-list-endpoints.md) | A total count is opt-in, not part of every paging envelope | Accepted |
 | [0020](0020-a-checkout-is-a-claim-with-a-deadline-not-a-sale.md) | A checkout is a claim with a deadline, not a sale | Accepted |
 | [0021](0021-availability-is-part-of-bookings.md) | Availability is part of Bookings, not a module upstream of it | Accepted |
-| [0022](0022-checkout-idempotency-keys.md) | Checkout idempotency keys | Accepted (amended: the stored plaintext token is gone) |
+| [0022](0022-checkout-idempotency-keys.md) | Checkout idempotency keys | Accepted |
 | [0023](0023-booking-management-sessions.md) | The management token is exchanged once, not carried everywhere | Accepted |
 | [0024](0024-every-memory-cache-entry-declares-its-size.md) | Every IMemoryCache entry declares its size, in bytes | Accepted |
-| [0025](0025-retried-work-is-built-inside-the-retry.md) | Work that must survive a retry is built inside the retry | Accepted (amended: uncommitted writes, check ordering, and payment-lock protocol) |
+| [0025](0025-retried-work-is-built-inside-the-retry.md) | The retry protocol | Accepted |
 | [0026](0026-stay-search-materialises-the-platform-wide-blocked-set.md) | Stay search materialises a platform-wide blocked set, and that is a known ceiling | Accepted (records a boundary) |
+| [0027](0027-refunds-are-decided-once-from-a-durable-obligation.md) | Refunds are decided once, from a durable obligation | Accepted |
+| [0028](0028-advisory-locks-and-lock-order.md) | Advisory locks and lock order | Accepted |

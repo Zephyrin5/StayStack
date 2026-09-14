@@ -1,8 +1,6 @@
 # 0008 - Offset pagination with an Id tiebreaker
 
-**Status:** Accepted, amended by [ADR-0019](0019-total-count-is-opt-in-on-expensive-list-endpoints.md)
-
-> **Amendment:** the `TotalCount` field below is no longer served by every list endpoint. ADR-0019 makes it opt-in - endpoints that display a total keep `PagedResponse<T>`; endpoints that only need to know whether more rows exist return `PagedSliceResponse<T>` and skip the second query. The offset-with-Id-tiebreaker decision itself is unchanged, and the `.ThenBy(x => x.Id)` rule applies to both envelopes.
+**Status:** Accepted. Which envelope carries a total count is [ADR-0019](0019-total-count-is-opt-in-on-expensive-list-endpoints.md); the `.ThenBy(x => x.Id)` rule applies to both `PagedResponse<T>` and `PagedSliceResponse<T>`.
 
 ## Context
 

@@ -48,19 +48,19 @@ The hold statements are Dapper (per [ADR-0014](0014-ef-core-vs-dapper-decision-r
 
 `HoldConfirmation` therefore passes `dbContext.Database.CurrentTransaction?.GetDbTransaction()` on every statement. Null when there is no transaction, which leaves standalone callers behaving exactly as before. **This is the single line that makes the merge more than a file move**; without it the code would compile, pass, and silently keep the old two-commit semantics under a new directory.
 
-### The per-client cap now counts `pending_payment`, reversing ADR-0020
+### The per-client cap counts `pending_payment`
 
-[ADR-0020](0020-a-checkout-is-a-claim-with-a-deadline-not-a-sale.md) rejected this on two grounds. The first stands; the second does not survive arithmetic.
+The alternative is to count `'held'` only and rely on rate limit x payment deadline to bound claims. It fails on the second point below.
 
 **The cost is real.** `client_key` is `ClientNetworkKey` - an IP or IPv6 /64 - so a NAT shares one budget. With `MaxActiveHoldsPerClient: 25`, twenty-five live claims behind one address means the twenty-sixth caller gets a 429.
 
-**The claimed alternative bound is much weaker than stated.** ADR-0020 argued the cap "buys nothing" because the hold rate limit R and payment deadline D already bound concurrent claims at R × D. They do - but at the configured values (`Holds.PermitLimit: 20` per 60s, `PaymentWindowMinutes: 30`) that ceiling is **20 × 30 = 600 concurrent claimed ranges per IP**, not a small number. Counting `pending_payment` moves the ceiling from 600 to 25. The disagreement was never about whether a bound existed; it was an order-of-magnitude difference read as a rounding error.
+**The alternative bound is weak.** The hold rate limit R and payment deadline D do bound concurrent claims at R × D - but at the configured values (`Holds.PermitLimit: 20` per 60s, `PaymentWindowMinutes: 30`) that ceiling is **20 × 30 = 600 concurrent claimed ranges per IP**, not a small number. Counting `pending_payment` moves the ceiling from 600 to 25.
 
-**And the escape it closes is free to the attacker.** Counting `'held'` alone meant *confirming a checkout was itself the way out of the cap* - the transition moved the row out of the counted set while the exclusion constraint went on blocking its range. Hold, confirm, repeat: no account, no card, no rate-limit trip until 600.
+**And the escape it closes is free to the attacker.** Counting `'held'` alone makes *confirming a checkout itself the way out of the cap* - the transition moved the row out of the counted set while the exclusion constraint went on blocking its range. Hold, confirm, repeat: no account, no card, no rate-limit trip until 600.
 
-What makes the residual sharing acceptable is that these rows are now finite. When ADR-0020 was written, `pending_payment` had just been introduced precisely *because* claims needed a deadline; a shared budget filled with claims that expire in at most 30 minutes is a queue, not a lockout. The failure also lands at hold time, with a retryable 429 while the guest is still choosing dates - not at payment time, with money in hand.
+What makes the residual sharing acceptable is that these rows are finite: a shared budget filled with claims that expire in at most 30 minutes is a queue, not a lockout. The failure also lands at hold time, with a retryable 429 while the guest is still choosing dates - not at payment time, with money in hand.
 
-The partial index `ix_unit_availability_holds_client_key_active` widens to match. ADR-0020's consequence "the two partial indexes keep their `status = 'held'` filters" applies to the sweep's index only; a filter narrower than its query stops covering it, and this one runs inside a `Serializable` transaction where a sequential scan is not merely slower.
+The partial index `ix_unit_availability_holds_client_key_active` covers the same statuses; a filter narrower than its query stops covering it, and this query runs inside a `Serializable` transaction where a sequential scan is not merely slower.
 
 ## Consequences
 

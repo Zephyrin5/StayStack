@@ -4,9 +4,7 @@
 
 ## Context
 
-Every currency amount in this codebase was a plain `decimal`, paired with a sibling `Currency` enum property wherever one was needed - `Unit.BasePrice`/`Currency`, `UnitAvailabilityHold.TotalPrice`/`Currency`, `Booking.TotalPrice`/`Currency`, `Transaction.Amount`/`Currency`, `PromotionRedemption.DiscountAmount`/`Currency`. No convention existed for *when* to round a computed amount, or *to how many decimal places* - `PricingCalculator` summed full-precision `decimal` arithmetic across every night of a stay and only ever got quantized implicitly, by whatever scale the destination Postgres column happened to declare (`numeric(10,2)` in most places, an unspecified default - effectively `numeric(18,2)` - on `Booking.TotalPrice`).
-
-That absence of a boundary was a real bug, not a theoretical one: `ConfirmBookingHandler` needed the pre-discount subtotal to compute a redeemed promo code's base, and reconstructed it by adding `hold.TotalPrice + hold.LengthOfStayDiscountAmount` back together - two independently-rounded numbers that don't reliably recover the third. `GetPriceCalendarHandler`'s calendar preview and `HoldAvailabilityHandler`'s actual charged price both called the same `PricingCalculator`, so they could never structurally disagree on *which* rule applied (see ADR-0012) - but nothing stopped them from landing on different final numbers once rounding entered the picture, since neither path rounded at all until the database truncated the result.
+A plain `decimal` beside a `Currency` property says nothing about *when* an amount is rounded or *to how many places*, so amounts are quantized implicitly by whatever scale a column declares, and a value derived from two independently rounded numbers does not reliably recover a third. Two paths calling the same `PricingCalculator` agree on which rule applies ([ADR-0012](0012-single-pricing-rule-entity-with-write-time-overlap-rejection.md)) but can land on different final numbers if either rounds differently. And a currency paired back onto an amount by hand, at a call site, can be the wrong one without any operator seeing a mismatch.
 
 Separately, this app supports KWD, which - like BHD, OMR, JOD, and TND - uses **3** decimal places, not 2. Any rounding convention adopted here has to be currency-aware from the start, not bolted on as a two-decimal assumption that happens to work for SAR/AED/USD.
 
@@ -18,143 +16,48 @@ A `readonly record struct Money(decimal Amount, Currency Currency)` in `SeedWork
 - Every arithmetic operator (`+`, `-`, `*` by a scalar `decimal`, `/` by a scalar `decimal`) re-rounds its result through the same rule. A `Money` value in the wild is therefore always a real, payable amount - never an intermediate full-precision fraction waiting to be rounded later.
 - `+`/`-` throw a new `CurrencyMismatchException` (a plain `InvalidOperationException`, not an `AppException` - this is an internal invariant violation, never a caller input error) if the two operands carry different currencies.
 - `PricingCalculator` operates in `Money` throughout: `ResolveNightlyPrice` returns an already-rounded `Money` for each night (an override or multiplied rate is rounded the moment it's resolved, not at the end of the stay), and `ResolveStayTotal` sums already-rounded nightly values into `Subtotal`. Each night is therefore the same number a guest would ever actually see charged for that night - not a slice of a total that was rounded once, after the fact.
-- `UnitAvailabilityHold.Subtotal` (new column) and `Booking.Subtotal` (new column) snapshot this pre-discount total directly, once, at the point it's computed. `ConfirmBookingHandler`'s coupon-base computation now reads `hold.Subtotal` directly instead of reconstructing it via addition - the exact bug this ADR exists to close.
+- The pre-discount subtotal is snapshotted once, where it is computed, and read directly by `ConfirmBookingHandler` for a coupon's base - never reconstructed by adding a total and a discount back together.
+- **Rounding in a stay total happens per night and per step.** `ResolveStayTotal` sums already-rounded nightly prices into `Subtotal`, rounds the length-of-stay discount, and subtracts it, so `Subtotal`, `LengthOfStayDiscountAmount` and `Total` are each payable amounts and `Total` is exactly `Subtotal - LengthOfStayDiscountAmount`. Rounding once at the end differs only at exact ties, by one minor unit (about 0.02% of stays in a 200,000-stay sweep), and at those ties the itemised amounts no longer add up to the charge. `PricingCalculatorTests` pins a discriminating case: 45 nights at 191.175 KWD less 13.2% charges 7467.295 here and 7467.296 under round-at-the-end.
 
 ### `default(Money)` and the `Currency` enum
 
-`Currency.KWD` was `0` before this ADR. A `readonly record struct` is a value type - `default(Money)`, produced by array allocation, a deserializer skipping a field, or an EF materialization edge case on a nullable complex property, would have silently been a plausible-looking "0 KWD" instead of something obviously wrong. `Currency` gained a `None = 0` member, shifting `KWD/SAR/AED/USD` to `1..4`; `Money.Of` throws `ArgumentException` if asked to construct a value with `Currency.None`. This cost nothing at the database: `Currency` has always been persisted via `HasConversion<string>()` (confirmed at every configuration site before this change), never the ordinal, so renumbering is invisible to already-stored data. It's also invisible to the wire: every module's JSON serializer context sets `UseStringEnumConverter = true`, so API responses were never exposing the ordinal either.
+A `readonly record struct` is a value type, so `default(Money)` - from array allocation, a deserializer skipping a field, or materialization of a nullable complex property - must not be a plausible-looking amount. `Currency.None = 0` is the default, `KWD/SAR/AED/USD` are `1..4`, and `Money.Of` throws `ArgumentException` for `Currency.None`. `Currency` is persisted with `HasConversion<string>()` and serialized with `UseStringEnumConverter = true`, so ordinals appear in neither the database nor the wire format.
 
 ### Mapping: `ComplexProperty`, not `OwnsOne`, not JSONB
 
-This codebase's only existing value-converted types - `LocalizedText` and `CancellationPolicy` - both collapse to a single `jsonb` column via a global `Properties<T>()` convention in `StayStackDbContext.ConfigureConventions`. `Money` needed a genuinely different shape: two plain relational columns (`numeric` + `varchar(3)`), so a total can still be summed/indexed/queried in SQL, not buried in a JSON blob. `OwnsOne` and `ComplexProperty` were both entirely unused in this codebase before this ADR. EF Core 10's native `ComplexProperty` is the correct tool for "one value object, two plain columns" and is what's used here, via a small reusable `ModelBuilderExtensions.ConfigureMoney(amountColumnName, currencyColumnName)` helper (same idea as `ApplySoftDeleteQueryFilter` - one place, reused per entity) that pins explicit column names/types so introducing `Money` is a type-only change against already-existing columns wherever the names match, not a rename.
+`LocalizedText` and `CancellationPolicy` collapse to a single `jsonb` column by convention. `Money` maps to two plain relational columns (`numeric` + `varchar(3)`) through EF Core's `ComplexProperty`, so totals stay summable, indexable and queryable in SQL. `ModelBuilderExtensions.ConfigureMoney(amountColumnName, currencyColumnName)` pins the column names and types in one place. Every money column is `numeric(12,3)`; scale 3 covers KWD.
 
-Every money column is standardized on `numeric(12,3)` - scale 3 covers KWD without truncation; every prior column was either `numeric(10,2)` or (on `Booking.TotalPrice`) an unspecified default. This *is* a real physical column-type change (`ALTER COLUMN TYPE`, a table rewrite), not a no-op migration - the empty-`Up`/`Down` pattern ADR-0011 documents only applies when nothing physically changes, which isn't the case for any money column here.
+### Entities with a `Money` constructor parameter need a parameterless constructor for EF
 
-### A second EF Core limitation, discovered mid-implementation
-
-Every entity here (`Booking`, `Unit`, `Transaction`) follows this codebase's established pattern (see `Property.cs`'s own doc comment) of materializing through a real, validated constructor rather than a parameterless one plus `required`/`null!`. EF Core's constructor-binding convention, however, only matches constructor parameters against an entity's *directly* mapped scalar/converted properties by name - it has no notion of binding a parameter to a complex property spanning two columns, and threw `InvalidOperationException: No suitable constructor was found` the first time this was tried. The fix is the standard EF-documented pattern for constructors the binding convention can't fully resolve: each affected entity now also has a `private` **parameterless** constructor, used only as EF's materialization fallback. `Create()` is completely unaffected and still runs through the full validated constructor for every write; the parameterless constructor is never reachable from application code, and any non-nullable reference-type property it would otherwise leave in a warning state gets a real (not `null!`) empty/default placeholder that EF overwrites via property-setting the instant materialization returns.
+Entities materialize through a validated constructor (see `Property.cs`). EF Core's constructor binding matches parameters only to directly mapped properties and cannot bind one to a complex property spanning two columns, so each entity with a `Money` parameter also has a `private` parameterless constructor used only for materialization. `Create()` still goes through the validated constructor for every write, and non-nullable reference properties get real placeholders that EF overwrites.
 
 ### Scope boundary: domain-only, deliberately
 
-`Money` replaces `decimal`+`Currency` in: entities (`Unit.BasePrice`, `UnitAvailabilityHold.TotalPrice`, `Booking.TotalPrice`, `Transaction.Amount`, `PromotionRedemption.DiscountAmount`), `PricingCalculator`, and the cross-module `Contracts` records that carry a domain-meaningful amount between modules (`Catalog.Contracts.UnitSummary.BasePrice`, `ConfirmedHold.TotalPrice`, `Bookings.Contracts.BookingSummary.TotalPrice`, `ITransactionReversal`'s refund parameter, `IPromotionRedemption`'s subtotal parameter and result). Outward-facing response DTOs are deliberately **not** converted - `HoldAvailabilityResponse`, `ConfirmBookingResponse`, `CancelBookingResponse`, `TransactionSummary`, and friends keep emitting flat `decimal TotalPrice` + `Currency Currency` fields, unpacked from `Money` at the mapping boundary. This is a wire-format-neutral internal-correctness change; no frontend coordination is required. The one exception is `CancelBookingResponse`, which previously reported `RefundAmount` with no `Currency` field at all - an outright gap, not a deliberate omission, closed alongside this work.
+`Money` replaces `decimal`+`Currency` in: entities (`Unit.BasePrice`, `UnitAvailabilityHold.TotalPrice`, `Booking.TotalPrice`, `Transaction.Amount`, `PromotionRedemption.DiscountAmount`), `PricingCalculator`, and the cross-module `Contracts` records that carry a domain-meaningful amount between modules (`Catalog.Contracts.UnitSummary.BasePrice`, `ConfirmedHold.TotalPrice`, `Bookings.Contracts.BookingSummary.TotalPrice`, `ITransactionReversal`'s payment-state snapshots, `IPromotionRedemption`'s subtotal parameter and result). Outward-facing response DTOs are **not** `Money` - `HoldAvailabilityResponse`, `ConfirmBookingResponse`, `CancelBookingResponse`, `TransactionSummary` and the rest emit flat `decimal` + `Currency` fields, unpacked at the mapping boundary. Every amount a response carries is accompanied by its currency.
 
-### What stayed a plain `decimal`, deliberately
+### Amounts that share their entity's currency are `Money` in type, not in storage
 
-- `PricingRule.OverridePrice`/`Multiplier`/`DiscountPercent` - no paired `Currency` exists at that level (it's implied by the owning `Unit`); wrapping these in `Money` would invent structure that isn't there.
-- `Promotion.DiscountValue` - a genuinely discriminated field. For a `FixedAmount` promotion it's a real currency amount with `Currency` set; for `Percentage` it's a bare percentage and `Currency` is null *by design* (enforced in `CreatePromotionRequestValidator`). Modeling this pair as `Money?` would null out the discount value itself for every percentage-based promotion. Splitting it into `FixedAmount: Money?` / `Percentage: decimal?` would be a real, separate modeling improvement, but is out of scope here.
-- **Superseded in part (see "Amendment: subtotal is a `Money`" below).** `UnitAvailabilityHold.Subtotal`/`LengthOfStayDiscountAmount`, `Booking.Subtotal`, `Transaction.RefundAmount` - each shares its owning entity's one canonical currency by construction (a hold/booking/transaction has exactly one currency; `Transaction.MarkRefundPending(Money refundAmount)` validates the incoming refund's currency against `Amount.Currency` before ever persisting it, then stores just the decimal). Modeling these as independently-currencied `Money?` fields would add a redundant currency column that could only ever agree with the entity's own, for no type-safety benefit - the same reasoning that keeps `PricingRule.OverridePrice` a plain decimal.
+`Booking.Subtotal`, `Transaction.RefundAmount`, `ConfirmedHold.Subtotal`, `ConfirmedHold.LengthOfStayDiscountAmount` and `StayPricingResult.Subtotal` are `Money`. An amount that shares its entity's one currency does not get a second currency column - it could only ever agree with the first - so the entity stores a private `decimal` backing field and exposes a computed `Money` paired with the entity's currency, mapped to the same column by field name. The currency is paired once, where the row's single currency is read (`HoldConfirmation.ConfirmHoldAsync` for holds), never by a consumer.
 
-## Amendment: subtotal is a `Money`
+`Transaction.MarkRefundPending(Money)` rejects a refund whose currency differs from `Amount`'s. That guard is required, not redundant: only the decimal is stored, so the type would otherwise silently relabel a mismatched refund with the transaction's currency. `TransactionTests` pins both the rejection and the currency that comes back out. A computed `RefundAmount` has no SQL translation, so queries use `EF.Property<decimal?>(t, Transaction.RefundAmountField)`, a `const` on the entity.
 
-The "what stayed a plain `decimal`" list above conflated two separate
-questions, and got one of them wrong.
+### What stays a plain `decimal`
 
-**Storage - unchanged, and the original reasoning still holds.** A subtotal
-does share its entity's one canonical currency by construction, and a second
-currency column could only ever agree with the first. There is still exactly
-one `subtotal` column and one `currency`/`total_price_currency` alongside it.
-Making `Booking.Subtotal` a `Money` required no migration at all: it is a
-`Money`-typed property computed over a private `decimal` backing field, which
-`BookingConfiguration` maps to the same column by field name.
-
-**Typing - reversed.** "The currency is implied" does not follow from "the
-currency is not stored twice", and treating it as if it did pushed the pairing
-out to every consumer. `ConfirmBookingHandler` did it literally:
-
-```csharp
-Money couponBase = Money.Of(hold.Subtotal, hold.TotalPrice.Currency);
-```
-
-That line is the whole argument against the original decision. It is a
-currency being re-attached by hand, at a call site, to a value that already
-had one - in a codebase whose stated reason for having `Money` at all is that
-amounts should carry their currency. Nothing stops the next such line pairing
-a subtotal with some *other* amount's currency, and nothing would catch it:
-both operands are the right types, the arithmetic succeeds, and
-`CurrencyMismatchException` never fires because the mismatch was introduced
-before any operator saw it. The same reattachment had already been copied into
-a unit test's mock setup, which is how this kind of thing spreads.
-
-So `StayPricingResult.Subtotal`, `ConfirmedHold.Subtotal` and
-`ConfirmedHold.LengthOfStayDiscountAmount`, and `Booking.Subtotal` are now
-`Money`. `PricingCalculator.StayPriceBreakdown.Subtotal` always was - the type
-was being *discarded* at the contract boundary (`Subtotal = breakdown.Subtotal.Amount`)
-and manually reconstituted downstream. The currency is now paired back exactly
-once, in `HoldConfirmation.ConfirmHoldAsync`, where the row's single currency
-column is read.
-
-`UnitAvailabilityHold.Subtotal` stays a plain `decimal`, deliberately and
-consistently with this: that type is a persistence-layer construct (see its
-own doc comment), written by hand-rolled Dapper SQL and never loaded through
-EF change tracking by business logic. `ConfirmedHold` is the contract business
-logic actually consumes, and that is where the typing belongs.
-`Transaction.RefundAmount` is now `Money?` too, for the same reason and by the
-same mechanism - a computed property over a private `decimal?` backing field
-that `TransactionConfiguration` maps to the same column, so again no migration.
-The earlier note here said it could stay a bare decimal because
-`MarkRefundPending(Money)` validates the incoming currency at the only write
-path. That was true and is still true, but it answers a different question:
-enforcing the invariant on the way *in* did nothing for the way *out*, where
-`CancelBookingHandler` was pairing `booking.TotalPrice.Currency` back onto the
-refund by hand to build its response - in the one place a wrong currency costs
-real money.
-
-**The write-side guard stays, and typing the property is exactly why it must.**
-Only the decimal is stored; the currency on the way out is derived from
-`Amount`. So a mismatched refund is not something the type rejects - it is
-something the type would silently *relabel* as the transaction's currency,
-which is worse than the reattachment the typing removed. The guard is what
-licenses discarding the incoming currency at all, and
-`TransactionTests` pins both halves: the mismatch throws, and the currency that
-comes back out is `Amount`'s.
-
-One consequence worth naming: `RefundAmount` is no longer translatable to SQL,
-so `TransactionReversal`'s "has this booking been refunded" query goes through
-`EF.Property<decimal?>(t, Transaction.RefundAmountField)`. The field name is a
-`const` on the entity rather than a literal at the query site, so a rename
-cannot silently produce a query that compiles and matches nothing.
-
-## Amendment: where rounding happens in a stay total
-
-The "Alternatives considered" entry below rejects rounding once at the end of
-a stay *for per-night prices*. `ResolveStayTotal` then makes the same choice a
-second time, one level up, and that was not written down: the length-of-stay
-discount is applied to the already-rounded subtotal, and the discount is
-itself rounded.
-
-The consequence is that `Subtotal`, `LengthOfStayDiscountAmount` and `Total`
-are all real payable amounts, and `Total` is exactly
-`Subtotal - LengthOfStayDiscountAmount`. Under the usual alternative - full
-precision throughout, round once at the boundary - the two numbers the guest
-is shown need not add up to the one they are charged.
-
-**How much this actually matters was measured, not assumed**, because the
-first draft of this amendment overstated it. Since the subtotal is always an
-exact multiple of the minor unit (it is a sum of already-rounded nightly
-prices), rounding is otherwise translation-invariant and the two policies
-agree almost everywhere. They diverge only at exact ties, where
-`MidpointRounding.ToEven` inspects the last digit of the discount under one
-policy and of the difference under the other, and those digits can have
-different parity. A sweep over 200,000 random stays put the divergence at
-~0.02% of cases, always by exactly one minor unit.
-
-`PricingCalculatorTests` pins a concrete instance rather than a decorative
-one: 45 nights at 191.175 KWD less 13.2% gives a subtotal of 8602.875 and a
-discount of 1135.580, so this policy charges **7467.295** where round-at-the-
-end charges **7467.296** - and at that same tie, round-at-the-end is exactly
-where `8602.875 - 1135.580` stops equalling the total charged. The test was
-verified to fail against a round-at-the-end implementation, so it discriminates
-between the policies rather than merely describing the current one.
+- `UnitAvailabilityHold.Subtotal` - a persistence-layer type written by Dapper and not consumed by business logic; `ConfirmedHold` is the contract that carries the typed value.
+- `PricingRule.OverridePrice`/`Multiplier`/`DiscountPercent` - no currency at that level; it is the owning unit's.
+- `Promotion.DiscountValue` - a discriminated field: a currency amount for `FixedAmount` promotions, a percentage (with `Currency` null) for `Percentage` ones. Splitting it into `FixedAmount: Money?` / `Percentage: decimal?` would be a separate modelling change.
 
 ## Alternatives considered
 
 - **JSONB collapse, matching `LocalizedText`/`CancellationPolicy`.** Rejected: money values benefit from staying real `numeric` columns - `SUM(total_price)`, indexing, and reporting queries all need that, and jsonb-serializing a value this central would be a real regression in queryability to save a small amount of mapping ceremony.
 - **`OwnsOne`.** Would work, but this codebase has no owned-entity-type precedent anywhere, and `ComplexProperty` is EF Core's more direct, purpose-built answer to "one value object, plain columns" as of EF Core 8+.
-- **Round once, at the end of a stay total, rather than per night.** Rejected: it would make a displayed nightly rate not add up to the total a guest sees on their itemized bill in edge cases, and it's the shape of the original bug (round only at the boundary, drift accumulates in between).
+- **Round once, at the end of a stay total, rather than per night and per step.** Rejected: a displayed nightly rate, or a subtotal and discount, would not add up to the charged total at exact ties.
+- **A second currency column for amounts that share their entity's currency.** Rejected: it can only agree with the first.
+- **Leave shared-currency amounts as bare `decimal`.** Rejected: every consumer then re-attaches a currency by hand, where a wrong pairing type-checks and no operator sees a mismatch.
 
 ## Consequences
 
-- `PricingCalculatorTests` and `GetPriceCalendarHandlerTests`' expected values changed where per-night rounding legitimately produces a different result than rounding once at the end (e.g. a KWD stay at a base price that doesn't divide evenly) - this is correct, not a regression, and is called out explicitly in the tests that exercise it (`ResolveStayTotal_ShouldRoundPerNight_ForThreeDecimalCurrency`).
+- Per-night rounding is pinned by `ResolveStayTotal_ShouldRoundPerNight_ForThreeDecimalCurrency` for a KWD stay whose base price does not divide evenly.
 - Any new money-bearing field should default to `Money` at the point it's computed/stored in a domain entity or cross-module contract, and unpack to flat `decimal`+`Currency` only at the point it's written into a response DTO - not the other way around.
-- Any new entity with a `Money`-typed constructor parameter needs the same parameterless-constructor-for-EF pairing described above; this is now the established pattern for future entities, not something to rediscover.
+- Any new entity with a `Money`-typed constructor parameter needs the parameterless constructor described above.
 - `ApiJsonTypeInfoResolver` has no reflection fallback by design (see its own doc comment) - if `Money` is ever accidentally added to a response DTO, that surfaces as a runtime 500 on the one endpoint touching it, not a compile error. A test iterating every response DTO through `ApiJsonTypeInfoResolver.Combined` guards against this.
