@@ -7,7 +7,6 @@ using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using System.Data;
 using Unit = Catalog.Entities.Unit;
 
 namespace Catalog.Features.CreatePricingRule;
@@ -44,20 +43,21 @@ public class CreatePricingRuleHandler(
             hostAuthorization.RequireOwnership(property.HostId, nameof(Property), property.Id);
         }
 
-        // ADR-0012 deliberately skips a GIST exclusion constraint here
-        // (low-frequency, single-host action, unlike guests racing for a
-        // unit) - but the check-then-insert below is still a genuine
-        // read-then-write race with nothing at the database enforcing it.
-        // Serializable isolation closes that without contradicting
-        // ADR-0012: still no GIST constraint, just a transaction strong
-        // enough that two concurrent conflicting inserts can't both pass
-        // their own overlap check. A losing transaction fails with
-        // Postgres' 40001, which EnableRetryOnFailure is configured to
-        // retry rather than surface as a 500. ChangeTracker.Clear() is
-        // required here (unlike HoldAvailabilityHandler's raw-Dapper
-        // transaction) - this one calls dbContext.Add(), and a retried
-        // delegate would otherwise re-add a second entity on top of the
-        // first attempt's still-tracked, rolled-back one.
+        // The in-memory overlap check below is a read-then-insert, and two
+        // concurrent creates can both pass it. The database decides that race,
+        // not the isolation level: all three overlap invariants are schema
+        // constraints now (docs/adr/0012), and the loser's violation is
+        // translated into the same 409 by IsOverlapViolation.
+        //
+        // This ran at Serializable while day-of-week had no constraint, and
+        // Serializable was all that stood between two hosts and two Saturday
+        // multipliers - lowered to ReadCommitted, six concurrent overlapping
+        // creates all committed. With every invariant in the schema it guarded
+        // nothing further, and cost a 40001 retry on ordinary contention.
+        //
+        // ChangeTracker.Clear() is still required - this calls dbContext.Add(),
+        // and a retried delegate would otherwise re-add a second entity on top
+        // of the first attempt's still-tracked, rolled-back one.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
         // Once, outside the retry (docs/adr/0025). The factories used to mint it
@@ -72,7 +72,7 @@ public class CreatePricingRuleHandler(
             dbContext.ChangeTracker.Clear();
 
             await using IDbContextTransaction transaction =
-                await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
             // An earlier attempt may already have committed. Asked before the
             // overlap check, because that check would otherwise judge the

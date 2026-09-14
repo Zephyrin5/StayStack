@@ -140,24 +140,70 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
     }
 
     [Fact]
-    public async Task DayOfWeekMultiplier_OverlappingDaysForTheSameUnit_IsStillOnlyGuardedByApplicationCode()
+    public async Task DayOfWeekMultiplier_OverlappingDaysForTheSameUnit_IsRejectedByTheDatabase()
     {
-        // Deliberately asserts the gap rather than hiding it. The third rule
-        // type's invariant - no two active rules sharing a day - is array
-        // overlap, and Postgres has no built-in GiST opclass for integer[],
-        // so it cannot be an exclusion constraint without enabling the
-        // intarray extension or normalising days into their own rows.
+        // This test used to assert the opposite, and said so on purpose: array
+        // overlap has no built-in GiST opclass, so the third invariant rested on
+        // PricingRuleOverlapChecker under Serializable alone. The audit showed
+        // what that meant - lowered to ReadCommitted, six concurrent overlapping
+        // Saturday multipliers all committed.
         //
-        // So this write succeeds at the database. It is still rejected for any
-        // caller going through CreatePricingRuleHandler, by
-        // PricingRuleOverlapChecker under Serializable isolation - the same
-        // protection the other two types had before this change, no weaker.
-        // This test exists so that stays a known, deliberate asymmetry instead
-        // of being rediscovered as a surprise.
+        // Closed without intarray: the domain is seven weekdays, so one partial
+        // unique index per day holds "each day in at most one active rule", and
+        // the violation names the day that collided - Saturday here.
         Guid unitId = await SeedUnitAsync();
 
         await AddRuleAsync(PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), unitId, [5, 6], 1.5m));
-        await AddRuleAsync(PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), unitId, [6, 0], 1.25m));
+
+        DbUpdateException exception = await Assert.ThrowsAsync<DbUpdateException>(() =>
+            AddRuleAsync(PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), unitId, [6, 0], 1.25m)));
+
+        PostgresException postgres = UnwrapPostgres(exception);
+        Assert.Equal("23505", postgres.SqlState);
+        Assert.Equal("ix_pricing_rules_unit_day_of_week_6_active", postgres.ConstraintName);
+    }
+
+    [Fact]
+    public async Task DayOfWeekMultiplier_DisjointDaysForTheSameUnit_AreAccepted()
+    {
+        // Per-day indexes must not overreach into "one multiplier per unit".
+        Guid unitId = await SeedUnitAsync();
+
+        await AddRuleAsync(PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), unitId, [5, 6], 1.5m));
+        await AddRuleAsync(PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), unitId, [0, 1, 2], 0.9m));
+    }
+
+    [Fact]
+    public async Task DayOfWeekMultiplier_ReplacingAnArchivedRule_IsAccepted()
+    {
+        Guid unitId = await SeedUnitAsync();
+
+        PricingRule archived = PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), unitId, [5, 6], 1.5m);
+        archived.Archive(DateTimeOffset.UtcNow, null);
+        await AddRuleAsync(archived);
+
+        await AddRuleAsync(PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), unitId, [6], 2m));
+    }
+
+    [Fact]
+    public async Task DayOfWeekMultiplier_WithADayOutsideTheWeek_IsRejectedByTheDatabase()
+    {
+        // The per-day indexes only cover 0..6, so a 7 would sit outside all of
+        // them and escape the invariant. PricingRule.ValidateDaysOfWeek refuses
+        // it, which is exactly why this goes around the entity with raw SQL.
+        Guid unitId = await SeedUnitAsync();
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+
+        PostgresException postgres = await Assert.ThrowsAsync<PostgresException>(() =>
+            context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO pricing_rules (id, unit_id, rule_type, days_of_week, multiplier, status, created_at)
+                VALUES ({Guid.CreateVersion7()}, {unitId}, 'DayOfWeekMultiplier', ARRAY[6, 7], 1.5, 0, now())
+                """, TestContext.Current.CancellationToken));
+
+        Assert.Equal("23514", postgres.SqlState);
+        Assert.Equal("ck_pricing_rules_days_of_week_domain", postgres.ConstraintName);
     }
 
     [Fact]

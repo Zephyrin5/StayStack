@@ -129,6 +129,38 @@ on purpose, and were verified against a build without the constraint: the
 overlapping insert succeeds there, so they test the schema rather than
 restating the application check.
 
+## Amendment: day-of-week is in the schema, and Serializable is gone
+
+The previous amendment left `DayOfWeekMultiplier` application-only and called it
+"no worse protected than the other two were before." A mutation probe showed
+what that protection actually was. `PricingRuleConcurrencyTests` passed with both
+handlers lowered to Read Committed - because it only raced the two
+constraint-backed types. A day-of-week race added alongside it then committed
+**all six** concurrent overlapping Saturday multipliers under Read Committed.
+Serializable was the entire defence for that invariant, and nothing tested it.
+
+**Closed with seven partial unique indexes, not `intarray`.** The invariant is
+"each weekday belongs to at most one active multiplier per unit," and the domain
+is exactly seven values. `ix_pricing_rules_unit_day_of_week_{0..6}_active` are
+unique on `unit_id`, filtered on `rule_type = 'DayOfWeekMultiplier' AND status <> 2
+AND days_of_week @> ARRAY[d]` - the built-in `@>`, plain btree. The exclusion
+form would need `intarray`, which is not enabled and which, once installed,
+redefines `&&`, `@>` and `<@` for every `int4[]` in the database with semantics
+that differ from the built-ins. A per-day violation also names the day that
+collided. `ck_pricing_rules_days_of_week_domain` keeps `days_of_week` inside
+0..6, because a day outside that range would escape every index.
+
+**Serializable is removed from both pricing handlers.** With all three
+invariants in the schema, the race each handler's in-memory check cannot close is
+decided by a constraint, and `PricingRuleOverlapChecker.IsOverlapViolation`
+translates the loser's violation into the same 409. The three concurrency tests
+pass under Read Committed, and the day-of-week one fails there without the
+indexes - so they now prove the constraints rather than an isolation level.
+
+This also corrects the previous amendment's closing claim that a constraint
+firing is left to surface as a 500. `IsOverlapViolation` translates it, since
+`PricingRuleConcurrencyTests` showed a violation on an ordinary concurrent path.
+
 ## Consequences
 
 - Every future new rule type needs new nullable columns on `PricingRule` (schema growth) rather than a

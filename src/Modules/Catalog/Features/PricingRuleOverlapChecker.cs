@@ -1,4 +1,5 @@
 using Catalog.Entities;
+using Catalog.Entities.Configurations;
 using Catalog.Exceptions;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -11,8 +12,9 @@ namespace Catalog.Features;
 // priority/tie-break concept at read time - see docs/adr/0012.
 internal static class PricingRuleOverlapChecker
 {
-    // The database-side names of the same two invariants this class checks
-    // in memory. See the AddPricingRuleOverlapConstraints migration.
+    // The database-side names of the invariants this class checks in memory.
+    // See the AddPricingRuleOverlapConstraints migration, and
+    // PricingRuleConfiguration for the per-weekday day-of-week indexes.
     private const string DateRangeOverlapConstraint = "pricing_rules_date_range_overlap_excl";
     private const string LengthOfStayUniqueIndex = "ix_pricing_rules_unit_length_of_stay_active";
 
@@ -52,6 +54,15 @@ internal static class PricingRuleOverlapChecker
             && postgres.ConstraintName == LengthOfStayUniqueIndex)
         {
             message = "This unit already has an active length-of-stay discount rule - only one is allowed at a time.";
+            return true;
+        }
+
+        // Same message as EnsureNoDayOfWeekConflict, so a race decided by the
+        // index reads exactly like one caught by the in-memory check.
+        if (postgres.SqlState == PostgresErrorCodes.UniqueViolation
+            && Enumerable.Range(0, 7).Any(day => postgres.ConstraintName == PricingRuleConfiguration.DayOfWeekIndexName(day)))
+        {
+            message = "One or more of these days already has an active day-of-week multiplier rule for this unit.";
             return true;
         }
 

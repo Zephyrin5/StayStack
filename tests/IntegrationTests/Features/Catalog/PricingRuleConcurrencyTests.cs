@@ -1,4 +1,4 @@
-// AUDIT 2026-09-14: Unforced bursts; fresh-scope row counts. Probed: PASSES 3/3 with both handlers lowered to ReadCommitted, so it proves the overlap constraints hold, not the Serializable isolation this header credits.
+// AUDIT 2026-09-14: Unforced bursts; fresh-scope row counts. The original two creates only raced the constraint-backed rule types, which is why they passed with Serializable lowered to ReadCommitted. The day-of-week race added after that audit fails under ReadCommitted without its per-day unique indexes (6 of 6 commit) and passes with them; the handlers now run at the default isolation, so these prove the schema constraints.
 using Bogus;
 using Catalog;
 using Catalog.Entities;
@@ -19,15 +19,16 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Catalog;
 
-// ADR-0012/finding #9's Serializable-isolation fix for CreatePricingRuleHandler/
-// UpdatePricingRuleHandler is, like HoldAvailabilityConcurrencyTests, a claim
-// only a genuinely concurrent test can disprove: a single-threaded test can
-// call the handler twice in sequence and see the second call correctly
-// rejected, but that's true whether or not the transaction is Serializable -
-// a plain Read Committed check-then-insert would look identical under a
-// single thread. These fire real concurrent requests, same
-// separate-HttpClient-per-request approach as HoldAvailabilityConcurrencyTests,
-// to actually exercise the isolation level.
+// The pricing-rule overlap invariants are claims only a genuinely concurrent
+// test can disprove: a single-threaded test sees the second create rejected
+// whether or not anything in the database would have stopped two concurrent
+// ones. These fire real concurrent requests, same separate-HttpClient-per-request
+// approach as HoldAvailabilityConcurrencyTests.
+//
+// What decides each race is the schema - one constraint per rule type (see
+// docs/adr/0012) - not the isolation level. The handlers used to run at
+// Serializable; that turned out to be the only defence for day-of-week rules,
+// which had no constraint, and no test here raced that type until one was added.
 [Collection("Integration Tests")]
 public class PricingRuleConcurrencyTests(IntegrationTestWebApplicationFactory factory)
 {
@@ -148,6 +149,48 @@ public class PricingRuleConcurrencyTests(IntegrationTestWebApplicationFactory fa
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
         int ruleCount = await context.PricingRules.CountAsync(
             r => r.UnitId == unitId && r.RuleType == PricingRuleType.LengthOfStayDiscount, TestContext.Current.CancellationToken);
+        Assert.Equal(1, ruleCount);
+    }
+
+    [Fact]
+    public async Task CreatePricingRule_ConcurrentOverlappingDayOfWeekMultipliers_ExactlyOneSucceeds()
+    {
+        // The third rule type, and until this test the only one with nothing in
+        // the database behind it. The other two creates in this file passed with
+        // both handlers lowered to ReadCommitted, because their constraints decide
+        // the race; day-of-week had only the in-memory check, a read-then-insert
+        // that two concurrent writers can both pass. PricingCalculator takes the
+        // first matching multiplier per night, so two would make a Saturday's
+        // price depend on row order.
+        //
+        // Every request shares Saturday (6) and differs elsewhere, so each pair
+        // overlaps on exactly one day - the smallest overlap there is.
+        (string hostToken, Guid unitId) = await SeedHostWithUnitAsync();
+
+        const int concurrentRequests = 6;
+        Task<HttpResponseMessage>[] tasks =
+        [
+            .. Enumerable.Range(0, concurrentRequests)
+                .Select(i => factory.CreateClient().SendAsync(
+                    Authorized(HttpMethod.Post, $"/api/catalog/units/{unitId}/pricing-rules", hostToken, new CreatePricingRuleRequest
+                    {
+                        UnitId = unitId,
+                        RuleType = PricingRuleType.DayOfWeekMultiplier,
+                        DaysOfWeek = [i, 6],
+                        Multiplier = 1.5m
+                    }),
+                    TestContext.Current.CancellationToken))
+        ];
+
+        HttpResponseMessage[] responses = await Task.WhenAll(tasks);
+
+        Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
+        Assert.Equal(concurrentRequests - 1, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        int ruleCount = await context.PricingRules.CountAsync(
+            r => r.UnitId == unitId && r.RuleType == PricingRuleType.DayOfWeekMultiplier, TestContext.Current.CancellationToken);
         Assert.Equal(1, ruleCount);
     }
 

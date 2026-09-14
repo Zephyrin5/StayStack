@@ -7,7 +7,6 @@ using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using System.Data;
 using Unit = Catalog.Entities.Unit;
 
 namespace Catalog.Features.UpdatePricingRule;
@@ -58,8 +57,11 @@ public class UpdatePricingRuleHandler(
             throw new ValidationException(nameof(request.RuleType), "RuleType cannot be changed once a rule is created.");
         }
 
-        // Same TOCTOU this ADR-0012/#9 fix closed on the create path -
-        // CreatePricingRuleHandler's own comment covers the full reasoning.
+        // Same race as the create path, decided the same way: by the schema's
+        // overlap constraints, not by Serializable - see
+        // CreatePricingRuleHandler's comment. Two updates that each conflict
+        // only with the other's new state are caught by the constraint on
+        // whichever commits second.
         //
         // This used to skip ChangeTracker.Clear() on purpose, arguing that
         // `rule` "stays the SAME tracked instance across every retry" and that
@@ -72,9 +74,9 @@ public class UpdatePricingRuleHandler(
         // Keeping the instance is what broke it. SaveChangesAsync accepts its
         // changes when it returns (acceptAllChangesOnSuccess defaults to true),
         // so the new price becomes the entity's *original* value before
-        // CommitAsync has run. Under Serializable a 40001 is routinely raised
-        // at commit time - this is the handler's normal operating mode, not an
-        // exotic failure - and the retry then re-applies values EF no longer
+        // CommitAsync has run. Any transient commit failure - a 40001 was
+        // routine here while this ran at Serializable, and a dropped connection
+        // still is - retries a delegate that then re-applies values EF no longer
         // sees as changes. No UPDATE for them, commit succeeds, caller gets
         // 200, row unchanged. See docs/adr/0025.
         //
@@ -88,7 +90,7 @@ public class UpdatePricingRuleHandler(
             dbContext.ChangeTracker.Clear();
 
             await using IDbContextTransaction transaction =
-                await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
             // Reloaded under this attempt's transaction. The instance resolved
             // above belongs to the authorization checks and to a snapshot a
