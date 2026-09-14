@@ -1,4 +1,4 @@
-// AUDIT 2026-09-14: Injects through CommitFaults.FailBeforeCommit - pre-commit, the rollback case, as named; targeted by the tracked booking; asserts through a fresh scope. Probed: fails without ChangeTracker.Clear(). Gap: nothing injects after the commit, so the handler's already-Cancelled recovery branch never runs.
+// AUDIT 2026-09-14: Injects through CommitFaults.FailBeforeCommit - pre-commit, the rollback case, as named; targeted by the tracked booking; asserts through a fresh scope. Probed: fails without ChangeTracker.Clear(). The lost-acknowledgement test (FailAfterCommit) exercises the already-Cancelled recovery branch; probed: 409 with that branch disabled.
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
@@ -15,6 +15,10 @@ using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Transactions;
+using Transactions.Contracts;
+using Transactions.Entities;
+using Bookings.Features.CancelBooking;
 namespace IntegrationTests.Features.Bookings;
 
 // A transient failure on COMMIT is the one failure an execution strategy
@@ -151,5 +155,84 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
         int compensations = await db.BookingsOutboxMessages.AsNoTracking()
             .CountAsync(m => m.Payload.Contains(bookingId.ToString()), TestContext.Current.CancellationToken);
         Assert.Equal(2, compensations);
+    }
+
+    [Fact]
+    public async Task ACancellationWhoseCommitLosesItsAcknowledgement_ReportsTheCancellationItAlreadyMade()
+    {
+        // The other side of the commit, and the branch that had never run.
+        // CancelBookingHandler re-reads the booking under its lock; finding it
+        // already Cancelled, it answers success from persisted state instead of
+        // treating its own committed cancellation as a conflict - and it must
+        // not enqueue the compensations a second time.
+        //
+        // Paid first, so there is a refund to report. The recovered attempt
+        // enqueued nothing, so nothing is dispatched inline and the refund is
+        // still outstanding - which is exactly what the response must say.
+        (Guid bookingId, string managementToken, Guid holdId) = await CreateGuestBookingAsync();
+
+        using (IServiceScope paymentScope = factory.Services.CreateScope())
+        {
+            Money total = (await paymentScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Bookings
+                .AsNoTracking().SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken)).TotalPrice;
+
+            AppTransactionsDbContext transactions = paymentScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+            Transaction payment = Transaction.Create(Guid.CreateVersion7(), bookingId, total);
+            payment.MarkSucceeded(DateTimeOffset.UtcNow);
+            transactions.Transactions.Add(payment);
+            await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        CreateBookingSessionResponse? session = await (await factory.CreateClient().PostAsJsonAsync(
+                $"/api/bookings/{bookingId}/manage/session",
+                new CreateBookingSessionRequest { BookingId = bookingId, ManagementToken = managementToken },
+                TestContext.Current.CancellationToken)).Content
+            .ReadFromJsonAsync<CreateBookingSessionResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(session);
+
+        // After the commit carrying this booking as Cancelled.
+        CommitFault<AppBookingsDbContext> lostAck = CommitFaults.FailAfterCommit<AppBookingsDbContext>(context =>
+            context.ChangeTracker.Entries<Booking>()
+                .Any(e => e.Entity.Id == bookingId && e.Entity.BookingStatus == BookingStatus.Cancelled));
+
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
+
+        HttpRequestMessage cancel = new HttpRequestMessage(HttpMethod.Post, $"/api/bookings/{bookingId}/cancel")
+        {
+            Content = JsonContent.Create(new { bookingId, guestEmail = "jane@example.com" })
+        };
+        cancel.Headers.Authorization = new AuthenticationHeaderValue("Bearer", session.SessionToken);
+
+        // Act
+        HttpResponseMessage response = await host.CreateClient().SendAsync(cancel, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the cancellation.");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        CancelBookingResponse? cancelled = await response.Content
+            .ReadFromJsonAsync<CancelBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(cancelled);
+        Assert.Equal(BookingStatus.Cancelled, cancelled.BookingStatus);
+
+        using IServiceScope assertScope = factory.Services.CreateScope();
+        AppBookingsDbContext db = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+
+        Assert.Equal(BookingStatus.Cancelled, (await db.Bookings.AsNoTracking()
+            .SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken)).BookingStatus);
+        Assert.Equal("held", (await db.UnitAvailabilityHolds.AsNoTracking()
+            .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken)).Status);
+
+        // Exactly once: the first attempt's two compensations and one obligation,
+        // with nothing added by the recovered attempt.
+        Assert.Equal(2, await db.BookingsOutboxMessages.AsNoTracking()
+            .CountAsync(m => m.Payload.Contains(bookingId.ToString()), TestContext.Current.CancellationToken));
+        RefundObligation obligation = Assert.Single(await db.RefundObligations.AsNoTracking()
+            .Where(o => o.BookingId == bookingId).ToListAsync(TestContext.Current.CancellationToken));
+
+        // The response reports the refund as it stands: owed, not yet recorded,
+        // at the amount the obligation committed.
+        Assert.Equal(RefundStatus.Pending, cancelled.RefundStatus);
+        Assert.Equal(obligation.PolicyRefundAmount, cancelled.RefundAmount);
     }
 }

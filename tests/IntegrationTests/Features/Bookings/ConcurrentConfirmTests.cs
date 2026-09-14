@@ -1,4 +1,4 @@
-// AUDIT 2026-09-14: Pauses checked against ConfirmBookingHandler: ConfirmHoldAsync (:605) runs before the first commit and GetUnitAsync (:332) after it, as each test claims. TwoConfirmationsForOneHold is an unforced race. Fresh-scope asserts. Not mutation-probed. Gap: no test loses the acknowledgement of ConfirmBookingHandler's own commit.
+// AUDIT 2026-09-14: Pauses checked against ConfirmBookingHandler: ConfirmHoldAsync (:605) runs before the first commit and GetUnitAsync (:332) after it, as each test claims. TwoConfirmationsForOneHold is an unforced race. Fresh-scope asserts. Not mutation-probed. The lost acknowledgement of ConfirmBookingHandler's booking-insert commit is ConfirmRetryTests'.
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Features.CreateBookingSession;
