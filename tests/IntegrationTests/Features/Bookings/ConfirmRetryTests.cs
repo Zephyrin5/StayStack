@@ -32,6 +32,7 @@ public class ConfirmRetryTests(IntegrationTestWebApplicationFactory factory)
     {
         Property property = CatalogSeeding.CreateProperty();
         Unit unit = Unit.Create(
+            Guid.CreateVersion7(),
             property.Id,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
             2,

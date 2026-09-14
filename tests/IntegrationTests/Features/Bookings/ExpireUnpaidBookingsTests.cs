@@ -39,6 +39,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         _pendingProperties.Add(property);
 
         return Unit.Create(
+            Guid.CreateVersion7(),
             property.Id,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
             2,

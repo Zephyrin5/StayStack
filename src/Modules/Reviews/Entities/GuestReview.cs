@@ -32,13 +32,15 @@ public sealed class GuestReview : Entity, IAggregateRoot
     public int OverallRating { get; private set; }
     public string? Comment { get; private set; }
 
-    public static GuestReview Create(Guid bookingId, Guid hostId, string guestEmail, int overallRating, string? comment)
+    public static GuestReview Create(
+        Guid id, Guid bookingId, Guid hostId, string guestEmail, int overallRating, string? comment)
     {
+        Guard.Against.Default(id);
         Guard.Against.Default(bookingId);
         Guard.Against.Default(hostId);
         Guard.Against.NullOrWhiteSpace(guestEmail);
         Guard.Against.OutOfRange(overallRating, nameof(overallRating), 1, 5);
 
-        return new GuestReview(Guid.CreateVersion7(), bookingId, hostId, guestEmail.Trim().ToLowerInvariant(), overallRating, comment);
+        return new GuestReview(id, bookingId, hostId, guestEmail.Trim().ToLowerInvariant(), overallRating, comment);
     }
 }

@@ -216,6 +216,7 @@ public class PagedSliceTests(IntegrationTestWebApplicationFactory factory)
         for (int i = 0; i < count; i++)
         {
             context.Properties.Add(Property.Create(
+                Guid.CreateVersion7(),
                 Guid.NewGuid(),
                 PropertyType.Hotel,
                 LocalizedText.Create(new Dictionary<string, string> { { "en", $"Slice {i}" } }, "en"),

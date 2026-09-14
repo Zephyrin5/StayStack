@@ -54,6 +54,7 @@ public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory f
     private async Task<Promotion> SeedPromotionAsync(DateTimeOffset? expiresAt, Guid? hostId = null)
     {
         Promotion promotion = Promotion.CreatePlatformPromotion(
+            Guid.CreateVersion7(),
             $"RACE{Guid.NewGuid():N}"[..12].ToUpperInvariant(),
             PromotionDiscountType.Percentage,
             10m,

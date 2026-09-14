@@ -18,7 +18,7 @@ public class UnitEntityTests
         Guid propertyId = Guid.NewGuid();
         LocalizedText name = CreateName();
 
-        Unit unit = Unit.Create(propertyId, name, 2, 45.5m, Currency.KWD);
+        Unit unit = Unit.Create(Guid.CreateVersion7(), propertyId, name, 2, 45.5m, Currency.KWD);
 
         Assert.NotEqual(Guid.Empty, unit.Id);
         Assert.Equal(propertyId, unit.PropertyId);
@@ -32,7 +32,7 @@ public class UnitEntityTests
     [Fact]
     public void Create_ShouldDefaultCurrencyToKwd_WhenNotSpecified()
     {
-        Unit unit = Unit.Create(Guid.NewGuid(), CreateName(), 2, 45.5m);
+        Unit unit = Unit.Create(Guid.CreateVersion7(), Guid.NewGuid(), CreateName(), 2, 45.5m);
 
         Assert.Equal(Currency.KWD, unit.BasePrice.Currency);
     }
@@ -40,13 +40,13 @@ public class UnitEntityTests
     [Fact]
     public void Create_ShouldThrow_WhenPropertyIdIsEmpty()
     {
-        Assert.ThrowsAny<ArgumentException>(() => Unit.Create(Guid.Empty, CreateName(), 2, 45.5m));
+        Assert.ThrowsAny<ArgumentException>(() => Unit.Create(Guid.CreateVersion7(), Guid.Empty, CreateName(), 2, 45.5m));
     }
 
     [Fact]
     public void Create_ShouldThrow_WhenNameIsNull()
     {
-        Assert.Throws<ArgumentNullException>(() => Unit.Create(Guid.NewGuid(), null!, 2, 45.5m));
+        Assert.Throws<ArgumentNullException>(() => Unit.Create(Guid.CreateVersion7(), Guid.NewGuid(), null!, 2, 45.5m));
     }
 
     [Theory]
@@ -54,7 +54,7 @@ public class UnitEntityTests
     [InlineData(-1)]
     public void Create_ShouldThrow_WhenMaxOccupancyIsNotPositive(int maxOccupancy)
     {
-        Assert.ThrowsAny<ArgumentException>(() => Unit.Create(Guid.NewGuid(), CreateName(), maxOccupancy, 45.5m));
+        Assert.ThrowsAny<ArgumentException>(() => Unit.Create(Guid.CreateVersion7(), Guid.NewGuid(), CreateName(), maxOccupancy, 45.5m));
     }
 
     [Theory]
@@ -62,13 +62,13 @@ public class UnitEntityTests
     [InlineData(-10.5)]
     public void Create_ShouldThrow_WhenBasePriceIsNotPositive(decimal basePrice)
     {
-        Assert.ThrowsAny<ArgumentException>(() => Unit.Create(Guid.NewGuid(), CreateName(), 2, basePrice));
+        Assert.ThrowsAny<ArgumentException>(() => Unit.Create(Guid.CreateVersion7(), Guid.NewGuid(), CreateName(), 2, basePrice));
     }
 
     [Fact]
     public void SetBasePrice_ShouldUpdatePrice_WhenPositive()
     {
-        Unit unit = Unit.Create(Guid.NewGuid(), CreateName(), 2, 45.5m);
+        Unit unit = Unit.Create(Guid.CreateVersion7(), Guid.NewGuid(), CreateName(), 2, 45.5m);
 
         unit.SetBasePrice(60m);
 
@@ -80,7 +80,7 @@ public class UnitEntityTests
     [InlineData(-1)]
     public void SetBasePrice_ShouldThrow_WhenNotPositive(decimal price)
     {
-        Unit unit = Unit.Create(Guid.NewGuid(), CreateName(), 2, 45.5m);
+        Unit unit = Unit.Create(Guid.CreateVersion7(), Guid.NewGuid(), CreateName(), 2, 45.5m);
 
         Assert.ThrowsAny<ArgumentException>(() => unit.SetBasePrice(price));
     }
@@ -88,7 +88,7 @@ public class UnitEntityTests
     [Fact]
     public void Rename_ShouldUpdateName_WhenValid()
     {
-        Unit unit = Unit.Create(Guid.NewGuid(), CreateName(), 2, 45.5m);
+        Unit unit = Unit.Create(Guid.CreateVersion7(), Guid.NewGuid(), CreateName(), 2, 45.5m);
         LocalizedText newName = LocalizedText.Create(new Dictionary<string, string> { { "en", "Executive Room" } }, "en");
 
         unit.Rename(newName);
@@ -99,7 +99,7 @@ public class UnitEntityTests
     [Fact]
     public void Rename_ShouldThrow_WhenNameIsNull()
     {
-        Unit unit = Unit.Create(Guid.NewGuid(), CreateName(), 2, 45.5m);
+        Unit unit = Unit.Create(Guid.CreateVersion7(), Guid.NewGuid(), CreateName(), 2, 45.5m);
 
         Assert.Throws<ArgumentNullException>(() => unit.Rename(null!));
     }

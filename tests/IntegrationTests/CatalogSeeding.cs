@@ -45,6 +45,7 @@ internal static class CatalogSeeding
 
     public static Property CreateProperty(string timeZoneId = TestTimeZoneId) =>
         Property.Create(
+            Guid.CreateVersion7(),
             Guid.NewGuid(),
             PropertyType.Hotel,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Test Property" } }, "en"),
@@ -57,6 +58,7 @@ internal static class CatalogSeeding
         int maxOccupancy = 2,
         string name = "Standard Room") =>
         Unit.Create(
+            Guid.CreateVersion7(),
             property.Id,
             LocalizedText.Create(new Dictionary<string, string> { { "en", name } }, "en"),
             maxOccupancy,

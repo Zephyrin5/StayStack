@@ -40,6 +40,7 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
         _pendingProperties.Add(property);
 
         return Unit.Create(
+            Guid.CreateVersion7(),
             property.Id,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
             2,
@@ -231,6 +232,7 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
 
         List<Unit> units = Enumerable.Range(0, 3)
             .Select(_ => Unit.Create(
+                Guid.CreateVersion7(),
                 property.Id,
                 LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
                 2,
@@ -295,6 +297,7 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
         // there is somewhere to pause it. An empty property archives with no
         // round trips and cannot be interleaved with.
         Unit existing = Unit.Create(
+            Guid.CreateVersion7(),
             property.Id,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "First Room" } }, "en"),
             2,

@@ -14,6 +14,9 @@ public class AdminCreatePromotionHandler(
     public async ValueTask<CreatePromotionResponse> Handle(
         AdminCreatePromotionRequest request, CancellationToken cancellationToken)
     {
+        // Chosen first, before anything that could retry - see docs/adr/0025.
+        Guid promotionId = Guid.CreateVersion7();
+
         // Unlike CreatePromotionHandler, HostId here IS trusted client
         // input - but "trusted" (an Administrator is allowed to specify
         // it) doesn't mean "assumed valid". Only checked when set - null
@@ -27,6 +30,7 @@ public class AdminCreatePromotionHandler(
         try
         {
             promotion = Promotion.CreatePlatformPromotion(
+                promotionId,
                 request.Code, request.DiscountType, request.DiscountValue, request.Currency,
                 request.ExpiresAt, request.MaxRedemptions, request.HostId);
         }

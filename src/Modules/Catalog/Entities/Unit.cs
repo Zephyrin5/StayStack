@@ -49,6 +49,7 @@ public sealed class Unit : Entity, IAggregateRoot
     public CancellationPolicy CancellationPolicy { get; private set; }
 
     public static Unit Create(
+        Guid id,
         Guid propertyId,
         LocalizedText name,
         int maxOccupancy,
@@ -56,13 +57,14 @@ public sealed class Unit : Entity, IAggregateRoot
         Currency currency = Currency.KWD,
         CancellationPolicy? cancellationPolicy = null)
     {
+        Guard.Against.Default(id);
         Guard.Against.Default(propertyId);
         Guard.Against.Null(name);
         Guard.Against.NegativeOrZero(maxOccupancy);
         Guard.Against.NegativeOrZero(basePrice);
 
         return new Unit(
-            Guid.CreateVersion7(), propertyId, name, maxOccupancy, Money.Of(basePrice, currency),
+            id, propertyId, name, maxOccupancy, Money.Of(basePrice, currency),
             cancellationPolicy ?? CancellationPolicy.CreateDefault());
     }
 

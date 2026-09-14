@@ -21,6 +21,7 @@ public class PromotionRedemptionComputeDiscountAmountTests
     public void ComputeDiscountAmount_ShouldApplyPercentage_OfSubtotal()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.Percentage, 20m, null, null, null);
 
         Money discount = PromotionRedemption.ComputeDiscountAmount(promotion, Kwd(200m));
@@ -32,6 +33,7 @@ public class PromotionRedemptionComputeDiscountAmountTests
     public void ComputeDiscountAmount_ShouldClampPercentage_AtSubtotal()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.Percentage, 100m, null, null, null);
 
         Money discount = PromotionRedemption.ComputeDiscountAmount(promotion, Kwd(50m));
@@ -43,6 +45,7 @@ public class PromotionRedemptionComputeDiscountAmountTests
     public void ComputeDiscountAmount_ShouldReturnFixedAmount_WhenBelowSubtotal()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.FixedAmount, 15m, Currency.KWD, null, null);
 
         Money discount = PromotionRedemption.ComputeDiscountAmount(promotion, Kwd(200m));
@@ -54,6 +57,7 @@ public class PromotionRedemptionComputeDiscountAmountTests
     public void ComputeDiscountAmount_ShouldClampFixedAmount_AtSubtotal()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.FixedAmount, 500m, Currency.KWD, null, null);
 
         Money discount = PromotionRedemption.ComputeDiscountAmount(promotion, Kwd(200m));
@@ -65,6 +69,7 @@ public class PromotionRedemptionComputeDiscountAmountTests
     public void ComputeDiscountAmount_ShouldNeverBeNegative_WhenSubtotalIsZero()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.FixedAmount, 15m, Currency.KWD, null, null);
 
         Money discount = PromotionRedemption.ComputeDiscountAmount(promotion, Kwd(0m));

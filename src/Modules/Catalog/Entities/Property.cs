@@ -37,17 +37,19 @@ public sealed class Property : Entity
     public string TimeZoneId { get; private set; }
 
     public static Property Create(
+        Guid id,
         Guid hostId,
         PropertyType propertyType,
         LocalizedText name,
         string? city,
         string timeZoneId)
     {
+        Guard.Against.Default(id);
         Guard.Against.Default(hostId);
         Guard.Against.Null(name);
         GuardTimeZone(timeZoneId);
 
-        return new Property(Guid.CreateVersion7(), hostId, propertyType, name, city, timeZoneId);
+        return new Property(id, hostId, propertyType, name, city, timeZoneId);
     }
 
     public void Rename(LocalizedText name)

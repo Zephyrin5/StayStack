@@ -21,6 +21,9 @@ public class CreateGuestReviewHandler(
 {
     public async ValueTask<CreateGuestReviewResponse> Handle(CreateGuestReviewRequest request, CancellationToken cancellationToken)
     {
+        // Chosen first, before anything that could retry - see docs/adr/0025.
+        Guid reviewId = Guid.CreateVersion7();
+
         Guid hostId = hostAuthorization.RequireHostId();
 
         // A raw lookup, not an ownership-checked one - a host reviewing a
@@ -74,7 +77,7 @@ public class CreateGuestReviewHandler(
             throw new GuestAlreadyReviewedException(request.BookingId);
         }
 
-        GuestReview review = GuestReview.Create(request.BookingId, hostId, booking.GuestEmail, request.OverallRating, request.Comment);
+        GuestReview review = GuestReview.Create(reviewId, request.BookingId, hostId, booking.GuestEmail, request.OverallRating, request.Comment);
         dbContext.GuestReviews.Add(review);
 
         try

@@ -12,6 +12,7 @@ public class PromotionTests
         DateTimeOffset expiresAt = DateTimeOffset.UtcNow.AddDays(30);
 
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             hostId, " summer26 ", PromotionDiscountType.Percentage, 10m, null, expiresAt, 100);
 
         Assert.NotEqual(Guid.Empty, promotion.Id);
@@ -29,6 +30,7 @@ public class PromotionTests
     public void CreateHostPromotion_ShouldThrow_WhenHostIdIsEmpty()
     {
         Assert.ThrowsAny<ArgumentException>(() => Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.Empty, "CODE", PromotionDiscountType.Percentage, 10m, null, null, null));
     }
 
@@ -39,6 +41,7 @@ public class PromotionTests
     public void CreateHostPromotion_ShouldThrow_WhenCodeIsNullOrWhitespace(string? code)
     {
         Assert.ThrowsAny<ArgumentException>(() => Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), code!, PromotionDiscountType.Percentage, 10m, null, null, null));
     }
 
@@ -48,6 +51,7 @@ public class PromotionTests
     public void CreateHostPromotion_ShouldThrow_WhenPercentageDiscountValueIsOutOfRange(double discountValue)
     {
         Assert.ThrowsAny<ArgumentException>(() => Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.Percentage, (decimal)discountValue, null, null, null));
     }
 
@@ -55,6 +59,7 @@ public class PromotionTests
     public void CreateHostPromotion_ShouldAllowPercentageDiscountValueOfExactlyOneHundred()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.Percentage, 100m, null, null, null);
 
         Assert.Equal(100m, promotion.DiscountValue);
@@ -64,6 +69,7 @@ public class PromotionTests
     public void CreateHostPromotion_ShouldThrow_WhenFixedAmountDiscountValueIsNotPositive()
     {
         Assert.ThrowsAny<ArgumentException>(() => Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.FixedAmount, 0m, Currency.KWD, null, null));
     }
 
@@ -71,6 +77,7 @@ public class PromotionTests
     public void CreateHostPromotion_ShouldThrow_WhenFixedAmountHasNoCurrency()
     {
         Assert.Throws<ArgumentException>(() => Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.FixedAmount, 10m, null, null, null));
     }
 
@@ -78,6 +85,7 @@ public class PromotionTests
     public void CreateHostPromotion_ShouldAllowFixedAmountWithCurrency()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.FixedAmount, 10m, Currency.KWD, null, null);
 
         Assert.Equal(Currency.KWD, promotion.Currency);
@@ -89,6 +97,7 @@ public class PromotionTests
     public void CreateHostPromotion_ShouldThrow_WhenMaxRedemptionsIsNotPositive(int maxRedemptions)
     {
         Assert.ThrowsAny<ArgumentException>(() => Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.Percentage, 10m, null, null, maxRedemptions));
     }
 
@@ -96,6 +105,7 @@ public class PromotionTests
     public void CreateHostPromotion_ShouldAllowNullMaxRedemptions()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.Percentage, 10m, null, null, null);
 
         Assert.Null(promotion.MaxRedemptions);
@@ -105,6 +115,7 @@ public class PromotionTests
     public void CreatePlatformPromotion_ShouldAllowNullHostId()
     {
         Promotion promotion = Promotion.CreatePlatformPromotion(
+            Guid.CreateVersion7(),
             "CODE", PromotionDiscountType.Percentage, 10m, null, null, null, null);
 
         Assert.Null(promotion.HostId);
@@ -116,6 +127,7 @@ public class PromotionTests
         Guid hostId = Guid.NewGuid();
 
         Promotion promotion = Promotion.CreatePlatformPromotion(
+            Guid.CreateVersion7(),
             "CODE", PromotionDiscountType.Percentage, 10m, null, null, null, hostId);
 
         Assert.Equal(hostId, promotion.HostId);
@@ -125,6 +137,7 @@ public class PromotionTests
     public void CreatePlatformPromotion_ShouldThrow_WhenFixedAmountHasNoCurrency()
     {
         Assert.Throws<ArgumentException>(() => Promotion.CreatePlatformPromotion(
+            Guid.CreateVersion7(),
             "CODE", PromotionDiscountType.FixedAmount, 10m, null, null, null, null));
     }
 
@@ -132,6 +145,7 @@ public class PromotionTests
     public void SetDiscountValue_ShouldThrow_WhenPercentageValueIsOutOfRange()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.Percentage, 10m, null, null, null);
 
         Assert.ThrowsAny<ArgumentException>(() => promotion.SetDiscountValue(0m));
@@ -141,6 +155,7 @@ public class PromotionTests
     public void SetDiscountValue_ShouldUpdateValue_WhenValid()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.Percentage, 10m, null, null, null);
 
         promotion.SetDiscountValue(20m);
@@ -152,6 +167,7 @@ public class PromotionTests
     public void SetCurrency_ShouldThrow_WhenFixedAmountAndCurrencyIsNull()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.FixedAmount, 10m, Currency.KWD, null, null);
 
         Assert.Throws<ArgumentException>(() => promotion.SetCurrency(null));
@@ -161,6 +177,7 @@ public class PromotionTests
     public void SetExpiresAt_ShouldUpdateValue()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.Percentage, 10m, null, null, null);
         DateTimeOffset expiresAt = DateTimeOffset.UtcNow.AddDays(5);
 
@@ -173,6 +190,7 @@ public class PromotionTests
     public void SetMaxRedemptions_ShouldThrow_WhenNotPositive()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.Percentage, 10m, null, null, null);
 
         Assert.ThrowsAny<ArgumentException>(() => promotion.SetMaxRedemptions(0));
@@ -182,6 +200,7 @@ public class PromotionTests
     public void SetMaxRedemptions_ShouldAllowNull()
     {
         Promotion promotion = Promotion.CreateHostPromotion(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), "CODE", PromotionDiscountType.Percentage, 10m, null, null, 5);
 
         promotion.SetMaxRedemptions(null);

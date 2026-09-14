@@ -41,6 +41,7 @@ public class ReconcilerOrderingTests(IntegrationTestWebApplicationFactory factor
         _pendingProperties.Add(property);
 
         return Unit.Create(
+            Guid.CreateVersion7(),
             property.Id,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
             2,
@@ -80,6 +81,7 @@ public class ReconcilerOrderingTests(IntegrationTestWebApplicationFactory factor
             // thing the reconciler must not reverse ahead of its own commit.
             AppPromotionsDbContext promotions = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
             Promotion promotion = Promotion.CreatePlatformPromotion(
+                Guid.CreateVersion7(),
                 $"RECON{promotionId:N}"[..12], PromotionDiscountType.Percentage, 10m,
                 currency: null, expiresAt: DateTimeOffset.UtcNow.AddDays(30), maxRedemptions: null, hostId: null);
             promotions.Promotions.Add(promotion);
@@ -209,6 +211,7 @@ public class ReconcilerOrderingTests(IntegrationTestWebApplicationFactory factor
 
             AppPromotionsDbContext promotions = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
             Promotion seeded = Promotion.CreatePlatformPromotion(
+                Guid.CreateVersion7(),
                 promoCode, PromotionDiscountType.Percentage, 10m,
                 currency: null, expiresAt: DateTimeOffset.UtcNow.AddDays(30), maxRedemptions: null, hostId: null);
             promotions.Promotions.Add(seeded);

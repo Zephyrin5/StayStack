@@ -235,10 +235,12 @@ public partial class RetryIdentityProtocolTests
         List<(string File, string Body)> delegates = RetryDelegates(sources);
 
         // Not vacuous: the scan must find retry delegates, and must recognise a
-        // factory that mints its own id when one exists - Unit.Create does.
+        // factory that mints. Entity factories no longer do (EntityIdentityProtocolTests),
+        // so the anchor is IssuedRefreshToken.New, which mints by design and is
+        // exactly the kind of call that must stay outside a delegate.
         Assert.True(delegates.Count >= 15, $"Found only {delegates.Count} retry delegates - the scan is broken.");
-        Assert.True(factories.Contains("Unit.Create"),
-            "The scan no longer recognises Unit.Create as minting its own id: " + string.Join(", ", factories));
+        Assert.True(factories.Contains("IssuedRefreshToken.New"),
+            "The scan no longer recognises IssuedRefreshToken.New as minting: " + string.Join(", ", factories));
 
         List<string> violations = [];
 

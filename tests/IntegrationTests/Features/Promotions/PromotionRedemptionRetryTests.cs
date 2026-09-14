@@ -25,6 +25,7 @@ public class PromotionRedemptionRetryTests(IntegrationTestWebApplicationFactory 
     public async Task ARedemptionWhoseCommitLosesItsAcknowledgement_ReturnsTheRedemptionItAlreadyMade()
     {
         Promotion promotion = Promotion.CreatePlatformPromotion(
+            Guid.CreateVersion7(),
             $"RETRY{Guid.NewGuid():N}"[..12].ToUpperInvariant(),
             PromotionDiscountType.Percentage,
             10m,

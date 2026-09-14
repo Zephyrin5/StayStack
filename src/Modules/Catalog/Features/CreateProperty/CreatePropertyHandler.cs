@@ -15,6 +15,9 @@ public class CreatePropertyHandler(
         CreatePropertyRequest request,
         CancellationToken cancellationToken)
     {
+        // Chosen first, before anything that could retry - see docs/adr/0025.
+        Guid propertyId = Guid.CreateVersion7();
+
         // Throws NotAHostException if the caller has no host_id claim -
         // this also means IHostLookup isn't needed here at all anymore:
         // a HostId that made it into the token was only ever set by
@@ -24,7 +27,7 @@ public class CreatePropertyHandler(
 
         LocalizedText name = LocalizedText.Create(request.Name, localizationSettings.Value.DefaultCulture);
 
-        Property property = Property.Create(hostId, request.PropertyType, name, request.City, request.TimeZoneId);
+        Property property = Property.Create(propertyId, hostId, request.PropertyType, name, request.City, request.TimeZoneId);
 
         dbContext.Properties.Add(property);
         await dbContext.SaveChangesAsync(cancellationToken);

@@ -77,6 +77,7 @@ public sealed class StayReview : Entity, IAggregateRoot
     public DateTimeOffset? HostRepliedAt { get; private set; }
 
     public static StayReview Create(
+        Guid id,
         Guid bookingId,
         Guid propertyId,
         Guid hostId,
@@ -89,6 +90,7 @@ public sealed class StayReview : Entity, IAggregateRoot
         int accuracyRating,
         string? comment)
     {
+        Guard.Against.Default(id);
         Guard.Against.Default(bookingId);
         Guard.Against.Default(propertyId);
         Guard.Against.Default(hostId);
@@ -100,7 +102,7 @@ public sealed class StayReview : Entity, IAggregateRoot
         Guard.Against.OutOfRange(accuracyRating, nameof(accuracyRating), 1, 5);
 
         return new StayReview(
-            Guid.CreateVersion7(), bookingId, propertyId, hostId, reviewerCustomerId,
+            id, bookingId, propertyId, hostId, reviewerCustomerId,
             reviewerGuestEmail.Trim().ToLowerInvariant(), cleanlinessRating, communicationRating,
             locationRating, valueRating, accuracyRating, comment);
     }

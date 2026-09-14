@@ -20,6 +20,7 @@ public class HoldAvailabilityValidationResponseTests(IntegrationTestWebApplicati
     {
         Property property = CatalogSeeding.CreateProperty();
         Unit unit = Unit.Create(
+            Guid.CreateVersion7(),
             property.Id,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
             maxOccupancy,

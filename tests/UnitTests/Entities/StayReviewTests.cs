@@ -7,6 +7,7 @@ public class StayReviewTests
     private static StayReview CreateValidReview(
         int cleanliness = 5, int communication = 4, int location = 3, int value = 2, int accuracy = 1) =>
         StayReview.Create(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Guest@Example.com ",
             cleanliness, communication, location, value, accuracy, "Great stay");
 
@@ -19,6 +20,7 @@ public class StayReviewTests
         Guid reviewerCustomerId = Guid.NewGuid();
 
         StayReview review = StayReview.Create(
+            Guid.CreateVersion7(),
             bookingId, propertyId, hostId, reviewerCustomerId, "Guest@Example.com ",
             5, 4, 3, 2, 1, "Great stay");
 
@@ -42,6 +44,7 @@ public class StayReviewTests
     public void Create_ShouldComputeOverallRatingAsTheAverageOfTheFiveCategories()
     {
         StayReview review = StayReview.Create(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "guest@example.com",
             5, 4, 3, 2, 1, null);
 
@@ -52,6 +55,7 @@ public class StayReviewTests
     public void Create_ShouldAllowNullReviewerCustomerId_ForGuestCheckout()
     {
         StayReview review = StayReview.Create(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "guest@example.com",
             5, 5, 5, 5, 5, null);
 
@@ -62,6 +66,7 @@ public class StayReviewTests
     public void Create_ShouldThrow_WhenBookingIdIsEmpty()
     {
         Assert.ThrowsAny<ArgumentException>(() => StayReview.Create(
+            Guid.CreateVersion7(),
             Guid.Empty, Guid.NewGuid(), Guid.NewGuid(), null, "guest@example.com", 5, 5, 5, 5, 5, null));
     }
 
@@ -69,6 +74,7 @@ public class StayReviewTests
     public void Create_ShouldThrow_WhenPropertyIdIsEmpty()
     {
         Assert.ThrowsAny<ArgumentException>(() => StayReview.Create(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), Guid.Empty, Guid.NewGuid(), null, "guest@example.com", 5, 5, 5, 5, 5, null));
     }
 
@@ -76,6 +82,7 @@ public class StayReviewTests
     public void Create_ShouldThrow_WhenHostIdIsEmpty()
     {
         Assert.ThrowsAny<ArgumentException>(() => StayReview.Create(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, null, "guest@example.com", 5, 5, 5, 5, 5, null));
     }
 
@@ -86,6 +93,7 @@ public class StayReviewTests
     public void Create_ShouldThrow_WhenReviewerGuestEmailIsNullOrWhitespace(string? guestEmail)
     {
         Assert.ThrowsAny<ArgumentException>(() => StayReview.Create(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, guestEmail!, 5, 5, 5, 5, 5, null));
     }
 
@@ -95,6 +103,7 @@ public class StayReviewTests
     public void Create_ShouldThrow_WhenAnyCategoryRatingIsOutOfRange(int invalidRating)
     {
         Assert.ThrowsAny<ArgumentException>(() => StayReview.Create(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, "guest@example.com",
             invalidRating, 5, 5, 5, 5, null));
     }

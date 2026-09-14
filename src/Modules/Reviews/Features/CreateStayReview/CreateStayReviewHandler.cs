@@ -21,6 +21,9 @@ public class CreateStayReviewHandler(
 {
     public async ValueTask<CreateStayReviewResponse> Handle(CreateStayReviewRequest request, CancellationToken cancellationToken)
     {
+        // Chosen first, before anything that could retry - see docs/adr/0025.
+        Guid reviewId = Guid.CreateVersion7();
+
         // Same two-path ownership proof CancelBookingHandler itself uses -
         // an authenticated customer's own id, or a guest-checkout
         // management token - resolved cross-module without Reviews ever
@@ -72,6 +75,7 @@ public class CreateStayReviewHandler(
                             ?? throw new NotFoundException("Unit", access.UnitId);
 
         StayReview review = StayReview.Create(
+            reviewId,
             request.BookingId,
             unit.PropertyId,
             unit.HostId,

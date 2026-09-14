@@ -50,6 +50,7 @@ public sealed class Promotion : Entity, IAggregateRoot
     public int RedemptionCount { get; private set; }
 
     public static Promotion CreateHostPromotion(
+        Guid id,
         Guid hostId,
         string code,
         PromotionDiscountType discountType,
@@ -59,10 +60,11 @@ public sealed class Promotion : Entity, IAggregateRoot
         int? maxRedemptions)
     {
         Guard.Against.Default(hostId);
-        return Create(code, discountType, discountValue, currency, hostId, expiresAt, maxRedemptions);
+        return Create(id, code, discountType, discountValue, currency, hostId, expiresAt, maxRedemptions);
     }
 
     public static Promotion CreatePlatformPromotion(
+        Guid id,
         string code,
         PromotionDiscountType discountType,
         decimal discountValue,
@@ -71,7 +73,7 @@ public sealed class Promotion : Entity, IAggregateRoot
         int? maxRedemptions,
         Guid? hostId)
     {
-        return Create(code, discountType, discountValue, currency, hostId, expiresAt, maxRedemptions);
+        return Create(id, code, discountType, discountValue, currency, hostId, expiresAt, maxRedemptions);
     }
 
     // Code and DiscountType are immutable after creation - no setters for
@@ -103,6 +105,7 @@ public sealed class Promotion : Entity, IAggregateRoot
     }
 
     private static Promotion Create(
+        Guid id,
         string code,
         PromotionDiscountType discountType,
         decimal discountValue,
@@ -111,6 +114,7 @@ public sealed class Promotion : Entity, IAggregateRoot
         DateTimeOffset? expiresAt,
         int? maxRedemptions)
     {
+        Guard.Against.Default(id);
         Guard.Against.NullOrWhiteSpace(code);
         string normalizedCode = code.Trim().ToUpperInvariant();
         ValidateDiscountValue(discountType, discountValue);
@@ -121,7 +125,7 @@ public sealed class Promotion : Entity, IAggregateRoot
         }
 
         return new Promotion(
-            Guid.CreateVersion7(), normalizedCode, discountType, discountValue, currency,
+            id, normalizedCode, discountType, discountValue, currency,
             hostId, expiresAt, maxRedemptions);
     }
 

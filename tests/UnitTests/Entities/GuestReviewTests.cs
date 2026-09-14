@@ -9,7 +9,7 @@ public class GuestReviewTests
         Guid bookingId = Guid.NewGuid();
         Guid hostId = Guid.NewGuid();
 
-        GuestReview review = GuestReview.Create(bookingId, hostId, "Guest@Example.com ", 4, "Great guest");
+        GuestReview review = GuestReview.Create(Guid.CreateVersion7(), bookingId, hostId, "Guest@Example.com ", 4, "Great guest");
 
         Assert.NotEqual(Guid.Empty, review.Id);
         Assert.Equal(bookingId, review.BookingId);
@@ -22,7 +22,7 @@ public class GuestReviewTests
     [Fact]
     public void Create_ShouldAllowNullComment()
     {
-        GuestReview review = GuestReview.Create(Guid.NewGuid(), Guid.NewGuid(), "guest@example.com", 5, null);
+        GuestReview review = GuestReview.Create(Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), "guest@example.com", 5, null);
 
         Assert.Null(review.Comment);
     }
@@ -31,6 +31,7 @@ public class GuestReviewTests
     public void Create_ShouldThrow_WhenBookingIdIsEmpty()
     {
         Assert.ThrowsAny<ArgumentException>(() => GuestReview.Create(
+            Guid.CreateVersion7(),
             Guid.Empty, Guid.NewGuid(), "guest@example.com", 5, null));
     }
 
@@ -38,6 +39,7 @@ public class GuestReviewTests
     public void Create_ShouldThrow_WhenHostIdIsEmpty()
     {
         Assert.ThrowsAny<ArgumentException>(() => GuestReview.Create(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), Guid.Empty, "guest@example.com", 5, null));
     }
 
@@ -48,6 +50,7 @@ public class GuestReviewTests
     public void Create_ShouldThrow_WhenGuestEmailIsNullOrWhitespace(string? guestEmail)
     {
         Assert.ThrowsAny<ArgumentException>(() => GuestReview.Create(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), Guid.NewGuid(), guestEmail!, 5, null));
     }
 
@@ -57,6 +60,7 @@ public class GuestReviewTests
     public void Create_ShouldThrow_WhenOverallRatingIsOutOfRange(int invalidRating)
     {
         Assert.ThrowsAny<ArgumentException>(() => GuestReview.Create(
+            Guid.CreateVersion7(),
             Guid.NewGuid(), Guid.NewGuid(), "guest@example.com", invalidRating, null));
     }
 }

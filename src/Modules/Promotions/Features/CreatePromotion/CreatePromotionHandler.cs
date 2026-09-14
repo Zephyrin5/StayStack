@@ -13,12 +13,16 @@ public class CreatePromotionHandler(
     public async ValueTask<CreatePromotionResponse> Handle(
         CreatePromotionRequest request, CancellationToken cancellationToken)
     {
+        // Chosen first, before anything that could retry - see docs/adr/0025.
+        Guid promotionId = Guid.CreateVersion7();
+
         Guid hostId = hostAuthorization.RequireHostId();
 
         Promotion promotion;
         try
         {
             promotion = Promotion.CreateHostPromotion(
+                promotionId,
                 hostId, request.Code, request.DiscountType, request.DiscountValue, request.Currency,
                 request.ExpiresAt, request.MaxRedemptions);
         }

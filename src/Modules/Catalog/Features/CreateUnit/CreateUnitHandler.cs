@@ -23,6 +23,9 @@ public class CreateUnitHandler(
 {
     public async ValueTask<CreateUnitResponse> Handle(CreateUnitRequest request, CancellationToken cancellationToken)
     {
+        // Chosen first, before anything that could retry - see docs/adr/0025.
+        Guid unitId = Guid.CreateVersion7();
+
         Property? property = await dbContext.Properties
             .SingleOrDefaultAsync(p => p.Id == request.PropertyId, cancellationToken);
 
@@ -49,6 +52,7 @@ public class CreateUnitHandler(
             : null;
 
         Unit unit = Unit.Create(
+            unitId,
             request.PropertyId,
             name,
             request.MaxOccupancy,

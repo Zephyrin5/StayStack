@@ -10,6 +10,9 @@ public class CreateHostHandler(AppHostsDbContext dbContext, IOptions<Localizatio
 {
     public async ValueTask<CreateHostResponse> Handle(CreateHostRequest request, CancellationToken cancellationToken)
     {
+        // Chosen first, before anything that could retry - see docs/adr/0025.
+        Guid hostId = Guid.CreateVersion7();
+
         LocalizedText? displayName = request.DisplayName is { Count: > 0 }
             ? LocalizedText.Create(request.DisplayName, localizationSettings.Value.DefaultCulture)
             : null;
@@ -18,7 +21,7 @@ public class CreateHostHandler(AppHostsDbContext dbContext, IOptions<Localizatio
         // retry story to make idempotent - unlike BecomeHost, whose id comes
         // from a PendingHostLinkIntent recorded before the call.
         Host host = Host.Create(
-            Guid.CreateVersion7(), request.BusinessName, request.ContactEmail, request.ContactPhone, displayName);
+            hostId, request.BusinessName, request.ContactEmail, request.ContactPhone, displayName);
 
         dbContext.Hosts.Add(host);
         await dbContext.SaveChangesAsync(cancellationToken);

@@ -18,6 +18,9 @@ public class AdminCreatePropertyHandler(
         AdminCreatePropertyRequest request,
         CancellationToken cancellationToken)
     {
+        // Chosen first, before anything that could retry - see docs/adr/0025.
+        Guid propertyId = Guid.CreateVersion7();
+
         // Unlike CreatePropertyHandler, HostId here IS trusted client
         // input - but "trusted" (an Administrator is allowed to specify
         // it) doesn't mean "assumed valid". Still confirm it's a real
@@ -29,7 +32,7 @@ public class AdminCreatePropertyHandler(
 
         LocalizedText name = LocalizedText.Create(request.Name, localizationSettings.Value.DefaultCulture);
 
-        Property property = Property.Create(request.HostId, request.PropertyType, name, request.City, request.TimeZoneId);
+        Property property = Property.Create(propertyId, request.HostId, request.PropertyType, name, request.City, request.TimeZoneId);
 
         dbContext.Properties.Add(property);
         await dbContext.SaveChangesAsync(cancellationToken);

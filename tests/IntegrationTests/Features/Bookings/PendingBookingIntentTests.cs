@@ -98,6 +98,7 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
         // A real Property, not a throwaway id - see CatalogSeeding.
         Property property = CatalogSeeding.CreateProperty();
         return (property, Unit.Create(
+            Guid.CreateVersion7(),
             property.Id,
         LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
         2,
