@@ -356,7 +356,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
 
-        PricingRule overrideRule = PricingRule.CreateDateRangeOverride(
+        PricingRule overrideRule = PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(),
             unit.Id, today.AddDays(1), today.AddDays(2), 500m);
 
         await SeedCatalogAsync(unit, overrideRule);
@@ -391,7 +391,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
 
-        PricingRule multiplierRule = PricingRule.CreateDayOfWeekMultiplier(unit.Id, [(int)DayOfWeek.Friday], 2m);
+        PricingRule multiplierRule = PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), unit.Id, [(int)DayOfWeek.Friday], 2m);
 
         await SeedCatalogAsync(unit, multiplierRule);
 
@@ -425,7 +425,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         DateTimeOffset fixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
         DateOnly today = DateOnly.FromDateTime(fixedInstant.UtcDateTime);
 
-        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(unit.Id, 7, 10m);
+        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unit.Id, 7, 10m);
 
         await SeedCatalogAsync(unit, discountRule);
 

@@ -251,7 +251,7 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         DateOnly from = new DateOnly(2026, 9, 1);
         DateOnly to = new DateOnly(2026, 9, 5); // Sept 1, 2, 3, 4
 
-        PricingRule overrideRule = PricingRule.CreateDateRangeOverride(
+        PricingRule overrideRule = PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(),
             unit.Id, new DateOnly(2026, 9, 2), new DateOnly(2026, 9, 4), 400m);
 
         await SeedDatabaseAsync(unit, overrideRule);
@@ -282,7 +282,7 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         DateOnly from = new DateOnly(2026, 9, 3);
         DateOnly to = new DateOnly(2026, 9, 5); // Sept 3 (Thu), Sept 4 (Fri)
 
-        PricingRule multiplierRule = PricingRule.CreateDayOfWeekMultiplier(unit.Id, [(int)DayOfWeek.Friday], 2m);
+        PricingRule multiplierRule = PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), unit.Id, [(int)DayOfWeek.Friday], 2m);
 
         await SeedDatabaseAsync(unit, multiplierRule);
 
@@ -313,7 +313,7 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         DateOnly from = new DateOnly(2026, 9, 1);
         DateOnly to = new DateOnly(2026, 9, 8); // 7 days - meets a MinNights=7 threshold
 
-        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(unit.Id, 7, 10m);
+        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unit.Id, 7, 10m);
 
         await SeedDatabaseAsync(unit, discountRule);
 

@@ -56,10 +56,10 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
     {
         Guid unitId = await SeedUnitAsync();
 
-        await AddRuleAsync(PricingRule.CreateDateRangeOverride(unitId, Anchor, Anchor.AddDays(10), 150m));
+        await AddRuleAsync(PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(), unitId, Anchor, Anchor.AddDays(10), 150m));
 
         DbUpdateException exception = await Assert.ThrowsAsync<DbUpdateException>(() =>
-            AddRuleAsync(PricingRule.CreateDateRangeOverride(unitId, Anchor.AddDays(5), Anchor.AddDays(15), 200m)));
+            AddRuleAsync(PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(), unitId, Anchor.AddDays(5), Anchor.AddDays(15), 200m)));
 
         // 23P01 is exclusion_violation - the constraint, not a unique index or
         // an application check that happened to run anyway.
@@ -76,8 +76,8 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
         // asserts it rather than assuming the two definitions coincide.
         Guid unitId = await SeedUnitAsync();
 
-        await AddRuleAsync(PricingRule.CreateDateRangeOverride(unitId, Anchor, Anchor.AddDays(10), 150m));
-        await AddRuleAsync(PricingRule.CreateDateRangeOverride(unitId, Anchor.AddDays(10), Anchor.AddDays(20), 200m));
+        await AddRuleAsync(PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(), unitId, Anchor, Anchor.AddDays(10), 150m));
+        await AddRuleAsync(PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(), unitId, Anchor.AddDays(10), Anchor.AddDays(20), 200m));
     }
 
     [Fact]
@@ -88,8 +88,8 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
         Guid firstUnitId = await SeedUnitAsync();
         Guid secondUnitId = await SeedUnitAsync();
 
-        await AddRuleAsync(PricingRule.CreateDateRangeOverride(firstUnitId, Anchor, Anchor.AddDays(10), 150m));
-        await AddRuleAsync(PricingRule.CreateDateRangeOverride(secondUnitId, Anchor, Anchor.AddDays(10), 200m));
+        await AddRuleAsync(PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(), firstUnitId, Anchor, Anchor.AddDays(10), 150m));
+        await AddRuleAsync(PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(), secondUnitId, Anchor, Anchor.AddDays(10), 200m));
     }
 
     [Fact]
@@ -100,11 +100,11 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
         // reserve its dates against the replacement that supersedes it.
         Guid unitId = await SeedUnitAsync();
 
-        PricingRule archived = PricingRule.CreateDateRangeOverride(unitId, Anchor, Anchor.AddDays(10), 150m);
+        PricingRule archived = PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(), unitId, Anchor, Anchor.AddDays(10), 150m);
         archived.Archive(DateTimeOffset.UtcNow, null);
         await AddRuleAsync(archived);
 
-        await AddRuleAsync(PricingRule.CreateDateRangeOverride(unitId, Anchor.AddDays(5), Anchor.AddDays(15), 200m));
+        await AddRuleAsync(PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(), unitId, Anchor.AddDays(5), Anchor.AddDays(15), 200m));
     }
 
     [Fact]
@@ -117,10 +117,10 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
         // would depend on row order.
         Guid unitId = await SeedUnitAsync();
 
-        await AddRuleAsync(PricingRule.CreateLengthOfStayDiscount(unitId, minNights: 3, discountPercent: 10m));
+        await AddRuleAsync(PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unitId, minNights: 3, discountPercent: 10m));
 
         DbUpdateException exception = await Assert.ThrowsAsync<DbUpdateException>(() =>
-            AddRuleAsync(PricingRule.CreateLengthOfStayDiscount(unitId, minNights: 7, discountPercent: 20m)));
+            AddRuleAsync(PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unitId, minNights: 7, discountPercent: 20m)));
 
         PostgresException postgres = UnwrapPostgres(exception);
         Assert.Equal("23505", postgres.SqlState);
@@ -132,11 +132,11 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
     {
         Guid unitId = await SeedUnitAsync();
 
-        PricingRule archived = PricingRule.CreateLengthOfStayDiscount(unitId, minNights: 3, discountPercent: 10m);
+        PricingRule archived = PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unitId, minNights: 3, discountPercent: 10m);
         archived.Archive(DateTimeOffset.UtcNow, null);
         await AddRuleAsync(archived);
 
-        await AddRuleAsync(PricingRule.CreateLengthOfStayDiscount(unitId, minNights: 7, discountPercent: 20m));
+        await AddRuleAsync(PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unitId, minNights: 7, discountPercent: 20m));
     }
 
     [Fact]
@@ -156,8 +156,8 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
         // of being rediscovered as a surprise.
         Guid unitId = await SeedUnitAsync();
 
-        await AddRuleAsync(PricingRule.CreateDayOfWeekMultiplier(unitId, [5, 6], 1.5m));
-        await AddRuleAsync(PricingRule.CreateDayOfWeekMultiplier(unitId, [6, 0], 1.25m));
+        await AddRuleAsync(PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), unitId, [5, 6], 1.5m));
+        await AddRuleAsync(PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), unitId, [6, 0], 1.25m));
     }
 
     [Fact]
@@ -179,7 +179,7 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
         // in this file: what is being tested is the column.
         Guid unitId = await SeedUnitAsync();
 
-        PricingRule rule = PricingRule.CreateDateRangeOverride(unitId, Anchor, Anchor.AddDays(3), 10.125m);
+        PricingRule rule = PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(), unitId, Anchor, Anchor.AddDays(3), 10.125m);
         await AddRuleAsync(rule);
 
         using IServiceScope scope = factory.Services.CreateScope();

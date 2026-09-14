@@ -25,7 +25,7 @@ public class PricingCalculatorTests
     public void ResolveNightlyPrice_ShouldReturnOverridePrice_WhenDateInsideActiveOverride()
     {
         DateOnly date = new DateOnly(2026, 12, 25);
-        PricingRule rule = PricingRule.CreateDateRangeOverride(
+        PricingRule rule = PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(),
             UnitId, new DateOnly(2026, 12, 20), new DateOnly(2026, 12, 31), 250m);
 
         Money price = PricingCalculator.ResolveNightlyPrice(Usd(100m), date, [rule]);
@@ -37,9 +37,9 @@ public class PricingCalculatorTests
     public void ResolveNightlyPrice_ShouldIgnoreMultiplier_WhenOverrideAlsoApplies()
     {
         DateOnly date = new DateOnly(2026, 12, 25); // a Friday
-        PricingRule overrideRule = PricingRule.CreateDateRangeOverride(
+        PricingRule overrideRule = PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(),
             UnitId, new DateOnly(2026, 12, 20), new DateOnly(2026, 12, 31), 250m);
-        PricingRule multiplierRule = PricingRule.CreateDayOfWeekMultiplier(UnitId, [5, 6], 1.5m);
+        PricingRule multiplierRule = PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), UnitId, [5, 6], 1.5m);
 
         Money price = PricingCalculator.ResolveNightlyPrice(Usd(100m), date, [overrideRule, multiplierRule]);
 
@@ -50,7 +50,7 @@ public class PricingCalculatorTests
     public void ResolveNightlyPrice_ShouldApplyMultiplier_WhenWeekdayMatches()
     {
         DateOnly saturday = new DateOnly(2026, 8, 29);
-        PricingRule rule = PricingRule.CreateDayOfWeekMultiplier(UnitId, [(int)DayOfWeek.Saturday], 1.5m);
+        PricingRule rule = PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), UnitId, [(int)DayOfWeek.Saturday], 1.5m);
 
         Money price = PricingCalculator.ResolveNightlyPrice(Usd(100m), saturday, [rule]);
 
@@ -61,7 +61,7 @@ public class PricingCalculatorTests
     public void ResolveNightlyPrice_ShouldReturnBasePrice_WhenWeekdayDoesNotMatch()
     {
         DateOnly tuesday = new DateOnly(2026, 9, 1);
-        PricingRule rule = PricingRule.CreateDayOfWeekMultiplier(UnitId, [(int)DayOfWeek.Saturday], 1.5m);
+        PricingRule rule = PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), UnitId, [(int)DayOfWeek.Saturday], 1.5m);
 
         Money price = PricingCalculator.ResolveNightlyPrice(Usd(100m), tuesday, [rule]);
 
@@ -74,7 +74,7 @@ public class PricingCalculatorTests
         // Aug 29 (Sat, overridden) + Aug 30/31 (base) = 200 + 100 + 100
         DateOnly checkIn = new DateOnly(2026, 8, 29);
         DateOnly checkOut = new DateOnly(2026, 9, 1);
-        PricingRule overrideRule = PricingRule.CreateDateRangeOverride(
+        PricingRule overrideRule = PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(),
             UnitId, new DateOnly(2026, 8, 29), new DateOnly(2026, 8, 30), 200m);
 
         StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(Usd(100m), checkIn, checkOut, [overrideRule]);
@@ -90,7 +90,7 @@ public class PricingCalculatorTests
         // Week of Mon Aug 24 - Sun Aug 30 2026: Fri 28 + Sat 29 are weekend nights.
         DateOnly checkIn = new DateOnly(2026, 8, 24);
         DateOnly checkOut = new DateOnly(2026, 8, 31); // 7 nights
-        PricingRule weekendRule = PricingRule.CreateDayOfWeekMultiplier(
+        PricingRule weekendRule = PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(),
             UnitId, [(int)DayOfWeek.Friday, (int)DayOfWeek.Saturday], 2m);
 
         StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(Usd(100m), checkIn, checkOut, [weekendRule]);
@@ -104,7 +104,7 @@ public class PricingCalculatorTests
     {
         DateOnly checkIn = new DateOnly(2026, 1, 1);
         DateOnly checkOut = new DateOnly(2026, 1, 7); // 6 nights
-        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(UnitId, 7, 10m);
+        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), UnitId, 7, 10m);
 
         StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(Usd(100m), checkIn, checkOut, [discountRule]);
 
@@ -117,7 +117,7 @@ public class PricingCalculatorTests
     {
         DateOnly checkIn = new DateOnly(2026, 1, 1);
         DateOnly checkOut = new DateOnly(2026, 1, 8); // 7 nights
-        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(UnitId, 7, 10m);
+        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), UnitId, 7, 10m);
 
         StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(Usd(100m), checkIn, checkOut, [discountRule]);
 
@@ -131,7 +131,7 @@ public class PricingCalculatorTests
     {
         DateOnly checkIn = new DateOnly(2026, 1, 1);
         DateOnly checkOut = new DateOnly(2026, 1, 15); // 14 nights
-        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(UnitId, 7, 10m);
+        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), UnitId, 7, 10m);
 
         StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(Usd(100m), checkIn, checkOut, [discountRule]);
 
@@ -147,11 +147,11 @@ public class PricingCalculatorTests
         // 7 nights total triggers the 10% length-of-stay discount on the subtotal.
         DateOnly checkIn = new DateOnly(2026, 8, 24);
         DateOnly checkOut = new DateOnly(2026, 8, 31);
-        PricingRule overrideRule = PricingRule.CreateDateRangeOverride(
+        PricingRule overrideRule = PricingRule.CreateDateRangeOverride(Guid.CreateVersion7(),
             UnitId, new DateOnly(2026, 8, 29), new DateOnly(2026, 8, 30), 500m);
-        PricingRule weekendRule = PricingRule.CreateDayOfWeekMultiplier(
+        PricingRule weekendRule = PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(),
             UnitId, [(int)DayOfWeek.Friday, (int)DayOfWeek.Saturday], 2m);
-        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(UnitId, 7, 10m);
+        PricingRule discountRule = PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), UnitId, 7, 10m);
 
         StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(
             Usd(100m), checkIn, checkOut, [overrideRule, weekendRule, discountRule]);
@@ -210,7 +210,7 @@ public class PricingCalculatorTests
         Money basePrice = Money.Of(191.175m, Currency.KWD);
         DateOnly checkIn = new DateOnly(2026, 1, 1);
         DateOnly checkOut = checkIn.AddDays(45);
-        PricingRule[] rules = [PricingRule.CreateLengthOfStayDiscount(UnitId, minNights: 45, discountPercent: 13.2m)];
+        PricingRule[] rules = [PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), UnitId, minNights: 45, discountPercent: 13.2m)];
 
         StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(basePrice, checkIn, checkOut, rules);
 
@@ -235,7 +235,7 @@ public class PricingCalculatorTests
         Money basePrice = Money.Of(100.001m, Currency.KWD);
         DateOnly checkIn = new DateOnly(2026, 1, 1);
         DateOnly checkOut = checkIn.AddDays(1);
-        PricingRule[] rules = [PricingRule.CreateLengthOfStayDiscount(UnitId, minNights: 1, discountPercent: 33m)];
+        PricingRule[] rules = [PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), UnitId, minNights: 1, discountPercent: 33m)];
 
         StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(basePrice, checkIn, checkOut, rules);
 

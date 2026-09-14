@@ -60,12 +60,28 @@ public class CreatePricingRuleHandler(
         // first attempt's still-tracked, rolled-back one.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
-        Guid pricingRuleId = await strategy.ExecuteAsync(async () =>
+        // Once, outside the retry (docs/adr/0025). The factories used to mint it
+        // inside, so an attempt whose commit lost its acknowledgement was
+        // followed by one holding a different id - which then met the first
+        // attempt's committed rule in the overlap check below and reported the
+        // host's own new rule as a conflict with an existing one.
+        Guid pricingRuleId = Guid.CreateVersion7();
+
+        await strategy.ExecuteAsync(async () =>
         {
             dbContext.ChangeTracker.Clear();
 
             await using IDbContextTransaction transaction =
                 await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+            // An earlier attempt may already have committed. Asked before the
+            // overlap check, because that check would otherwise judge the
+            // request against a set containing its own rule and refuse it - the
+            // same ordering mistake initiation and the hold cap each made.
+            if (await dbContext.PricingRules.AsNoTracking().AnyAsync(r => r.Id == pricingRuleId, cancellationToken))
+            {
+                return;
+            }
 
             List<PricingRule> existingSameType = await dbContext.PricingRules
                 .Where(r => r.UnitId == request.UnitId && r.RuleType == request.RuleType)
@@ -73,9 +89,9 @@ public class CreatePricingRuleHandler(
 
             PricingRule rule = request.RuleType switch
             {
-                PricingRuleType.DateRangeOverride => CreateDateRangeOverride(request, existingSameType),
-                PricingRuleType.DayOfWeekMultiplier => CreateDayOfWeekMultiplier(request, existingSameType),
-                PricingRuleType.LengthOfStayDiscount => CreateLengthOfStayDiscount(request, existingSameType),
+                PricingRuleType.DateRangeOverride => CreateDateRangeOverride(pricingRuleId, request, existingSameType),
+                PricingRuleType.DayOfWeekMultiplier => CreateDayOfWeekMultiplier(pricingRuleId, request, existingSameType),
+                PricingRuleType.LengthOfStayDiscount => CreateLengthOfStayDiscount(pricingRuleId, request, existingSameType),
                 _ => throw new ValidationException(nameof(request.RuleType), "Unsupported RuleType.")
             };
 
@@ -95,34 +111,35 @@ public class CreatePricingRuleHandler(
             }
 
             await transaction.CommitAsync(cancellationToken);
-
-            return rule.Id;
         });
 
         return new CreatePricingRuleResponse { PricingRuleId = pricingRuleId };
     }
 
-    private static PricingRule CreateDateRangeOverride(CreatePricingRuleRequest request, IReadOnlyList<PricingRule> existing)
+    private static PricingRule CreateDateRangeOverride(
+        Guid id, CreatePricingRuleRequest request, IReadOnlyList<PricingRule> existing)
     {
         DateOnly startDate = request.StartDate!.Value;
         DateOnly endDate = request.EndDate!.Value;
         PricingRuleOverlapChecker.EnsureNoDateRangeConflict(startDate, endDate, existing);
 
-        return PricingRule.CreateDateRangeOverride(request.UnitId, startDate, endDate, request.OverridePrice!.Value);
+        return PricingRule.CreateDateRangeOverride(id, request.UnitId, startDate, endDate, request.OverridePrice!.Value);
     }
 
-    private static PricingRule CreateDayOfWeekMultiplier(CreatePricingRuleRequest request, IReadOnlyList<PricingRule> existing)
+    private static PricingRule CreateDayOfWeekMultiplier(
+        Guid id, CreatePricingRuleRequest request, IReadOnlyList<PricingRule> existing)
     {
         int[] daysOfWeek = request.DaysOfWeek!;
         PricingRuleOverlapChecker.EnsureNoDayOfWeekConflict(daysOfWeek, existing);
 
-        return PricingRule.CreateDayOfWeekMultiplier(request.UnitId, daysOfWeek, request.Multiplier!.Value);
+        return PricingRule.CreateDayOfWeekMultiplier(id, request.UnitId, daysOfWeek, request.Multiplier!.Value);
     }
 
-    private static PricingRule CreateLengthOfStayDiscount(CreatePricingRuleRequest request, IReadOnlyList<PricingRule> existing)
+    private static PricingRule CreateLengthOfStayDiscount(
+        Guid id, CreatePricingRuleRequest request, IReadOnlyList<PricingRule> existing)
     {
         PricingRuleOverlapChecker.EnsureNoLengthOfStayConflict(existing);
 
-        return PricingRule.CreateLengthOfStayDiscount(request.UnitId, request.MinNights!.Value, request.DiscountPercent!.Value);
+        return PricingRule.CreateLengthOfStayDiscount(id, request.UnitId, request.MinNights!.Value, request.DiscountPercent!.Value);
     }
 }

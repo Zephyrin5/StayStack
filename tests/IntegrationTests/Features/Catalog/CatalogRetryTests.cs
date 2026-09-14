@@ -122,7 +122,9 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
                                      {
                                          Unit unit => unit.Id == _target,
                                          Property property => property.Id == _target,
-                                         PricingRule rule => rule.Id == _target,
+                                         // By unit too: a create's rule id is the
+                                         // handler's, unknown to the test arming it.
+                                         PricingRule rule => rule.Id == _target || rule.UnitId == _target,
                                          _ => false
                                      });
 
@@ -293,6 +295,60 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         // 275, not the 150 it was created with. The old shape returned 200 and
         // left 150 in the database.
         Assert.Equal(275m, persisted.OverridePrice);
+    }
+
+    [Fact]
+    public async Task APricingRuleCreateWhoseAcknowledgementIsLost_ReturnsTheRuleItAlreadyCreated()
+    {
+        // The rule committed. The caller was told it conflicts with an existing
+        // rule - itself.
+        //
+        // The factories minted the rule's id inside the retried delegate, and
+        // the overlap check ran inside it too, so the retry held a new id and
+        // found the first attempt's committed rule overlapping its range.
+        Unit unit = CreateTestUnit();
+        await SeedAsync(unit);
+
+        string adminToken = await SignInAsAdministratorAsync();
+
+        using WebApplicationFactory<Program> host = HostLosingTheFirstAck(factory);
+        using HttpClient client = host.CreateClient();
+
+        LoseTheAckOnFirstCatalogCommitFor.ArmFor(unit.Id);
+
+        DateOnly start = CatalogSeeding.Today().AddDays(210);
+
+        HttpRequestMessage create = new HttpRequestMessage(HttpMethod.Post, $"/api/catalog/units/{unit.Id}/pricing-rules")
+        {
+            Content = JsonContent.Create(new CreatePricingRuleRequest
+            {
+                UnitId = unit.Id,
+                RuleType = PricingRuleType.DateRangeOverride,
+                StartDate = start,
+                EndDate = start.AddDays(5),
+                OverridePrice = 150m
+            }, options: TestJsonOptions.Default)
+        };
+        create.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+
+        HttpResponseMessage response = await client.SendAsync(create, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(LoseTheAckOnFirstCatalogCommitFor.Fired, "The lost acknowledgement never reached the create.");
+
+        CreatePricingRuleResponse? rule = await response.Content
+            .ReadFromJsonAsync<CreatePricingRuleResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(rule);
+
+        using IServiceScope assertScope = factory.Services.CreateScope();
+        AppCatalogDbContext db = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+
+        // Exactly one, and the one the caller was handed.
+        List<PricingRule> rules = await db.PricingRules.AsNoTracking()
+            .Where(r => r.UnitId == unit.Id)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(rule.PricingRuleId, Assert.Single(rules).Id);
     }
 
     [Fact]

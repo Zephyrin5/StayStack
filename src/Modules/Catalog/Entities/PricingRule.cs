@@ -53,36 +53,41 @@ public sealed class PricingRule : Entity, IAggregateRoot
     public decimal? DiscountPercent { get; private set; }
 
     public static PricingRule CreateDateRangeOverride(
-        Guid unitId, DateOnly startDate, DateOnly endDate, decimal overridePrice)
+        Guid id, Guid unitId, DateOnly startDate, DateOnly endDate, decimal overridePrice)
     {
+        Guard.Against.Default(id);
         Guard.Against.Default(unitId);
         Guard.Against.NegativeOrZero(overridePrice);
         NpgsqlRange<DateOnly> range = BuildDateRange(startDate, endDate);
 
         return new PricingRule(
-            Guid.CreateVersion7(), unitId, PricingRuleType.DateRangeOverride,
+            id, unitId, PricingRuleType.DateRangeOverride,
             range, overridePrice, null, null, null, null);
     }
 
-    public static PricingRule CreateDayOfWeekMultiplier(Guid unitId, int[] daysOfWeek, decimal multiplier)
+    public static PricingRule CreateDayOfWeekMultiplier(
+        Guid id, Guid unitId, int[] daysOfWeek, decimal multiplier)
     {
+        Guard.Against.Default(id);
         Guard.Against.Default(unitId);
         Guard.Against.NegativeOrZero(multiplier);
         int[] validated = ValidateDaysOfWeek(daysOfWeek);
 
         return new PricingRule(
-            Guid.CreateVersion7(), unitId, PricingRuleType.DayOfWeekMultiplier,
+            id, unitId, PricingRuleType.DayOfWeekMultiplier,
             null, null, validated, multiplier, null, null);
     }
 
-    public static PricingRule CreateLengthOfStayDiscount(Guid unitId, int minNights, decimal discountPercent)
+    public static PricingRule CreateLengthOfStayDiscount(
+        Guid id, Guid unitId, int minNights, decimal discountPercent)
     {
+        Guard.Against.Default(id);
         Guard.Against.Default(unitId);
         Guard.Against.NegativeOrZero(minNights);
         Guard.Against.OutOfRange(discountPercent, nameof(discountPercent), 0.01m, 100m);
 
         return new PricingRule(
-            Guid.CreateVersion7(), unitId, PricingRuleType.LengthOfStayDiscount,
+            id, unitId, PricingRuleType.LengthOfStayDiscount,
             null, null, null, null, minNights, discountPercent);
     }
 
