@@ -78,17 +78,23 @@ public class AuthTokenProvider(
         return new JsonWebTokenHandler().CreateToken(tokenDescriptor);
     }
 
-    public async Task<string> GenerateRefreshToken(Guid userId, Guid? familyId, Guid? parentTokenId, CancellationToken cancellationToken)
+    public async Task<string> GenerateRefreshToken(
+        Guid userId, Guid? familyId, Guid? parentTokenId, IssuedRefreshToken token, CancellationToken cancellationToken)
     {
-        string newRefreshTokenPlain = SecureToken.Generate();
+        string newRefreshTokenPlain = token.Plaintext;
         string newRefreshTokenHash = SecureToken.Hash(newRefreshTokenPlain);
         DateTime now = timeProvider.GetUtcNow().UtcDateTime;
 
         Entities.RefreshToken newRefreshTokenEntity = new Entities.RefreshToken
         {
+            Id = token.Id,
             TokenHash = newRefreshTokenHash,
             UserId = userId,
-            FamilyId = familyId ?? Guid.CreateVersion7(),
+            // A new family is named after its first token. Minting a separate
+            // id here put an identity inside every caller's retry that nothing
+            // could recover by, and a family needs no name of its own: its root
+            // token's id is already unique, stable, and chosen by the caller.
+            FamilyId = familyId ?? token.Id,
             ParentTokenId = parentTokenId,
             CreatedAt = now,
             ExpiresAt = now.AddDays(_authTokenSettings.RefreshTokenLifespanInDays),
@@ -106,6 +112,25 @@ public class AuthTokenProvider(
         }
 
         return newRefreshTokenPlain;
+    }
+
+    public async Task<Guid?> FindCommittedRotationAsync(
+        string presentedToken, Guid replacementId, CancellationToken cancellationToken)
+    {
+        string presentedHash = SecureToken.Hash(presentedToken);
+        DateTime now = timeProvider.GetUtcNow().UtcDateTime;
+
+        // One query: the presented token names this replacement, and the
+        // replacement is live. A replacement since revoked - its family caught
+        // by genuine reuse between the two attempts - is not recovered; the
+        // caller falls through to validation and gets the ordinary answer.
+        return await dbContext.RefreshTokens.AsNoTracking()
+            .Where(presented => presented.TokenHash == presentedHash && presented.ReplacedByTokenId == replacementId)
+            .Join(dbContext.RefreshTokens.Where(replacement => !replacement.IsRevoked && replacement.ExpiresAt > now),
+                presented => presented.ReplacedByTokenId,
+                replacement => (Guid?)replacement.Id,
+                (_, replacement) => (Guid?)replacement.UserId)
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
     public async Task<RefreshTokenValidationResult> ValidateRefreshToken(string refreshToken, CancellationToken cancellationToken)

@@ -1,9 +1,20 @@
 using Bogus;
+using Identity;
 using Identity.Entities;
 using Identity.Features.Common;
+using Identity.Features.RefreshToken;
 using Identity.Features.SignUp;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
+using Persistence;
+using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
@@ -118,8 +129,13 @@ public class SignUpTests(IntegrationTestWebApplicationFactory factory)
         public Task<RefreshTokenValidationResult> ValidateRefreshToken(string refreshToken, CancellationToken cancellationToken) =>
             inner.ValidateRefreshToken(refreshToken, cancellationToken);
 
-        public Task<string> GenerateRefreshToken(Guid userId, Guid? familyId, Guid? parentTokenId, CancellationToken cancellationToken) =>
+        public Task<string> GenerateRefreshToken(
+            Guid userId, Guid? familyId, Guid? parentTokenId, IssuedRefreshToken token, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Refresh token storage is unavailable.");
+
+        public Task<Guid?> FindCommittedRotationAsync(
+            string presentedToken, Guid replacementId, CancellationToken cancellationToken) =>
+            inner.FindCommittedRotationAsync(presentedToken, replacementId, cancellationToken);
 
         public Task RevokeRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken) =>
             inner.RevokeRefreshTokenAsync(refreshToken, cancellationToken);
@@ -194,5 +210,80 @@ public class SignUpTests(IntegrationTestWebApplicationFactory factory)
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+    }
+
+    // After the commit, and only the commit that registered this email - matched
+    // on the tracked account, since Identity registers no audit interceptor to
+    // substitute and its context is otherwise quiet in this host.
+    private sealed class LoseTheAckOnRegistrationOf(string email) : DbTransactionInterceptor
+    {
+        private int _fired;
+
+        public bool Fired => Volatile.Read(ref _fired) > 0;
+
+        public override Task TransactionCommittedAsync(
+            DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context is AppIdentityDbContext context
+                && context.ChangeTracker.Entries<ApplicationUser>().Any(e => e.Entity.Email == email)
+                && Interlocked.Increment(ref _fired) == 1)
+            {
+                throw new PostgresException("simulated lost acknowledgement after commit", "ERROR", "ERROR", "40001");
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task SignUp_WhoseCommitLosesItsAcknowledgement_ReturnsTheAccountItCreated()
+    {
+        // Registration commits the account, its role and its first refresh token
+        // together. A retry after a lost acknowledgement used to run
+        // CreateAsync again for an account that now existed, and answer a
+        // validation error to someone who had just registered - with a refresh
+        // token minted inside the retry that no row would ever match.
+        string email = _faker.Internet.Email();
+        LoseTheAckOnRegistrationOf interceptor = new LoseTheAckOnRegistrationOf(email);
+        string connection = factory.Services.GetRequiredService<IConfiguration>().GetConnectionString("AppConnection")!;
+
+        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<DbContextOptions<AppIdentityDbContext>>();
+                services.AddDbContext<AppIdentityDbContext>(options =>
+                {
+                    options.ConfigureStayStackDefaults(connection, "identity", false);
+                    options.AddInterceptors(interceptor);
+                });
+            }));
+
+        // Act
+        HttpResponseMessage response = await host.CreateClient().PostAsJsonAsync(
+            "/api/auth/register", CreateValidRequest(email), TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.True(interceptor.Fired, "The lost acknowledgement never reached the registration.");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        SignUpResponse? result = await response.Content
+            .ReadFromJsonAsync<SignUpResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result?.RefreshToken);
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppIdentityDbContext db = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+
+            ApplicationUser account = await db.Users.AsNoTracking()
+                .SingleAsync(u => u.Email == email, TestContext.Current.CancellationToken);
+            Assert.Equal(result.Id, account.Id);
+            Assert.Contains("Customer", result.Roles);
+        }
+
+        // The refresh token handed back is the one that committed - proven by
+        // using it, not by its shape.
+        HttpResponseMessage refreshed = await factory.CreateClient().PostAsJsonAsync("/api/auth/refresh-token",
+            new RefreshTokenRequest { RefreshToken = result.RefreshToken }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
     }
 }

@@ -32,10 +32,48 @@ public class RefreshTokenHandler(
         // transaction for free.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
+        // The replacement, chosen once, outside the retry - and that is the
+        // whole of the lost-acknowledgement fix.
+        //
+        // A refresh is consume-once. When the replacement was minted inside the
+        // delegate, an attempt whose commit landed and lost its acknowledgement
+        // was followed by one holding a different replacement, presenting a
+        // token its own predecessor had already consumed. That is
+        // indistinguishable from reuse by the token alone - it is meant to be -
+        // so reuse detection revoked the family, including the replacement just
+        // committed, and a transient blip logged the user out.
+        IssuedRefreshToken replacement = IssuedRefreshToken.New();
+
         return await strategy.ExecuteAsync(async () =>
         {
+            // Nothing inherited from a previous attempt: a rolled-back attempt
+            // leaves its replacement tracked, and adding it again under the same
+            // id would collide in the tracker (docs/adr/0025).
+            dbContext.ChangeTracker.Clear();
+
             await using IDbContextTransaction transaction =
                 await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+            // An earlier attempt of this request may already have committed.
+            // Asked first - before ValidateRefreshToken, whose consume would find
+            // the token spent and whose reuse path, through the commit in the
+            // catch below, would make the family revocation durable before
+            // anything could recover. Only this request's own replacement id
+            // matches, so a replayed token still reaches reuse detection.
+            if (await authTokenProvider.FindCommittedRotationAsync(refreshToken, replacement.Id, cancellationToken)
+                is { } rotatedFor)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+
+                ApplicationUser rotatedUser = await userManager.FindByIdAsync(rotatedFor.ToString())
+                                              ?? throw new InvalidRefreshTokenException();
+
+                return new RefreshTokenResponse
+                {
+                    AccessToken = authTokenProvider.GenerateJwtToken(rotatedUser, await userManager.GetRolesAsync(rotatedUser)),
+                    RefreshToken = replacement.Plaintext
+                };
+            }
 
             // Atomically consumes the token - see AuthTokenProvider.ValidateRefreshToken.
             RefreshTokenValidationResult validated;
@@ -74,7 +112,7 @@ public class RefreshTokenHandler(
             // one just consumed.
             string newAccessToken = authTokenProvider.GenerateJwtToken(user, roles);
             string newRefreshToken = await authTokenProvider.GenerateRefreshToken(
-                validated.UserId, validated.FamilyId, validated.TokenId, cancellationToken);
+                validated.UserId, validated.FamilyId, validated.TokenId, replacement, cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
 

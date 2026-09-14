@@ -58,7 +58,7 @@ public class AuthTokenProviderTests : IDisposable
     {
         Guid userId = Guid.NewGuid();
 
-        string rawToken = await _sut.GenerateRefreshToken(userId, familyId: null, parentTokenId: null, CancellationToken.None);
+        string rawToken = await _sut.GenerateRefreshToken(userId, familyId: null, parentTokenId: null, IssuedRefreshToken.New(), CancellationToken.None);
 
         string expectedHash = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(rawToken)));
         Identity.Entities.RefreshToken? storedToken = await _dbContext.RefreshTokens.SingleOrDefaultAsync(rt => rt.UserId == userId);
@@ -71,7 +71,7 @@ public class AuthTokenProviderTests : IDisposable
     public async Task ValidateRefreshToken_ShouldRevokeTokenOnFirstUse()
     {
         Guid userId = Guid.NewGuid();
-        string rawToken = await _sut.GenerateRefreshToken(userId, familyId: null, parentTokenId: null, CancellationToken.None);
+        string rawToken = await _sut.GenerateRefreshToken(userId, familyId: null, parentTokenId: null, IssuedRefreshToken.New(), CancellationToken.None);
 
         RefreshTokenValidationResult result = await _sut.ValidateRefreshToken(rawToken, CancellationToken.None);
 
@@ -101,7 +101,7 @@ public class AuthTokenProviderTests : IDisposable
     public async Task ValidateRefreshToken_ShouldThrowRefreshTokenReuseDetectedException_WhenTokenIsReused()
     {
         Guid userId = Guid.NewGuid();
-        string rawToken = await _sut.GenerateRefreshToken(userId, familyId: null, parentTokenId: null, CancellationToken.None);
+        string rawToken = await _sut.GenerateRefreshToken(userId, familyId: null, parentTokenId: null, IssuedRefreshToken.New(), CancellationToken.None);
 
         // First use (valid)
         await _sut.ValidateRefreshToken(rawToken, CancellationToken.None);

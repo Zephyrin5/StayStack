@@ -32,11 +32,32 @@ public interface IAuthTokenProvider
     Task<RefreshTokenValidationResult> ValidateRefreshToken(string refreshToken, CancellationToken cancellationToken);
 
     /// <summary>
-    ///     Issues a new refresh token. Pass familyId/parentTokenId as null
-    ///     for a fresh sign-in (starts a new family); pass the values from
-    ///     a just-validated token to rotate within the same family.
+    ///     Persists <paramref name="token"/> as a new refresh token and returns
+    ///     its plaintext. Pass familyId/parentTokenId as null for a fresh sign-in
+    ///     (starts a new family); pass the values from a just-validated token to
+    ///     rotate within the same family.
+    ///     <para>
+    ///         The caller supplies the token rather than this minting it - see
+    ///         <see cref="IssuedRefreshToken"/>.
+    ///     </para>
     /// </summary>
-    Task<string> GenerateRefreshToken(Guid userId, Guid? familyId, Guid? parentTokenId, CancellationToken cancellationToken);
+    Task<string> GenerateRefreshToken(
+        Guid userId, Guid? familyId, Guid? parentTokenId, IssuedRefreshToken token, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     The user a rotation already committed for, or null.
+    ///     <para>
+    ///         True only when <paramref name="presentedToken"/> was consumed and
+    ///         replaced by exactly <paramref name="replacementId"/>, and that
+    ///         replacement is still live. The id is chosen server-side per
+    ///         request and never leaves it, so this recognises a retry of the
+    ///         same request and nothing else: an attacker replaying a stolen
+    ///         token arrives as a new request with a new id, finds nothing, and
+    ///         reaches reuse detection as before.
+    ///     </para>
+    /// </summary>
+    Task<Guid?> FindCommittedRotationAsync(
+        string presentedToken, Guid replacementId, CancellationToken cancellationToken);
 
     /// <summary>
     ///     Sign-out: revokes exactly the one token, not its whole family

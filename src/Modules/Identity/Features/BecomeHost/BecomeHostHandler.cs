@@ -255,7 +255,7 @@ public class BecomeHostHandler(
         // Not a rotation of any specific presented refresh token (this
         // endpoint doesn't take one) - starts a new family, same as
         // SignIn/SignUp.
-        string refreshToken = await authTokenProvider.GenerateRefreshToken(user.Id, familyId: null, parentTokenId: null, cancellationToken);
+        string refreshToken = await authTokenProvider.GenerateRefreshToken(user.Id, familyId: null, parentTokenId: null, IssuedRefreshToken.New(), cancellationToken);
 
         return new BecomeHostResponse
         {

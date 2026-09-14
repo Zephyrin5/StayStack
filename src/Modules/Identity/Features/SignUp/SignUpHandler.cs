@@ -51,6 +51,11 @@ public class SignUpHandler(
         // registered account whose caller was told registration failed.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
+        // Chosen once, outside the retry, like the account's own id above
+        // (docs/adr/0025). Minted inside RegisterAsync, a retry after a lost
+        // acknowledgement would hand back a refresh token no row matches.
+        IssuedRefreshToken firstRefreshToken = IssuedRefreshToken.New();
+
         SignUpResponse response = await strategy.ExecuteAsync(async () =>
         {
             dbContext.ChangeTracker.Clear();
@@ -58,7 +63,28 @@ public class SignUpHandler(
             await using IDbContextTransaction transaction =
                 await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-            SignUpResponse created = await RegisterAsync(user, request, cancellationToken);
+            // An earlier attempt may already have committed the account, its
+            // role and its refresh token together. Asked before CreateAsync,
+            // which would otherwise insert the same account id again and fail on
+            // the primary key - a 500 for someone who had just registered.
+            if (await dbContext.Users.AsNoTracking().AnyAsync(u => u.Id == user.Id, cancellationToken))
+            {
+                await transaction.RollbackAsync(cancellationToken);
+
+                IList<string> committedRoles = await userManager.GetRolesAsync(user);
+
+                return new SignUpResponse
+                {
+                    Id = user.Id,
+                    UserName = user.UserName,
+                    Email = user.Email,
+                    AccessToken = authTokenProvider.GenerateJwtToken(user, committedRoles),
+                    RefreshToken = firstRefreshToken.Plaintext,
+                    Roles = [.. committedRoles]
+                };
+            }
+
+            SignUpResponse created = await RegisterAsync(user, request, firstRefreshToken, cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
             return created;
@@ -76,7 +102,8 @@ public class SignUpHandler(
     ///     </para>
     /// </summary>
     private async Task<SignUpResponse> RegisterAsync(
-        ApplicationUser user, SignUpRequest request, CancellationToken cancellationToken)
+        ApplicationUser user, SignUpRequest request, IssuedRefreshToken firstRefreshToken,
+        CancellationToken cancellationToken)
     {
         IdentityResult createResult = await userManager.CreateAsync(user, request.Password);
         if (!createResult.Succeeded)
@@ -118,7 +145,7 @@ public class SignUpHandler(
         var roles = await userManager.GetRolesAsync(user);
 
         string accessToken = authTokenProvider.GenerateJwtToken(user, roles);
-        string refreshToken = await authTokenProvider.GenerateRefreshToken(user.Id, familyId: null, parentTokenId: null, cancellationToken);
+        string refreshToken = await authTokenProvider.GenerateRefreshToken(user.Id, familyId: null, parentTokenId: null, firstRefreshToken, cancellationToken);
 
         return new SignUpResponse
         {

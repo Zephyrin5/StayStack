@@ -42,7 +42,7 @@ public class SignInHandler(
         var roles = await userManager.GetRolesAsync(user);
 
         string accessToken = authTokenProvider.GenerateJwtToken(user, roles);
-        string refreshToken = await authTokenProvider.GenerateRefreshToken(user.Id, familyId: null, parentTokenId: null, cancellationToken);
+        string refreshToken = await authTokenProvider.GenerateRefreshToken(user.Id, familyId: null, parentTokenId: null, IssuedRefreshToken.New(), cancellationToken);
 
         return new SignInResponse
         {
