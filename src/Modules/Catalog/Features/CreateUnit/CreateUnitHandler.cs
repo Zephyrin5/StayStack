@@ -78,6 +78,19 @@ public class CreateUnitHandler(
             await using IDbContextTransaction transaction =
                 await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
+            // An earlier attempt may already have committed and lost its
+            // acknowledgement. The unit and its id were built before this
+            // delegate, so without this a retry re-added the same entity and
+            // collided with its own committed row on the primary key - a 500 for
+            // a unit that exists. Asked before the property re-read below, and
+            // past the soft-delete filter: the commit is the outcome, and an
+            // archive landing in between must not hide it (docs/adr/0025).
+            if (await dbContext.Units.IgnoreQueryFilters().AnyAsync(u => u.Id == unit.Id, cancellationToken))
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return;
+            }
+
             if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
             {
                 await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(

@@ -3,6 +3,7 @@ using Catalog;
 using Catalog.Entities;
 using Catalog.Enums;
 using Catalog.Features.CreatePricingRule;
+using Catalog.Features.CreateUnit;
 using Catalog.Features.UpdatePricingRule;
 using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Hosting;
@@ -33,12 +34,13 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
 {
     // Whether a commit carries the entity under test - matched on the tracker,
     // because this host runs TickerQ and a stolen injection leaves the test
-    // green while proving nothing. A pricing rule matches by its unit too: a
-    // create's rule id is the handler's, unknown to the test.
+    // green while proving nothing. A pricing rule matches by its unit, and a
+    // unit by its property, too: a create's new id is the handler's, unknown to
+    // the test.
     private static bool Carries(AppCatalogDbContext context, Guid entityId) =>
         context.ChangeTracker.Entries().Any(entry => entry.Entity switch
         {
-            Unit unit => unit.Id == entityId,
+            Unit unit => unit.Id == entityId || unit.PropertyId == entityId,
             Property property => property.Id == entityId,
             PricingRule rule => rule.Id == entityId || rule.UnitId == entityId,
             _ => false
@@ -253,6 +255,59 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
             .ToListAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(rule.PricingRuleId, Assert.Single(rules).Id);
+    }
+
+    [Fact]
+    public async Task AUnitCreateWhoseAcknowledgementIsLost_ReturnsTheUnitItAlreadyCreated()
+    {
+        // The unit was built before the retried delegate, so a retry after a lost
+        // acknowledgement re-added the same entity and collided with its own
+        // committed row on the primary key - a 500 for a unit that exists.
+        Property property = CatalogSeeding.CreateProperty();
+
+        using (IServiceScope seed = factory.Services.CreateScope())
+        {
+            AppCatalogDbContext context = seed.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            context.Add(property);
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        string adminToken = await SignInAsAdministratorAsync();
+
+        CommitFault<AppCatalogDbContext> lostAck = LoseTheAckOnTheCommitCarrying(property.Id);
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
+        using HttpClient client = host.CreateClient();
+
+        HttpRequestMessage create = new HttpRequestMessage(HttpMethod.Post, "/api/catalog/units")
+        {
+            Content = JsonContent.Create(new CreateUnitRequest
+            {
+                PropertyId = property.Id,
+                Name = new Dictionary<string, string> { { "en", "Standard Room" } },
+                MaxOccupancy = 2,
+                BasePrice = 100m
+            }, options: TestJsonOptions.Default)
+        };
+        create.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+
+        HttpResponseMessage response = await client.SendAsync(create, TestContext.Current.CancellationToken);
+
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the create.");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        CreateUnitResponse? created = await response.Content
+            .ReadFromJsonAsync<CreateUnitResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(created);
+
+        using IServiceScope assertScope = factory.Services.CreateScope();
+        AppCatalogDbContext db = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+
+        // Exactly one, and the one the caller was handed.
+        List<Unit> units = await db.Units.IgnoreQueryFilters().AsNoTracking()
+            .Where(u => u.PropertyId == property.Id)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(created.UnitId, Assert.Single(units).Id);
     }
 
     [Fact]
