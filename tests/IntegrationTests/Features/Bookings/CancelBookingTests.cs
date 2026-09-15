@@ -18,6 +18,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Transactions;
+using Transactions.Contracts;
 using Transactions.Entities;
 using Transactions.Features.InitiateTransaction;
 using Bookings.Features.CreateBookingSession;
@@ -304,6 +305,45 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         AppTransactionsDbContext context = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
         Transaction transaction = await context.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
         return transaction.RefundAmount?.Amount;
+    }
+
+    // A refund that reached the card and one the provider refused must both read back
+    // on a re-cancel as the refund recorded, never as "nothing to refund".
+    [Theory]
+    [InlineData("refund", RefundStatus.Refunded)]
+    [InlineData("refund-fail", RefundStatus.Failed)]
+    public async Task CancelBooking_Recancelled_AfterTheRefundSettled_ReportsTheRecordedRefund(string settle, RefundStatus expected)
+    {
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+        string customerToken = await SeedSignedInCustomerAsync();
+        string adminToken = await SignInAsAdministratorAsync();
+        DateOnly today = CatalogSeeding.Today();
+        Guid holdId = await HoldUnitAsync(unit.Id, today.AddDays(3), today.AddDays(5));
+        Guid bookingId = await ConfirmBookingAsAsync(holdId, customerToken);
+        Guid transactionId = await InitiateTransactionAsync(bookingId, customerToken);
+        await MarkTransactionSucceededAsync(transactionId, adminToken);
+        Assert.Equal(HttpStatusCode.OK, (await CancelBookingAsync(bookingId, customerToken)).StatusCode);
+
+        using HttpRequestMessage settleRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/transactions/{transactionId}/{settle}")
+        {
+            Content = JsonContent.Create(new { reason = "declined by the provider" })
+        };
+        settleRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+        Assert.Equal(HttpStatusCode.OK, (await _client.SendAsync(settleRequest, TestContext.Current.CancellationToken)).StatusCode);
+
+        HttpResponseMessage recancel = await CancelBookingAsync(bookingId, customerToken);
+        CancelBookingResponse? body = await recancel.Content.ReadFromJsonAsync<CancelBookingResponse>(
+            TestJsonOptions.Default, TestContext.Current.CancellationToken);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        Transaction settled = await scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>().Transactions
+            .AsNoTracking().SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(body);
+        Assert.Equal(expected, body.RefundStatus);
+        Assert.Equal(settled.RefundAmount!.Value.Amount, body.RefundAmount);
+        Assert.Equal(settled.RefundAmount.Value.Amount / settled.Amount.Amount * 100m, body.RefundPercent);
     }
 
     [Fact]

@@ -47,24 +47,6 @@ public class CancelBookingHandler(
         // rather than a claim about what applied when it was made.
         CancellationPolicy cancellationPolicy = booking.CancellationPolicy ?? CancellationPolicy.CreateDefault();
 
-        // Guest policy, used only to fix the refund obligation's amount. Every
-        // figure reported afterwards comes from the obligation through
-        // RefundDecision (docs/adr/0027); computing policy again at report time
-        // would disagree with the refund recorded for expiries and late payments.
-        //
-        // Cancelling on or after check-in day lands on the strictest tier. The
-        // division happens first, in plain decimal: Money rounds on every
-        // operation, so `a * b / c` and `a * (b / c)` differ.
-        Money ComputeRefund(DateOnly asOf)
-        {
-            // Computed once, outside the retry: attempts on either side of a tier
-            // boundary must not disagree. It reads only fields Cancel() does not
-            // change, so the pre-lock snapshot is sufficient.
-            int daysBeforeCheckIn = Math.Max(booking.CheckIn.DayNumber - asOf.DayNumber, 0);
-            decimal percent = cancellationPolicy.ResolveRefundPercent(daysBeforeCheckIn);
-            return booking.TotalPrice * (percent / 100m);
-        }
-
         // A re-cancel writes nothing: the first cancellation committed its
         // obligation, release, reversal and refund decision together.
         if (booking.BookingStatus != BookingStatus.Cancelled)
@@ -85,7 +67,8 @@ public class CancelBookingHandler(
             // does not already show.
             RequireGuestEmailForLinkAccess(access, request.GuestEmail);
 
-            Money refundAmount = ComputeRefund(today);
+            // Once, outside the retry, so attempts either side of a tier boundary agree.
+            Money refundAmount = CancellationRefund.Compute(booking.TotalPrice, cancellationPolicy, booking.CheckIn, today);
 
             // Everything that must survive a retry is built inside the delegate
             // (docs/adr/0025). SaveChangesAsync accepts its changes before the
@@ -296,19 +279,11 @@ public class CancelBookingHandler(
             return;
         }
 
-        // Case-insensitive and trimmed: rejecting the right address in the wrong
-        // case teaches people the field is broken.
-        //
-        // An ordinary comparison, not a fixed-time one. This confirms the caller
-        // knows the booking; the link is the credential, and the endpoint's rate
-        // limit bounds guessing.
-        if (!string.IsNullOrWhiteSpace(supplied)
-            && string.Equals(supplied.Trim(), access.Booking.GuestEmail?.Trim(), StringComparison.OrdinalIgnoreCase))
+        if (CancellationGuestEmail.Matches(supplied, access.Booking.GuestEmail))
         {
             return;
         }
 
-        // Keyed to the field, and says only that it did not match.
         throw new ValidationException(
             nameof(CancelBookingRequest.GuestEmail),
             "Enter the email address this booking was made with to confirm the cancellation.");
