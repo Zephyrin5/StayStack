@@ -1,11 +1,10 @@
 ﻿using Ardalis.GuardClauses;
 using SeedWork.Abstractions;
 using SeedWork.Enums;
-using SeedWork.Interfaces;
 using SeedWork.ValueObjects;
 namespace Catalog.Entities;
 
-public sealed class Unit : Entity, IAggregateRoot
+public sealed class Unit : Entity
 {
     // EF can't bind a ComplexProperty (Money) parameter back to the
     // entity's own mapped complex property - see Booking's identical

@@ -1,7 +1,6 @@
 using Ardalis.GuardClauses;
 using Reviews.Exceptions;
 using SeedWork.Abstractions;
-using SeedWork.Interfaces;
 namespace Reviews.Entities;
 
 // A guest's review of a stay/property - the public-facing half of the
@@ -10,7 +9,7 @@ namespace Reviews.Entities;
 // moderation lever this app has for a review, matching PricingRule/
 // Promotion's own "no pre-publish approval, admin can remove after"
 // pattern.
-public sealed class StayReview : Entity, IAggregateRoot
+public sealed class StayReview : Entity
 {
     private StayReview(
         Guid id,

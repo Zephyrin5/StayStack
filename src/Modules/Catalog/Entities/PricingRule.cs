@@ -2,7 +2,6 @@ using Ardalis.GuardClauses;
 using Catalog.Enums;
 using NpgsqlTypes;
 using SeedWork.Abstractions;
-using SeedWork.Interfaces;
 namespace Catalog.Entities;
 
 // One discriminated entity for all rule types rather than one table per
@@ -12,7 +11,7 @@ namespace Catalog.Entities;
 // introducing a polymorphic hierarchy nothing else in this module uses. See
 // docs/adr/0012. Only the fields relevant to a row's own RuleType are ever
 // populated - the others stay null for that row.
-public sealed class PricingRule : Entity, IAggregateRoot
+public sealed class PricingRule : Entity
 {
     private PricingRule(
         Guid id,

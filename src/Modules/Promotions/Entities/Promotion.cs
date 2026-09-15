@@ -2,7 +2,6 @@ using Ardalis.GuardClauses;
 using Promotions.Enums;
 using SeedWork.Abstractions;
 using SeedWork.Enums;
-using SeedWork.Interfaces;
 namespace Promotions.Entities;
 
 // RedemptionCount is mutated via raw SQL on the hot concurrent-redemption
@@ -12,7 +11,7 @@ namespace Promotions.Entities;
 // both pass the cap check" atomicity that path needs. Everything else about
 // this entity (create/update/archive) is low-frequency admin action and
 // goes through EF normally.
-public sealed class Promotion : Entity, IAggregateRoot
+public sealed class Promotion : Entity
 {
     private Promotion(
         Guid id,

@@ -1,11 +1,10 @@
 using Ardalis.GuardClauses;
 using SeedWork.Abstractions;
-using SeedWork.Interfaces;
 using SeedWork.ValueObjects;
 using Transactions.Exceptions;
 namespace Transactions.Entities;
 
-public sealed class Transaction : Entity, IAggregateRoot
+public sealed class Transaction : Entity
 {
     // EF Core's constructor-binding convention can't bind a parameter typed
     // as a ComplexProperty (Money) back to the entity's own mapped complex

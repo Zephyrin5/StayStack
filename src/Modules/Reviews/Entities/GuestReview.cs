@@ -1,6 +1,5 @@
 using Ardalis.GuardClauses;
 using SeedWork.Abstractions;
-using SeedWork.Interfaces;
 namespace Reviews.Entities;
 
 // A host's review of a guest - private, host-facing only, the other half
@@ -8,7 +7,7 @@ namespace Reviews.Entities;
 // multi-category like StayReview - unlike the guest-facing review, nothing
 // downstream (search, listing sort) reads this one, so the extra
 // granularity buys less.
-public sealed class GuestReview : Entity, IAggregateRoot
+public sealed class GuestReview : Entity
 {
     private GuestReview(Guid id, Guid bookingId, Guid hostId, string guestEmail, int overallRating, string? comment)
     {
