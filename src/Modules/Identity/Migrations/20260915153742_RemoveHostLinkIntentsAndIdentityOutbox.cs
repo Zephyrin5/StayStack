@@ -1,0 +1,78 @@
+﻿using System;
+using Microsoft.EntityFrameworkCore.Migrations;
+
+#nullable disable
+
+namespace Identity.Migrations
+{
+    /// <inheritdoc />
+    public partial class RemoveHostLinkIntentsAndIdentityOutbox : Migration
+    {
+        /// <inheritdoc />
+        protected override void Up(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.DropTable(
+                name: "identity_outbox_messages");
+
+            migrationBuilder.DropTable(
+                name: "pending_host_link_intents");
+        }
+
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.CreateTable(
+                name: "identity_outbox_messages",
+                columns: table => new
+                {
+                    id = table.Column<Guid>(type: "uuid", nullable: false),
+                    attempts = table.Column<int>(type: "integer", nullable: false),
+                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    dead_lettered_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    last_error = table.Column<string>(type: "character varying(2000)", maxLength: 2000, nullable: true),
+                    next_attempt_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    payload = table.Column<string>(type: "text", nullable: false),
+                    processed_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    type = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("pk_identity_outbox_messages", x => x.id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "pending_host_link_intents",
+                columns: table => new
+                {
+                    id = table.Column<Guid>(type: "uuid", nullable: false),
+                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    user_id = table.Column<Guid>(type: "uuid", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("pk_pending_host_link_intents", x => x.id);
+                });
+
+            migrationBuilder.CreateIndex(
+                name: "ix_identity_outbox_messages_created_at",
+                table: "identity_outbox_messages",
+                column: "created_at");
+
+            migrationBuilder.CreateIndex(
+                name: "ix_identity_outbox_messages_processed_at_dead_lettered_at_next",
+                table: "identity_outbox_messages",
+                columns: new[] { "processed_at", "dead_lettered_at", "next_attempt_at" });
+
+            migrationBuilder.CreateIndex(
+                name: "ix_pending_host_link_intents_created_at",
+                table: "pending_host_link_intents",
+                column: "created_at");
+
+            migrationBuilder.CreateIndex(
+                name: "ix_pending_host_link_intents_user_id",
+                table: "pending_host_link_intents",
+                column: "user_id",
+                unique: true);
+        }
+    }
+}

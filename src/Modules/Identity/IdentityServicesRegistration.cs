@@ -5,7 +5,6 @@ using BuildingBlocks.Security;
 using Identity.Configurations;
 using Identity.Entities;
 using Identity.Features.Common;
-using Identity.Outbox;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
@@ -42,7 +41,6 @@ public static class IdentityServicesRegistration
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<AuthTokenConfiguration>, AuthTokenConfigurationValidator>();
         services.AddScoped<IAuthTokenProvider, AuthTokenProvider>();
-        services.AddScoped<IdentityOutboxDispatcher>();
 
         // Registered unconditionally, including under "Testing" - the test
         // host (IntegrationTestWebApplicationFactory) overrides this via

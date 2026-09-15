@@ -19,10 +19,8 @@ public class CreateHostHandler(AppHostsDbContext dbContext, IOptions<Localizatio
             ? LocalizedText.Create(request.DisplayName, localizationSettings.Value.DefaultCulture)
             : null;
 
-        // The admin-facing create, with no cross-module intent to recover by -
-        // unlike BecomeHost, whose id comes from a PendingHostLinkIntent. It still
-        // retries: the save below runs under the execution strategy, so a lost
-        // acknowledgement is recovered by the id minted above.
+        // The admin-facing create. The save below runs under the execution
+        // strategy, so a lost acknowledgement is recovered by the id minted above.
         Host host = Host.Create(
             hostId, request.BusinessName, request.ContactEmail, request.ContactPhone, displayName);
 

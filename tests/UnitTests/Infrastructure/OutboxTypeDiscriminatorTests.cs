@@ -1,5 +1,4 @@
 using Bookings.Outbox;
-using Identity.Outbox;
 using Outbox;
 using System.Reflection;
 using Transactions.Outbox;
@@ -21,8 +20,7 @@ public class OutboxTypeDiscriminatorTests
         (ReleaseHoldOutboxMessage.TypeName, "bookings.release-hold.v1"),
         (ReverseTransactionOutboxMessage.TypeName, "bookings.reverse-transaction.v1"),
         (ReverseRedemptionOutboxMessage.TypeName, "bookings.reverse-promotion-redemption.v1"),
-        (ConfirmBookingPaymentOutboxMessage.TypeName, "transactions.confirm-booking-payment.v1"),
-        (DeleteHostOutboxMessage.TypeName, "identity.delete-host.v1")
+        (ConfirmBookingPaymentOutboxMessage.TypeName, "transactions.confirm-booking-payment.v1")
     ];
 
     public static TheoryData<string, string> FrozenIdentifiers
@@ -68,8 +66,7 @@ public class OutboxTypeDiscriminatorTests
             .. new[]
                 {
                     typeof(ReleaseHoldOutboxMessage).Assembly,
-                    typeof(ConfirmBookingPaymentOutboxMessage).Assembly,
-                    typeof(DeleteHostOutboxMessage).Assembly
+                    typeof(ConfirmBookingPaymentOutboxMessage).Assembly
                 }
                 .SelectMany(assembly => assembly.GetTypes())
                 .Where(type => typeof(IOutboxMessage).IsAssignableFrom(type) && type is { IsAbstract: false, IsInterface: false })

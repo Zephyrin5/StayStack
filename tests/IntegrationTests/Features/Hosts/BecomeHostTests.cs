@@ -135,9 +135,6 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
                 throw new InvalidOperationException("Injected failure after the Host was registered.");
             }
         }
-
-        public Task DeleteAsync(Guid hostId, CancellationToken cancellationToken) =>
-            inner.DeleteAsync(hostId, cancellationToken);
     }
 
     [Fact]

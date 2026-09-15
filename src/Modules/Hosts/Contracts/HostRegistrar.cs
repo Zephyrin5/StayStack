@@ -42,28 +42,4 @@ internal class HostRegistrar(AppHostsDbContext dbContext) : IHostRegistrar
             dbContext.ChangeTracker.Clear();
         }
     }
-
-    public async Task DeleteAsync(Guid hostId, CancellationToken cancellationToken)
-    {
-        // IgnoreQueryFilters, matching RegisterHostAsync above. Registration
-        // must see archived rows: an archived Host still occupies the primary
-        // key, so a filtered existence check would miss it and the insert's
-        // unique-violation catch would adopt it anyway, implicitly. So this must
-        // reach whatever registration adopted; filtered, a compensation would
-        // silently no-op and leave the user linked to a Host nothing could
-        // remove.
-        //
-        // Nothing archives a Host today, so this is latent - settled before
-        // something does.
-        Host? host = await dbContext.Hosts
-            .IgnoreQueryFilters()
-            .SingleOrDefaultAsync(h => h.Id == hostId, cancellationToken);
-        if (host is null)
-        {
-            return;
-        }
-
-        dbContext.Hosts.Remove(host);
-        await dbContext.SaveChangesAsync(cancellationToken);
-    }
 }

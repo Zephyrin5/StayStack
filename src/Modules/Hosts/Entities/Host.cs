@@ -36,10 +36,9 @@ public sealed class Host : Entity
 
     /// <summary>
     ///     <paramref name="id"/> is supplied by the caller, not generated
-    ///     here, so registration can be idempotent: Identity pre-generates it,
-    ///     records it in a PendingHostLinkIntent before calling across, and a
-    ///     retry re-registers the same id rather than minting a second Host.
-    ///     See IHostRegistrar.RegisterHostAsync and docs/adr/0017.
+    ///     here, so registration can be idempotent: calling again with the same
+    ///     id does not mint a second Host. See IHostRegistrar.RegisterHostAsync
+    ///     and docs/adr/0025.
     /// </summary>
     public static Host Create(
         Guid id,

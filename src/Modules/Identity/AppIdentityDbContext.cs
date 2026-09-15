@@ -3,17 +3,12 @@ using Identity.Entities.Configurations;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
-using Outbox;
 namespace Identity;
 
 public class AppIdentityDbContext(DbContextOptions<AppIdentityDbContext> options)
     : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>(options)
 {
     public DbSet<RefreshToken> RefreshTokens { get; set; }
-    public DbSet<PendingHostLinkIntent> PendingHostLinkIntents => Set<PendingHostLinkIntent>();
-    // See AppBookingsDbContext.BookingsOutboxMessages for why this is
-    // module-prefixed rather than just "OutboxMessages".
-    public DbSet<OutboxMessage> IdentityOutboxMessages => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -21,8 +16,6 @@ public class AppIdentityDbContext(DbContextOptions<AppIdentityDbContext> options
         builder.Ignore<IdentityUserClaim<Guid>>();
         base.OnModelCreating(builder);
 
-        builder.ApplyConfiguration(new OutboxMessageConfiguration());
-        builder.ApplyConfiguration(new PendingHostLinkIntentConfiguration());
 
         builder.Entity<RefreshToken>(entity =>
         {
