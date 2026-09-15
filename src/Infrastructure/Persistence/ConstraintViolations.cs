@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using System.Diagnostics.CodeAnalysis;
 namespace Persistence;
 
 /// <summary>
@@ -27,10 +28,10 @@ public static class ConstraintViolations
     public static bool IsViolationOfAny(this Exception exception, params string[] constraintNames) =>
         IntegrityViolation(exception)?.ConstraintName is { } name && constraintNames.Contains(name);
 
-    public static bool IsPrimaryKeyViolationOf<TEntity>(this Exception exception, DbContext context) =>
+    public static bool IsPrimaryKeyViolationOf<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors | DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields | DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.NonPublicProperties | DynamicallyAccessedMemberTypes.Interfaces)] TEntity>(this Exception exception, DbContext context) =>
         exception.IsViolationOf(PrimaryKeyNameOf<TEntity>(context));
 
-    public static string PrimaryKeyNameOf<TEntity>(DbContext context) =>
+    public static string PrimaryKeyNameOf<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors | DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields | DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.NonPublicProperties | DynamicallyAccessedMemberTypes.Interfaces)] TEntity>(DbContext context) =>
         context.Model.FindEntityType(typeof(TEntity))?.FindPrimaryKey()?.GetName()
         ?? throw new InvalidOperationException($"{typeof(TEntity).Name} has no primary key in {context.GetType().Name}.");
 

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SeedWork.Abstractions;
+using System.Diagnostics.CodeAnalysis;
 namespace Persistence;
 
 /// <summary>
@@ -34,7 +35,7 @@ public static class CommittedInsertRecovery
     ///         soft-delete filter, so it sees the committed row as it is.
     ///     </para>
     /// </summary>
-    public static async Task<TEntity> FindOwnCommittedInsertAsync<TEntity>(
+    public static async Task<TEntity> FindOwnCommittedInsertAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors | DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields | DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.NonPublicProperties | DynamicallyAccessedMemberTypes.Interfaces)] TEntity>(
         this DbContext context, Guid id, CancellationToken cancellationToken)
         where TEntity : Entity
     {
