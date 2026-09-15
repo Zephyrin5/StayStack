@@ -1,3 +1,4 @@
+using BuildingBlocks.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,6 +39,7 @@ public static class TransactionsServicesRegistration
 
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
+        services.AddAtomicParticipant<AppTransactionsDbContext>(AtomicParticipants.Transactions);
 
         services.AddScoped<ITransactionReversal, TransactionReversal>();
         services.AddScoped<ITransactionLookup, TransactionLookup>();

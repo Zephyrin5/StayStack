@@ -1,4 +1,5 @@
-﻿using BuildingBlocks.Identity;
+﻿using BuildingBlocks.Persistence;
+using BuildingBlocks.Identity;
 using BuildingBlocks.Configuration;
 using BuildingBlocks.Security;
 using Identity.Configurations;
@@ -57,6 +58,7 @@ public static class IdentityServicesRegistration
                 "identity",
                 environment is not null && environment.IsDevelopment());
         });
+        services.AddAtomicParticipant<AppIdentityDbContext>(AtomicParticipants.Identity);
 
         services
             .AddIdentityCore<ApplicationUser>(options =>

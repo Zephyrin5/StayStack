@@ -1,3 +1,4 @@
+using BuildingBlocks.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,6 +37,7 @@ public static class ReviewsServicesRegistration
 
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
+        services.AddAtomicParticipant<AppReviewsDbContext>(AtomicParticipants.Reviews);
 
         return services;
     }

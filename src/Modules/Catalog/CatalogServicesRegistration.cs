@@ -1,3 +1,4 @@
+using BuildingBlocks.Persistence;
 using Catalog.Contracts;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -37,6 +38,7 @@ public static class CatalogServicesRegistration
 
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
+        services.AddAtomicParticipant<AppCatalogDbContext>(AtomicParticipants.Catalog);
 
         services.AddScoped<IUnitLookup, UnitLookup>();
 

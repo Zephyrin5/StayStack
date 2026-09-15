@@ -1,3 +1,4 @@
+using BuildingBlocks.Persistence;
 using Hosts.Contracts;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -37,6 +38,7 @@ public static class HostsServicesRegistration
 
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
+        services.AddAtomicParticipant<AppHostsDbContext>(AtomicParticipants.Hosts);
 
         services.AddScoped<IHostLookup, HostLookup>();
         services.AddScoped<IHostRegistrar, HostRegistrar>();

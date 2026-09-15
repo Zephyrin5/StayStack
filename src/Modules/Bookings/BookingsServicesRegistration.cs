@@ -1,3 +1,4 @@
+using BuildingBlocks.Persistence;
 using Bookings.Contracts;
 using BuildingBlocks.Configuration;
 using Bookings.Features.HoldAvailability;
@@ -42,6 +43,7 @@ public static class BookingsServicesRegistration
 
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
+        services.AddAtomicParticipant<AppBookingsDbContext>(AtomicParticipants.Bookings);
 
         services.AddScoped<IBookingLookup, BookingLookup>();
         services.AddScoped<IBookingPaymentConfirmation, BookingPaymentConfirmation>();

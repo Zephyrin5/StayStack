@@ -1,3 +1,4 @@
+using BuildingBlocks.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,6 +38,7 @@ public static class PromotionsServicesRegistration
 
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
+        services.AddAtomicParticipant<AppPromotionsDbContext>(AtomicParticipants.Promotions);
 
         services.AddScoped<IPromotionRedemption, PromotionRedemption>();
 
