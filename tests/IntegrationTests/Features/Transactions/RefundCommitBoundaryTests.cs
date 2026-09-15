@@ -1,4 +1,7 @@
-// AUDIT 2026-09-14: The two boundary tests seed a half-finished state rather than injecting a crash; the mid-resolve flip lands between the resolver's read and write as claimed; TwoResolversRacing fails 6/6 with the concurrency catch disabled (probed). APaymentStateRead_DescribesOneMomentRatherThanTwo reads a static row and cannot tell one read from two. Fresh-scope asserts.
+// Proves refund resolution finishes from half-finished seeded states and from a status flip
+// between the resolver's read and write; TwoResolversRacing fails 6/6 with the concurrency catch
+// disabled. APaymentStateRead_DescribesOneMomentRatherThanTwo reads a static row and cannot tell
+// one read from two.
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;

@@ -1,4 +1,6 @@
-// AUDIT 2026-09-14: All three inject post-commit (CommitFaults.FailAfterCommit), targeted at the commit under test since ff7062c; fresh-scope asserts. Probed: each fails with its handler's recovery disabled, including with a stray background commit taking the first shot.
+// Proves each creation handler recognises its own committed insert after a lost acknowledgement
+// (FailAfterCommit, targeted at the commit under test). Each fails with its handler's recovery
+// disabled, including when a background commit takes the first injected fault.
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;

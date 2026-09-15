@@ -1,4 +1,7 @@
-// AUDIT 2026-09-14: Injects through CommitFaults.FailBeforeCommit - pre-commit, the rollback case, as named; targeted by the tracked booking; asserts through a fresh scope. Probed: fails without ChangeTracker.Clear(). The lost-acknowledgement test (FailAfterCommit) exercises the already-Cancelled recovery branch; probed: 409 with that branch disabled.
+// Proves a cancellation retried after a pre-commit failure (CommitFaults.FailBeforeCommit) and
+// after a lost acknowledgement (FailAfterCommit) both end Cancelled, read through a fresh scope.
+// Without ChangeTracker.Clear() the first fails; without the already-Cancelled recovery branch
+// the second answers 409.
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;

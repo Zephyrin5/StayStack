@@ -1,4 +1,6 @@
-// AUDIT 2026-09-14: Injects post-commit (CommitFaults.FailAfterCommit), targeted by a durable redemption for the booking; fresh-scope asserts. Reproduced the exact rejection before bef3fb7 fixed it.
+// Proves a redemption whose commit loses its acknowledgement (FailAfterCommit) returns the
+// redemption it made. With the id minted inside the retried delegate, the retry is rejected as
+// "already used by this email address".
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

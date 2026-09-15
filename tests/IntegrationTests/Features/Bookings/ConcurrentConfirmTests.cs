@@ -1,4 +1,6 @@
-// AUDIT 2026-09-14: Pauses checked against ConfirmBookingHandler: ConfirmHoldAsync (:605) runs before the first commit and GetUnitAsync (:332) after it, as each test claims. TwoConfirmationsForOneHold is an unforced race. Fresh-scope asserts. Not mutation-probed. The lost acknowledgement of ConfirmBookingHandler's booking-insert commit is ConfirmRetryTests'.
+// Proves two confirmations for one hold leave exactly one booking (an unforced race), and that
+// two confirmations under one idempotency key get "in progress" or a completed replay, each pinned
+// by a barrier. Not verified by breaking the mechanisms.
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Features.CreateBookingSession;

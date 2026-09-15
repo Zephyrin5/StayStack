@@ -1,4 +1,6 @@
-// AUDIT 2026-09-14: Unforced bursts; fresh-scope row counts. The original two creates only raced the constraint-backed rule types, which is why they passed with Serializable lowered to ReadCommitted. The day-of-week race added after that audit fails under ReadCommitted without its per-day unique indexes (6 of 6 commit) and passes with them; the handlers now run at the default isolation, so these prove the schema constraints.
+// Proves the overlap constraints hold under unforced concurrent creates. Does NOT prove the
+// isolation level: these pass at ReadCommitted, where the handlers run. Without the per-day
+// unique indexes the day-of-week race commits 6 of 6.
 using Bogus;
 using Catalog;
 using Catalog.Entities;

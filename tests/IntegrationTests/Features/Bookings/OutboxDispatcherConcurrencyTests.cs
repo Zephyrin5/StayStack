@@ -1,4 +1,5 @@
-// AUDIT 2026-09-14: No injection: 8 genuinely concurrent claims of one row by id; asserts the handler count and the persisted row through a fresh scope. Probed: without FOR UPDATE SKIP LOCKED all 8 handle the row.
+// Proves 8 concurrent claims of one outbox row by id handle it once (no injection). Without
+// FOR UPDATE SKIP LOCKED all 8 handle the row.
 using Bookings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

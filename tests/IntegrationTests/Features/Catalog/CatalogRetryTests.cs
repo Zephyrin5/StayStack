@@ -1,4 +1,6 @@
-// AUDIT 2026-09-14: Two tests inject pre-commit (CommitFaults.FailBeforeCommit), three post-commit (CommitFaults.FailAfterCommit), each targeted by a tracked entity; fresh-scope asserts. Probed: the pre-commit pair fail without ChangeTracker.Clear(); the pricing-rule create fails without its recovery lookup.
+// Proves Catalog writes survive a retry: two tests inject pre-commit (FailBeforeCommit), three
+// post-commit (FailAfterCommit). The pre-commit pair fail without ChangeTracker.Clear(); the
+// pricing-rule create fails without its recovery lookup.
 using Catalog;
 using Catalog.Entities;
 using Catalog.Enums;

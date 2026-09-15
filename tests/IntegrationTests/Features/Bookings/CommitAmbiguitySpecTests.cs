@@ -1,4 +1,7 @@
-// AUDIT 2026-09-14: All four pass. Test 1 now says what it injects: a failure inside the confirmation's transaction, before its commit (ConfirmHoldAsync joins that transaction) - the lost acknowledgement of that commit is ConfirmRetryTests'. Test 2 is pre-commit by design; test 3 is genuinely post-commit (BookingPaymentConfirmation commits its own transaction); test 4 forces overlap by loading both sides first. Fresh-scope asserts. Not mutation-probed.
+// Proves each cross-module step commits or rolls back with its half: test 1 fails inside the
+// confirmation's transaction before its commit, test 2 is pre-commit, test 3 is post-commit
+// (BookingPaymentConfirmation commits its own transaction), test 4 forces overlap by loading both
+// sides first. Not verified by breaking the mechanisms; lost acknowledgements are ConfirmRetryTests'.
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;

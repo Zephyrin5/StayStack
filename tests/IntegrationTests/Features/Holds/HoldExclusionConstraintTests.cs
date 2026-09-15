@@ -1,4 +1,6 @@
-// AUDIT 2026-09-14: No injection - real concurrent inserts, aligned by a Barrier, through the handler's lock protocol and through none. Probed: with holds back in shared lock mode the protocol test fails on its first race (0 of 7 losers rejected cleanly - all deadlock victims). Persisted rows read on a separate connection.
+// Proves concurrent inserts aligned by a Barrier are decided by the exclusion constraint, through
+// the handler's lock protocol and through none. With holds in shared lock mode the protocol test
+// fails on its first race: every loser is a deadlock victim rather than a clean rejection.
 using BuildingBlocks.Persistence;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

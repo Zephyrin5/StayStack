@@ -1,4 +1,5 @@
-// AUDIT 2026-09-14: No injection - reads the live, migrated schema through a fresh scope. Pins the two database facts CommittedInsertRecovery's constraint-name match depends on; see the header for why the second one is not a formality.
+// Proves, against the live migrated schema, the two database facts CommittedInsertRecovery's
+// constraint-name match depends on; see the header for why the second is not a formality.
 using Catalog;
 using Catalog.Entities;
 using Hosts;

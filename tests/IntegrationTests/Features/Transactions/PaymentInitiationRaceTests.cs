@@ -1,4 +1,6 @@
-// AUDIT 2026-09-14: Three tests, and they prove different things - see the header. Probed with BookingPaymentLock removed: the pre-lock cancellation test still passes (it proves the re-read), while the in-lock cancellation and expiry tests fail (they prove the lock). Fresh-scope asserts.
+// Three tests proving different things - see the header. With BookingPaymentLock removed, the
+// pre-lock cancellation test still passes (it proves the re-read); the in-lock cancellation and
+// expiry tests fail (they prove the lock).
 using Bookings;
 using Bookings.Contracts;
 using BuildingBlocks.Persistence;

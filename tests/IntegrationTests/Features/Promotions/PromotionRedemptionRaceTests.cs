@@ -1,4 +1,6 @@
-// AUDIT 2026-09-14: Deterministic, not raced: an auto-advancing clock puts the expiry between snapshot and write, and the archive runs inside the pre-transaction GetUnitAsync - both inside the window claimed. Count read through a fresh scope. Not mutation-probed.
+// Proves redemption rejects a promotion that expires or is archived between snapshot and write,
+// placed there deterministically (an auto-advancing clock; an archive inside GetUnitAsync). Not
+// verified by breaking the mechanism.
 using Catalog;
 using Catalog.Contracts;
 using Catalog.Entities;

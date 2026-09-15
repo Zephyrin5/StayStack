@@ -1,4 +1,6 @@
-// AUDIT 2026-09-14: Injects post-commit (CommitFaults.FailAfterCommit) on the booking-insert commit, targeted by the tracked booking for the hold; fresh-scope asserts. Probed: 500 with the read-back recovery disabled, and when recovery returned a different management token only the session exchange caught it.
+// Proves a confirmation whose booking-insert commit loses its acknowledgement (FailAfterCommit)
+// returns the committed booking. With the read-back recovery disabled it answers 500; a recovery
+// returning a different management token is caught only by the session exchange assertion.
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
