@@ -15,6 +15,7 @@ namespace Catalog.Features.DeleteProperty;
 
 public class DeletePropertyHandler(
     AppCatalogDbContext dbContext,
+    IAtomicScope atomicScope,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization,
     IUnitArchivalGuard unitArchivalGuard,
@@ -52,25 +53,26 @@ public class DeletePropertyHandler(
         //    state UnitLookup throws OrphanedUnitException for. No per-unit
         //    lock can cover that, because the unit did not exist to be locked.
         //    Hence the property lock, which CreateUnitHandler takes shared.
-        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
-
-        await strategy.ExecuteAsync(async () =>
+        //
+        // Bookings participates read-only: the archival guard's reads run under
+        // the unit locks on this transaction's connection rather than a second
+        // pooled one.
+        await atomicScope.ExecuteAsync(
+            AtomicParticipants.Catalog,
+            AtomicParticipants.Catalog | AtomicParticipants.Bookings,
+            async token =>
         {
-            // A retry re-reads and re-locks everything from scratch. The
-            // property and any units loaded before this delegate ran describe a
-            // world a previous attempt may already have changed (docs/adr/0025).
-            dbContext.ChangeTracker.Clear();
-
-            await using IDbContextTransaction transaction =
-                await dbContext.Database.BeginTransactionAsync(cancellationToken);
-
+            // A retry re-reads and re-locks everything from scratch; the scope
+            // clears the change tracker on every attempt. The property and any
+            // units loaded before this delegate ran describe a world a previous
+            // attempt may already have changed (docs/adr/0025).
             if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
             {
                 await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
                     AdvisoryLock.AcquireExclusiveSql,
                     new { LockKey = PropertyUnitsLock.KeyFor(request.PropertyId) },
-                    transaction.GetDbTransaction(),
-                    cancellationToken: cancellationToken));
+                    dbContext.Database.CurrentTransaction!.GetDbTransaction(),
+                    cancellationToken: token));
             }
 
             // Re-read under that lock, not carried in from the authorization
@@ -87,12 +89,11 @@ public class DeletePropertyHandler(
             // still live under this property, which is exactly what it should
             // see.
             Property locked = await dbContext.Properties.IgnoreQueryFilters()
-                                  .SingleOrDefaultAsync(p => p.Id == request.PropertyId, cancellationToken)
+                                  .SingleOrDefaultAsync(p => p.Id == request.PropertyId, token)
                               ?? throw new NotFoundException(nameof(Property), request.PropertyId);
 
             if (locked.Status == EntityStatus.Archived)
             {
-                await transaction.RollbackAsync(cancellationToken);
                 return;
             }
 
@@ -114,7 +115,7 @@ public class DeletePropertyHandler(
             List<Unit> units = await dbContext.Units
                 .Where(u => u.PropertyId == locked.Id)
                 .OrderBy(u => u.Id)
-                .ToListAsync(cancellationToken);
+                .ToListAsync(token);
 
             // Every guard runs, and every lock it takes stays held, before any
             // archive is written. Same guard as DeleteUnitHandler - a cascading
@@ -123,7 +124,7 @@ public class DeletePropertyHandler(
             {
                 await UnitArchival.EnsureArchivableAsync(
                     dbContext, unit.Id, locked.TimeZoneId, timeProvider,
-                    unitArchivalGuard, availabilityLookup, cancellationToken);
+                    unitArchivalGuard, availabilityLookup, token);
             }
 
             DateTimeOffset now = timeProvider.GetUtcNow();
@@ -135,9 +136,9 @@ public class DeletePropertyHandler(
 
             locked.Archive(now, currentUserProvider.UserId);
 
-            await dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-        });
+            await dbContext.SaveChangesAsync(token);
+        },
+            cancellationToken);
 
         return new DeletePropertyResponse { PropertyId = property.Id };
     }

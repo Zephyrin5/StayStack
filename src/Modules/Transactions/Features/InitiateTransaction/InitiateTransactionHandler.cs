@@ -14,6 +14,7 @@ namespace Transactions.Features.InitiateTransaction;
 
 public class InitiateTransactionHandler(
     AppTransactionsDbContext dbContext,
+    IAtomicScope atomicScope,
     IBookingLookup bookingLookup,
     ICurrentUserProvider currentUserProvider) : IRequestHandler<InitiateTransactionRequest, InitiateTransactionResponse>
 {
@@ -49,7 +50,6 @@ public class InitiateTransactionHandler(
         //
         // This path takes no other lock. Paths that take it with the booking row
         // lock take it first (docs/adr/0028).
-        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
         // Once, outside the retry (docs/adr/0025). A fresh id per attempt would
         // make a retry after a lost acknowledgement find its own row as "a
@@ -57,20 +57,20 @@ public class InitiateTransactionHandler(
         // created it.
         Guid transactionId = Guid.CreateVersion7();
 
-        return await strategy.ExecuteAsync(async () =>
+        // Bookings participates read-only: the re-read under the lock runs on this
+        // transaction's connection rather than a second pooled one.
+        return await atomicScope.ExecuteAsync(
+            AtomicParticipants.Transactions,
+            AtomicParticipants.Transactions | AtomicParticipants.Bookings,
+            async token =>
         {
-            dbContext.ChangeTracker.Clear();
-
-            await using IDbContextTransaction scope =
-                await dbContext.Database.BeginTransactionAsync(cancellationToken);
-
             if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
             {
                 await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
                     AdvisoryLock.AcquireExclusiveSql,
                     new { LockKey = BookingPaymentLock.KeyFor(request.BookingId) },
-                    scope.GetDbTransaction(),
-                    cancellationToken: cancellationToken));
+                    dbContext.Database.CurrentTransaction!.GetDbTransaction(),
+                    cancellationToken: token));
             }
 
             // An earlier attempt of this request may already have committed.
@@ -92,30 +92,26 @@ public class InitiateTransactionHandler(
             // against a booking cancelled afterwards is exactly what the refund
             // obligation exists to settle.
             Transaction? committed = await dbContext.Transactions.AsNoTracking()
-                .SingleOrDefaultAsync(t => t.Id == transactionId, cancellationToken);
+                .SingleOrDefaultAsync(t => t.Id == transactionId, token);
 
             if (committed is not null)
             {
-                await scope.RollbackAsync(cancellationToken);
                 return BuildResponse(committed);
             }
 
             // Re-read under the lock: the lock orders this against a
             // cancellation, and only a read says what that cancellation did.
             BookingAccessResult? current = await bookingLookup.GetBookingDetailsAsync(
-                request.BookingId, cancellationToken);
+                request.BookingId, token);
 
             if (current is null || !current.IsPending)
             {
                 throw new BookingNotPayableException(request.BookingId);
             }
 
-            InitiateTransactionResponse created =
-                await InsertAsync(transactionId, request, current, cancellationToken);
-
-            await scope.CommitAsync(cancellationToken);
-            return created;
-        });
+            return await InsertAsync(transactionId, request, current, token);
+        },
+            cancellationToken);
     }
 
     private async ValueTask<InitiateTransactionResponse> InsertAsync(

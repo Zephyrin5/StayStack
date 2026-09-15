@@ -1,11 +1,11 @@
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
+using BuildingBlocks.Persistence;
 using Catalog.Archival;
 using Catalog.Contracts;
 using Catalog.Entities;
 using Hosts.Contracts;
 using Mediator;
-using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore;
 using SeedWork.Enums;
 using Unit = Catalog.Entities.Unit;
@@ -13,6 +13,7 @@ namespace Catalog.Features.DeleteUnit;
 
 public class DeleteUnitHandler(
     AppCatalogDbContext dbContext,
+    IAtomicScope atomicScope,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization,
     IUnitArchivalGuard unitArchivalGuard,
@@ -52,22 +53,24 @@ public class DeleteUnitHandler(
         //
         // The lock is inside UnitArchival now rather than here, because
         // DeletePropertyHandler shares the check and did not share the lock.
-        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
-
-        await strategy.ExecuteAsync(async () =>
+        //
+        // Bookings participates read-only: the archival guard's reads run under
+        // the unit lock on this transaction's connection rather than a second
+        // pooled one.
+        await atomicScope.ExecuteAsync(
+            AtomicParticipants.Catalog,
+            AtomicParticipants.Catalog | AtomicParticipants.Bookings,
+            async token =>
         {
-            // Cleared and reloaded inside the delegate (docs/adr/0025).
-            // SaveChangesAsync accepts changes when it returns
-            // (acceptAllChangesOnSuccess defaults to true), so an instance loaded
-            // before the retry has Archived as its original value before
-            // CommitAsync runs. A transient commit failure then retries a delegate
-            // where Archive() assigns a value EF no longer considers a change: the
-            // UPDATE carries the audit columns and not the status, the commit
-            // succeeds, and this handler reports success over an Active unit.
-            dbContext.ChangeTracker.Clear();
-
-            await using IDbContextTransaction transaction =
-                await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            // Reloaded inside the delegate (docs/adr/0025); the scope clears the
+            // change tracker on every attempt. SaveChangesAsync accepts changes
+            // when it returns (acceptAllChangesOnSuccess defaults to true), so an
+            // instance loaded before the retry has Archived as its original value
+            // before the commit runs. A transient commit failure then retries a
+            // delegate where Archive() assigns a value EF no longer considers a
+            // change: the UPDATE carries the audit columns and not the status, the
+            // commit succeeds, and this handler reports success over an Active
+            // unit.
 
             // IgnoreQueryFilters, because the soft-delete filter hides exactly
             // the row a retry needs to see. An attempt that committed and lost
@@ -80,7 +83,7 @@ public class DeleteUnitHandler(
             // row being archived - never on one that also reaches Units or
             // Properties for some other purpose.
             Unit locked = await dbContext.Units.IgnoreQueryFilters()
-                              .SingleOrDefaultAsync(u => u.Id == request.UnitId, cancellationToken)
+                              .SingleOrDefaultAsync(u => u.Id == request.UnitId, token)
                           ?? throw new NotFoundException(nameof(Unit), request.UnitId);
 
             // Already archived: an earlier attempt of this same delegate
@@ -91,7 +94,6 @@ public class DeleteUnitHandler(
             // what happened rather than inferring from how the attempt ended.
             if (locked.Status == EntityStatus.Archived)
             {
-                await transaction.RollbackAsync(cancellationToken);
                 return;
             }
 
@@ -100,12 +102,12 @@ public class DeleteUnitHandler(
             // reading it from an instance this delegate has just detached is
             // the same mistake one level down.
             Property lockedProperty = await dbContext.Properties
-                                          .SingleOrDefaultAsync(p => p.Id == locked.PropertyId, cancellationToken)
+                                          .SingleOrDefaultAsync(p => p.Id == locked.PropertyId, token)
                                       ?? throw new NotFoundException(nameof(Property), locked.PropertyId);
 
             await UnitArchival.EnsureArchivableAsync(
                 dbContext, locked.Id, lockedProperty.TimeZoneId, timeProvider,
-                unitArchivalGuard, availabilityLookup, cancellationToken);
+                unitArchivalGuard, availabilityLookup, token);
 
             // Safe to repeat after an ambiguous commit: Entity.Archive is a
             // plain assignment with no already-archived guard, so a retry that
@@ -114,9 +116,9 @@ public class DeleteUnitHandler(
             // instead of a silently skipped one.
             locked.Archive(timeProvider.GetUtcNow(), currentUserProvider.UserId);
 
-            await dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-        });
+            await dbContext.SaveChangesAsync(token);
+        },
+            cancellationToken);
 
         return new DeleteUnitResponse { UnitId = request.UnitId };
     }
