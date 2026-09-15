@@ -26,17 +26,15 @@ using Transactions.Contracts;
 using Transactions.Features.InitiateTransaction;
 namespace IntegrationTests.Features.Transactions;
 
-// Initiation used to verify the booking was payable and insert the transaction
-// as independent operations, so a cancellation committing in between produced a
-// pending payment against a cancelled booking.
+// Initiation checks the booking is payable and inserts the transaction. Without
+// BookingPaymentLock and a re-read under it, a cancellation committing in
+// between leaves a pending payment against a cancelled booking.
 //
-// On its own that is untidy - no money moves today. What promotes it is what it
+// On its own that is untidy - no money moves. What makes it matter is what it
 // manufactures: if the cancellation also moved an earlier payment to
 // RefundPending, the active-transaction check matches nothing and the insert
 // succeeds, leaving one booking with a RefundPending *and* a Succeeded
-// transaction. The active index permits exactly that pair, and any booking-wide
-// query written as SingleOrDefault then throws on every retry and every sweep
-// pass for as long as both rows exist.
+// transaction, a pair every booking-wide read has to handle.
 //
 // Which test proves what - the pairing looks symmetrical and is not:
 //
@@ -223,12 +221,12 @@ public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory fac
     [Fact]
     public async Task AnExpiryDuringInitiationsLockedSection_StepsOverTheBooking()
     {
-        // Expiry is the other path that cancels a booking, and it used to hold
-        // only the booking row. Initiation never touches that row - it reads
-        // the booking through IBookingLookup and holds BookingPaymentLock - so
-        // the two could not see each other: initiation re-read Pending, expiry
-        // cancelled and released the unit, and initiation then committed a
-        // payment against a booking that no longer existed.
+        // Expiry is the other path that cancels a booking. Initiation never
+        // touches the booking row - it reads the booking through IBookingLookup
+        // and holds BookingPaymentLock - so an expiry holding only the row lock
+        // could not see it: initiation re-reads Pending, expiry cancels and
+        // releases the unit, and initiation commits a payment against a
+        // cancelled booking.
         Unit unit = CreateTestUnit();
 
         using (IServiceScope scope = factory.Services.CreateScope())

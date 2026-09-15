@@ -110,8 +110,7 @@ public class SignUpTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    // Fails the last write registration performs, which is the one the old
-    // compensating delete never covered at all.
+    // Fails the last write registration performs.
     private sealed class FailAfterTheAccountExists(IAuthTokenProvider inner) : IAuthTokenProvider
     {
         public string GenerateJwtToken(ApplicationUser user, IList<string> roles) =>
@@ -140,18 +139,16 @@ public class SignUpTests(IntegrationTestWebApplicationFactory factory)
     {
         // Two things at once, and the first is the load-bearing one.
         //
-        // Registration is now one transaction rather than a compensating
-        // delete, and that only works if UserManager saves through the same
-        // scoped AppIdentityDbContext the transaction was opened on. If it
-        // resolved its own context the writes would commit beside the
-        // transaction and the rollback would remove nothing - so this asserts
-        // the assumption rather than the comment asserting it.
+        // Registration is one transaction, which works only if UserManager
+        // saves through the same scoped AppIdentityDbContext the transaction
+        // was opened on. If it resolved its own context the writes would commit
+        // beside the transaction and the rollback would remove nothing - so
+        // this asserts the assumption rather than a comment asserting it.
         //
-        // Second: the failure is injected at GenerateRefreshToken, which the
-        // old compensating delete did not cover. A failure there used to leave
-        // a fully registered account behind while telling the caller
-        // registration had failed - they could not register again (the email
-        // was taken) and could not sign in (they never got a token).
+        // Second: the failure is injected at GenerateRefreshToken, the last
+        // write. A failure there must not leave a registered account behind
+        // while telling the caller registration failed - they could neither
+        // register again (the email is taken) nor sign in (no token).
         string email = _faker.Internet.Email();
 
         HttpClient client = factory.WithWebHostBuilder(builder =>
@@ -210,10 +207,9 @@ public class SignUpTests(IntegrationTestWebApplicationFactory factory)
     public async Task SignUp_WhoseCommitLosesItsAcknowledgement_ReturnsTheAccountItCreated()
     {
         // Registration commits the account, its role and its first refresh token
-        // together. A retry after a lost acknowledgement used to run
-        // CreateAsync again for an account that now existed, and answer a
-        // validation error to someone who had just registered - with a refresh
-        // token minted inside the retry that no row would ever match.
+        // together. A retry after a lost acknowledgement must not run
+        // CreateAsync again for an account that now exists and answer a
+        // validation error to someone who just registered.
         string email = _faker.Internet.Email();
         // After the commit that registered this email, matched on the tracked
         // account.

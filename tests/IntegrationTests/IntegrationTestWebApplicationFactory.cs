@@ -31,9 +31,7 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
         await _dbContainer.StartAsync();
         await MigrateAllModulesAsync();
 
-        // The administrator these tests sign in as. It used to come from the
-        // schema - UserConfiguration seeded one with a known password, which
-        // meant every deployment had it too. Created here instead, so the
+        // The administrator these tests sign in as, created here so the
         // credential lives for one run in one throwaway database. See
         // IntegrationTestAdmin.
         await IntegrationTestAdmin.EnsureCreatedAsync(Services);
@@ -45,11 +43,9 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
         // sources and their pooled connections. Stopping the container out
         // from under a live pool just makes the shutdown noisier.
         //
-        // This used to be `public new`, which hid WebApplicationFactory's own
-        // DisposeAsync rather than extending it - so xUnit called this, the
-        // container stopped, and the host was never disposed at all. Same
-        // family of bug as the provider below: something built and never torn
-        // down.
+        // An override, not `public new`: hiding WebApplicationFactory's own
+        // DisposeAsync would stop the container without ever disposing the
+        // host.
         await base.DisposeAsync();
         await _dbContainer.StopAsync();
         GC.SuppressFinalize(this);
@@ -58,26 +54,18 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
     /// <summary>
     ///     Applies every module's real migrations, before the host is built.
     ///     <para>
-    ///         This used to call services.BuildServiceProvider() inside
-    ///         ConfigureServices (the ASP0000 anti-pattern), which stood up a
-    ///         SECOND container with its own copy of every singleton - a second
-    ///         set of Npgsql data sources and connection pools included - and
-    ///         then never disposed it. The `using` there was on the scope, not
-    ///         the provider, so all of that leaked for the life of the test run.
+    ///         Not through services.BuildServiceProvider() inside
+    ///         ConfigureServices (ASP0000): that stands up a second container
+    ///         with its own singletons, Npgsql data sources and pools included.
+    ///         Not through this factory's Services either: touching Services
+    ///         builds and starts the host, and TickerQ (Program.cs calls
+    ///         UseTickerQ()) would start against a database with no schema yet.
     ///     </para>
     ///     <para>
-    ///         The obvious fix is to migrate from this factory's own Services
-    ///         instead, but that is wrong here: touching Services builds AND
-    ///         starts the host, and this app registers TickerQ unconditionally
-    ///         (Program.cs calls UseTickerQ()), so its scheduler would come up
-    ///         against a database with no schema yet. Ordering is why the
-    ///         original code ran inside ConfigureServices at all.
-    ///     </para>
-    ///     <para>
-    ///         So: no container at all. Each context is constructed directly
+    ///         So no container at all. Each context is constructed directly
     ///         from the same ConfigureStayStackDefaults the app registers it
     ///         with, migrated, and disposed. Nothing is left behind, and
-    ///         migrations still complete before anything is hosted.
+    ///         migrations complete before anything is hosted.
     ///     </para>
     /// </summary>
     private async Task MigrateAllModulesAsync()
@@ -89,10 +77,6 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
         await MigrateAsync<AppCatalogDbContext>("catalog");
         await MigrateAsync<AppHostsDbContext>("hosts");
         await MigrateAsync<AppPromotionsDbContext>("promotions");
-        // No "availability" line any more: that module merged into Bookings,
-        // and its migrations went with it. Running the Bookings set a second
-        // time into Availability's old history table would re-apply every one
-        // of them against a schema that already has them.
         await MigrateAsync<AppBookingsDbContext>("bookings");
         await MigrateAsync<AppTransactionsDbContext>("transactions");
         await MigrateAsync<AppReviewsDbContext>("reviews");

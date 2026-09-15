@@ -3,20 +3,18 @@
 using System.Text.RegularExpressions;
 namespace UnitTests.Persistence;
 
-// Six tests in the integration suite ended up with their failure injected on the
-// wrong side of a commit - most silently, when an explicit transaction was added
-// around the code under test and a hook that used to follow the commit began to
-// precede it. At six this was a tooling problem, not carelessness.
+// A fault injected on the wrong side of a commit proves the other case, and it
+// goes wrong silently: adding an explicit transaction around the code under test
+// turns a hook that followed the commit into one that precedes it.
 //
-// CommitFaults now offers exactly two entry points, FailAfterCommit and
-// FailBeforeCommit, and owns the hook each maps to. This keeps it that way: an
-// integration test that names a transaction or command interceptor - or
-// substitutes the audit interceptor, which is how the old ones got their seam -
-// fails here, and is pointed at the helper whose method name states its intent.
+// CommitFaults owns the hooks and names the case at each entry point. This keeps
+// it that way: an integration test that names a transaction or command
+// interceptor - or substitutes the audit interceptor as a seam - fails here, and
+// is pointed at the helper whose method name states its intent.
 public partial class FaultInjectionProtocolTests
 {
     // Always a fault seam: nothing else in a test has a reason to hook a commit,
-    // and substituting the audit interceptor is how the old faults were attached.
+    // and substituting the audit interceptor is a way to attach one.
     [GeneratedRegex(
         @"\b(?:I?DbTransactionInterceptor|TransactionCommitt(?:ed|ing)Async|AddScoped<AuditableEntitySaveChangesInterceptor)\b")]
     private static partial Regex DirectHook();

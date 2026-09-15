@@ -51,7 +51,7 @@ public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
 
-        // Owners first - a Unit without its Property no longer resolves.
+        // Owners first - a Unit without its Property does not resolve.
         context.AddRange(_pendingProperties);
         _pendingProperties.Clear();
         context.AddRange(entities);
@@ -187,12 +187,9 @@ public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task GetMyBookings_ShouldReportCanCancelFalse_ForAStayThatHasAlreadyStarted()
     {
-        // The client's bookings list used to derive this itself as "not
-        // cancelled", which is what the server did too until cancellation
-        // became bounded by check-in. The guest-checkout view corrected
-        // itself then, because it reads the flag from the API; this list
-        // went on offering a Cancel button that answers 409. Sending the
-        // flag is what stops the two implementations diverging again.
+        // Sent by the server rather than derived by the client: "not cancelled"
+        // is not the rule, since cancellation is bounded by check-in in the
+        // property's own zone. One implementation cannot diverge from the API.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         string accessToken = await SeedSignedInCustomerAsync();

@@ -61,8 +61,7 @@ public class ProblemDetailsStatusMappingTests
         Assert.Equal("Too many requests", problem.Title);
 
         // RFC 6585, not 9110. 9110 section 15.5 enumerates 400-417, 421, 422
-        // and 426 and does not define 429 at all, so the old single-template
-        // URI could only ever have produced a confidently wrong link for it.
+        // and 426 and does not define 429 at all.
         Assert.Equal("https://tools.ietf.org/html/rfc6585#section-4", problem.Type);
     }
 

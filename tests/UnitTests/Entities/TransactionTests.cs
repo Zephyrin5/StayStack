@@ -217,9 +217,6 @@ public class TransactionTests
     {
         // The point of typing this Money? at all: callers get a currency with
         // the amount instead of pairing one on themselves.
-        // CancelBookingHandler used to reach for booking.TotalPrice.Currency
-        // to build its response - the same value, but asserted at the call
-        // site, in the one place getting it wrong costs real money.
         Transaction transaction = Transaction.Create(Guid.CreateVersion7(), Guid.NewGuid(), Money.Of(200m, Currency.KWD));
         transaction.MarkSucceeded(DateTimeOffset.UtcNow);
 

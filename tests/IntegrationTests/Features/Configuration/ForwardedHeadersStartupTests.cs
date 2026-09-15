@@ -9,10 +9,9 @@ namespace IntegrationTests.Features.Configuration;
 // the four anonymous read endpoints, where the result is 429s for every
 // visitor at once and an outage with nothing wrong in any log.
 //
-// This used to be a warning, and one that could never fire:
-// ForwardedHeadersOptions seeds KnownProxies with ::1, so the
-// `KnownProxies.Count == 0` it asked about was false even on a completely
-// unconfigured app.
+// So startup refuses rather than warns. The check reads configuration:
+// ForwardedHeadersOptions seeds KnownProxies with ::1, so
+// `KnownProxies.Count == 0` is false even on a completely unconfigured app.
 [Collection("Integration Tests")]
 public class ForwardedHeadersStartupTests(IntegrationTestWebApplicationFactory factory)
 {

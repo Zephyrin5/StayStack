@@ -33,9 +33,9 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
         // roleResult - indistinguishable, by code alone, from the role genuinely
         // failing to assign.
         //
-        // The compensations are correct either way; only the message was wrong.
-        // Reporting a role-assignment error here sends someone hunting through
-        // seed data for what is really just a timeout.
+        // The compensations are correct either way; this pins the message.
+        // Reporting a role-assignment error here would send someone hunting
+        // through seed data for what is really a timeout.
         //
         // Driven through a real seam rather than simulated: RegisterHostAsync
         // runs after the intent is opened and before the delete is staged,
@@ -107,17 +107,14 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     {
         // A double-click, or a client retrying a request still in flight.
         // OpenIntentAsync reads-then-inserts against a unique index on UserId,
-        // so both attempts saw no intent and both inserted: the loser got a
-        // bare DbUpdateException, which GlobalExceptionHandler has no arm for,
-        // and the user got a 500.
+        // so both attempts can see no intent and both insert. The loser adopts
+        // the committed intent rather than failing with a 500.
         //
-        // Worse than the 500 was what the fix could have caused. Concurrent
-        // attempts now adopt the SAME intent, and hostId is that intent's id -
-        // so the losing attempt's old compensation would have deleted the very
-        // Host the winner had just linked itself to, leaving a user pointing
-        // at a row that does not exist. That is the permanent lockout, from a
-        // double-click. Hence the assertions below check the Host survives,
-        // not merely that nothing returned 500.
+        // Adopting has a hazard: hostId is the intent's id, so both attempts
+        // share one Host, and a losing attempt that deleted "its" Host would
+        // delete the one the winner just linked - a user pointing at a missing
+        // row, locked out permanently by a double-click. Hence the assertions
+        // below check the Host survives, not merely that nothing returned 500.
         (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
 
         // Separate clients so these genuinely overlap rather than queueing on
@@ -192,16 +189,13 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task BecomeHost_WhenTheProcessDiesAfterLinkingButBeforeTheRole_TheJobUnlinksTheUserAndTheyCanRetry()
     {
-        // The permanent-lockout state. The intent used to be deleted in the
-        // same save as the HostId write, so it vanished exactly when the
-        // second cross-module inconsistency became possible: a crash between
-        // linking the Host and adding the role left a user linked to a real
-        // Host, holding no Host role, with no marker anywhere - and
-        // AlreadyAHostException firing on every future attempt. There was no
-        // path back in the handler, the outbox, or this job.
+        // The lockout state: a crash between linking the Host and adding the
+        // role leaves a user linked to a real Host, holding no Host role, with
+        // AlreadyAHostException firing on every attempt. The intent spans the
+        // whole operation, so it is still there to recover from.
         //
-        // Seeded as that exact state: intent alive (it now spans the whole
-        // operation), Host registered, user linked, no role.
+        // Seeded as that exact state: intent alive, Host registered, user
+        // linked, no role.
         (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
         Guid hostId = Guid.CreateVersion7();
 
@@ -243,9 +237,8 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
             Assert.Null(user.HostId);
         }
 
-        // The property that actually matters: the user is no longer stuck.
-        // Under the old behaviour this returned 409 AlreadyAHostException,
-        // forever, with nothing able to clear it.
+        // The property that actually matters: the user is not stuck. Without
+        // recovery this returns 409 AlreadyAHostException forever.
         HttpResponseMessage retry = await _client.SendAsync(
             CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken);
 
@@ -304,19 +297,12 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task Reconcile_WhenOneIntentThrows_StillProcessesTheRest()
     {
-        // This used to assert a per-item guard around the job's cross-module
-        // call: a registrar throwing for one host ended the whole run,
-        // abandoning every candidate behind it, and the next run five minutes
-        // later met the same row first - so one bad intent could starve the
-        // queue indefinitely.
-        //
-        // The guard is still there, but the call is not. Deleting the Host is
-        // an outbox row now (docs/adr/0025), committed with the unlink and
-        // dispatched after, so a failing registrar cannot fail a reconcile at
-        // all - TryDispatchAsync absorbs it and the relay retries. The
-        // starvation risk is structurally gone rather than caught, and this
-        // asserts the stronger property: BOTH intents resolve locally, even
-        // the one whose host deletion will fail.
+        // One failing host deletion must not starve the queue. Deleting the Host
+        // is an outbox row (docs/adr/0025), committed with the unlink and
+        // dispatched after, so a failing registrar cannot fail a reconcile -
+        // TryDispatchAsync absorbs it and the relay retries. This asserts that
+        // BOTH intents resolve locally, even the one whose host deletion will
+        // fail.
         (Guid poisonUserId, _) = await SeedAndSignInUserAsync();
         (Guid healthyUserId, _) = await SeedAndSignInUserAsync();
 
@@ -344,21 +330,20 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
             ReconcileOrphanedHostLinkIntentsJob job = ActivatorUtilities
                 .CreateInstance<ReconcileOrphanedHostLinkIntentsJob>(jobScope.ServiceProvider);
 
-            // The run itself must not throw - that was the defect.
+            // The run itself must not throw.
             await job.ReconcileAsync(default!, TestContext.Current.CancellationToken);
         }
 
         // Both intents are resolved. The local decision - unlink the user,
-        // delete the intent - no longer depends on a cross-module call
-        // succeeding, which is exactly the coupling that made one row able to
-        // block the others.
+        // delete the intent - does not depend on a cross-module call
+        // succeeding, so one row cannot block the others.
         Assert.False(await IntentExistsAsync(poisonHostId));
         Assert.False(await IntentExistsAsync(healthyHostId));
 
         // The healthy host is gone, dispatched inline after its commit.
         Assert.False(await HostExistsAsync(healthyHostId));
 
-        // The poisoned one survives its failed dispatch, and that is now a
+        // The poisoned one survives its failed dispatch, and that is a
         // durable outbox row's problem rather than a lost write: the relay
         // will keep trying. Nothing about it held up the row behind it.
         Assert.True(await HostExistsAsync(poisonHostId));
@@ -431,16 +416,14 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task DeleteHost_ForAnArchivedHost_StillRemovesIt()
     {
-        // The two registrar reads used to disagree about the soft-delete
-        // filter: RegisterHostAsync ignored it, DeleteAsync did not. So an
-        // archived Host would be adopted by registration and then be invisible
-        // to the compensation meant to undo it - the reconcile job's delete
-        // would no-op, and the user would stay linked to a Host nothing could
-        // remove.
+        // Both registrar operations ignore the soft-delete filter. If deletion
+        // honoured it, an archived Host adopted by registration would be
+        // invisible to the compensation meant to undo it: the reconcile job's
+        // delete would no-op, and the user would stay linked to a Host nothing
+        // could remove.
         //
-        // Latent, since nothing archives a Host today. That is exactly why it
-        // is worth pinning now: the first feature that archives one would
-        // otherwise discover this by way of an unremovable link.
+        // Latent, since nothing archives a Host today; the first feature that
+        // does would otherwise discover this by way of an unremovable link.
         Guid hostId = Guid.CreateVersion7();
 
         using (IServiceScope scope = factory.Services.CreateScope())
@@ -466,11 +449,10 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task RegisterHost_WhenAnArchivedHostOccupiesTheId_DoesNotCreateASecond()
     {
-        // The other half of the symmetry, and the reason the fix widened
-        // DeleteAsync rather than narrowing RegisterHostAsync: an archived Host
-        // still occupies the primary key. Registration has to see it, or the
-        // insert collides and the unique-violation catch adopts it anyway -
-        // implicitly, through an exception, instead of by an explicit check.
+        // The other half of the symmetry: an archived Host still occupies the
+        // primary key. Registration has to see it, or the insert collides and
+        // the unique-violation catch adopts it anyway - implicitly, through an
+        // exception, instead of by an explicit check.
         Guid hostId = Guid.CreateVersion7();
 
         using (IServiceScope scope = factory.Services.CreateScope())
@@ -502,14 +484,10 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task RegisterHost_CalledRepeatedlyWithTheSameId_CreatesExactlyOneHost()
     {
-        // The compounding half of the defect. RegisterHostAsync used to
-        // generate the id and return it, so a client retrying after a timeout
-        // got past the "already a host" guard (HostId still null) and created
-        // another orphan every time - three retries on a flaky connection,
-        // three orphaned Hosts.
-        //
-        // With the id supplied by the caller and recorded in the intent first,
-        // every retry re-registers the same Host.
+        // The id is supplied by the caller and recorded in the intent first, so
+        // every retry after a timeout re-registers the same Host. A registrar
+        // minting its own id would let each retry past the "already a host"
+        // guard (HostId still null) create another orphan.
         Guid hostId = Guid.CreateVersion7();
 
         for (int attempt = 0; attempt < 3; attempt++)

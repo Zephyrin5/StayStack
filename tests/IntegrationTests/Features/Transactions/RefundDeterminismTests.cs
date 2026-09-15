@@ -280,11 +280,9 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
         // the guest no longer had.
         //
         // Built as a genuine ordering rather than by backdating a timestamp.
-        // The first draft set CancelledAt two hours in the past but did not
-        // cancel until afterwards, so the confirmation arrived at a booking
-        // that was still live, confirmed it, and no refund path ran at all -
-        // a scenario that cannot happen, failing for a reason the code was
-        // right about.
+        // Setting CancelledAt in the past but cancelling afterwards would let
+        // the confirmation arrive at a still-live booking and confirm it, and no
+        // refund path would run - a scenario that cannot happen.
         //
         // What actually varies here is whether the cancellation's reversal
         // dispatch runs before or after the payment succeeds. Both must reach
@@ -325,12 +323,11 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
     [Fact]
     public async Task WithEveryOutboxMessageDroppedOnTheFloor_TheBackstopStillRefunds()
     {
-        // The test that proves correctness no longer depends on delivery.
+        // Correctness does not depend on delivery.
         //
         // Nothing is dispatched here at all - not the reversal, not the
-        // confirmation. Under the old design that meant no refund, because the
-        // decision only ever happened inside a message handler. The obligation
-        // is a durable work item, so the sweep finds it.
+        // confirmation. The obligation is a durable work item, so the sweep
+        // finds it and the refund is still recorded.
         DateTimeOffset succeededAt = DateTimeOffset.UtcNow.AddHours(-2);
         DateTimeOffset cancelledAt = DateTimeOffset.UtcNow.AddHours(-1);
 
@@ -391,8 +388,8 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
         await CancelAsync(bookingId, cancelledAt, Money.Of(100m, Currency.KWD), dispatchNow: false);
 
         // A thousand older obligations with no payment behind any of them -
-        // exactly the per-run cap, so under the old ordering they filled every
-        // batch and the payable one above never came up.
+        // exactly the per-run cap, so a sweep ordered by age alone would fill
+        // every batch with them and never reach the payable one above.
         using (IServiceScope scope = factory.Services.CreateScope())
         {
             AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();

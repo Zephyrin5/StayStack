@@ -11,12 +11,10 @@ using System.Net;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Auth;
 
-// Proves the fix for the refresh-token rotation race: ValidateRefreshToken
-// used to be SELECT -> check IsRevoked -> UPDATE, three separate steps, so
-// two concurrent callers presenting the same still-valid token could both
-// observe IsRevoked == false and both rotate it. Consumption is now a
-// single conditional UPDATE (AuthTokenProvider.ValidateRefreshToken), so
-// only one of any number of concurrent callers can win.
+// Consumption is a single conditional UPDATE (AuthTokenProvider), so of any
+// number of concurrent callers presenting one still-valid token only one can
+// rotate it. A SELECT, check, UPDATE sequence would let two callers both
+// observe IsRevoked == false.
 [Collection("Integration Tests")]
 public class RefreshTokenConcurrencyTests(IntegrationTestWebApplicationFactory factory)
 {

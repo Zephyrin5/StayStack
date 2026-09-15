@@ -72,8 +72,7 @@ public class OutboxDeadLetterCountingTests(IntegrationTestWebApplicationFactory 
         }
 
         // Act 2 - the hourly sweep retries it, fails again (Attempts 10 ->
-        // 11). This is the case the bug report was about: without the fix,
-        // this would fire the hook (and the counter) a second time for the
+        // 11). The hook and the counter must not fire a second time for the
         // same underlying problem.
         using (IServiceScope secondScope = factory.Services.CreateScope())
         {

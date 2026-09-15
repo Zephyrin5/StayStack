@@ -258,8 +258,8 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
     {
         // The storage-shape assertion behind the replay: the record must be
         // completed in the same transaction as the booking, or a committed
-        // booking whose record never landed strands the guest exactly as
-        // before - the bug reintroduced one level up.
+        // booking whose record never landed leaves the guest's retry with
+        // nothing to replay.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         Guid holdId = await HoldUnitAsync(unit.Id);
@@ -289,8 +289,8 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
         // cannot replay other people's checkouts either.
         Assert.DoesNotContain(key, record.KeyHash, StringComparison.Ordinal);
 
-        // And the intent is gone, as it always was: the two rows have
-        // deliberately different endings.
+        // And the intent is gone: the two rows have deliberately different
+        // endings.
         Assert.False(await context.PendingBookingIntents.AsNoTracking()
             .AnyAsync(i => i.Id == created.BookingId, TestContext.Current.CancellationToken));
     }
@@ -298,13 +298,11 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
     [Fact]
     public async Task AnExpiredRecord_IsRefusedEvenIfThePurgeNeverRan()
     {
-        // The window used to live only in PurgeReplayedCheckoutsJob's DELETE,
-        // which makes it a property of a background job rather than of the
-        // system: stop that job, break its cron, or let it fail quietly, and
-        // replay kept working forever, handing back a management token of
-        // unbounded age. This ages the record in place, deliberately without
-        // running the purge, so it fails if enforcement ever moves back out of
-        // the request path.
+        // The window is enforced on the request path, not only by
+        // PurgeReplayedCheckoutsJob's DELETE: with the job stopped or failing,
+        // replay would otherwise hand back management tokens of unbounded age.
+        // This ages the record in place, deliberately without running the
+        // purge, so it fails if enforcement moves back out of the request path.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         Guid holdId = await HoldUnitAsync(unit.Id);

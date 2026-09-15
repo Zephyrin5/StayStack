@@ -25,7 +25,7 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
 
-        // Owners first - a Unit without its Property no longer resolves.
+        // Owners first - a Unit without its Property does not resolve.
         context.AddRange(_pendingProperties);
         _pendingProperties.Clear();
 
@@ -203,14 +203,10 @@ public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory f
     [Fact]
     public async Task Handle_PendingPaymentHold_BlocksAvailability()
     {
-        // This test used to seed Status = "released" and assert that an
-        // unrecognised status was ignored. That value was never written by
-        // anything, and the CHECK constraint added with 'pending_payment' now
-        // rejects it outright - so the case it described cannot occur. What
-        // replaced it is the question that actually matters: a hold claimed
-        // by a checkout in progress is real inventory and must read as
-        // unavailable. Miss it and search offers a unit whose hold will be
-        // refused by the exclusion constraint at the last step.
+        // A hold claimed by a checkout in progress is real inventory and must
+        // read as unavailable; otherwise search offers a unit whose hold the
+        // exclusion constraint refuses at the last step. (An unrecognised status
+        // cannot occur: the CHECK constraint rejects it.)
         // Arrange
         Unit unit = CreateTestUnit();
         DateOnly from = new DateOnly(2026, 9, 1);

@@ -179,11 +179,8 @@ public class PagedSliceTests(IntegrationTestWebApplicationFactory factory)
     public async Task ToPagedSliceAsync_RejectsAPageSizePastTheMaximum()
     {
         // The offset guard alone never catches this: at page 1 the offset is
-        // 0 whatever the page size, int.MaxValue included. Until this bound
-        // existed here, the ceiling was the twelve request validators' alone -
-        // so ToPagedSliceAsync carried a clamp for a page size its own callers
-        // could not currently send it, and a paged caller arriving without a
-        // validator would have had no ceiling at all.
+        // 0 whatever the page size, int.MaxValue included. This bound is what
+        // gives a paged caller arriving without a validator a ceiling.
         CommandCountingInterceptor interceptor = new();
         await using CountedContext counted = ContextWith(interceptor);
 

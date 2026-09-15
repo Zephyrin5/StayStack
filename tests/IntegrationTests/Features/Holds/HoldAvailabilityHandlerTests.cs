@@ -31,7 +31,7 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
 
-        // Owners first - a Unit without its Property no longer resolves.
+        // Owners first - a Unit without its Property does not resolve.
         context.AddRange(_pendingProperties);
         _pendingProperties.Clear();
 
@@ -60,16 +60,13 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     ///         null <c>hold_expires_at</c>, which no sweep predicate matches.
     ///     </para>
     ///     <para>
-    ///         <b>These two are different, and the reason is a job rather than
-    ///         a date.</b> The test host runs TickerQ on the real clock, and
-    ///         ExpiredHoldsSweepJob deletes <em>every</em> row matching
+    ///         <b>These two are different because of a job, not a date.</b> The
+    ///         test host runs TickerQ on the real clock, and ExpiredHoldsSweepJob
+    ///         deletes <em>every</em> row matching
     ///         <c>status = 'held' AND hold_expires_at &lt;= now()</c>
-    ///         platform-wide, every five minutes. A hold minted at a fake
-    ///         2026-08-20 gets <c>hold_expires_at</c> fifteen minutes later -
-    ///         so once the real date passed it, every such row was born already
-    ///         eligible for that sweep. The two tests and the scheduler
-    ///         disagreed about what "expired" meant, and they broke in opposite
-    ///         directions:
+    ///         platform-wide, every five minutes. A hold minted at a past fake
+    ///         date is born eligible for that sweep, and the two tests break in
+    ///         opposite directions:
     ///     </para>
     ///     <list type="bullet">
     ///         <item>
@@ -77,18 +74,17 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     ///                 <c>Handle_SixthActiveHoldFromSameClientNetwork...</c>
     ///                 fills the cap with five live holds and expects the sixth
     ///                 to be refused. A sweep landing between the fifth and the
-    ///                 sixth deleted all five and the sixth succeeded - the
-    ///                 intermittent failure this fixes.
+    ///                 sixth deletes all five and the sixth succeeds -
+    ///                 intermittently.
     ///             </description>
     ///         </item>
     ///         <item>
     ///             <description>
-    ///                 <c>Handle_WithExpiredHeldRowsOnDifferentUnits...</c> is
-    ///                 the worse one, because it was <em>green</em>. It seeds
-    ///                 five expired rows to prove the cap's count query excludes
-    ///                 them; if the sweep gets there first there is nothing left
-    ///                 to exclude, and it passes without exercising the
-    ///                 predicate it exists for.
+    ///                 <c>Handle_WithExpiredHeldRowsOnDifferentUnits...</c> stays
+    ///                 <em>green</em>. It seeds five expired rows to prove the
+    ///                 cap's count query excludes them; if the sweep gets there
+    ///                 first there is nothing left to exclude, and it passes
+    ///                 without exercising the predicate it exists for.
     ///             </description>
     ///         </item>
     ///     </list>
@@ -97,8 +93,8 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     ///         expired (<c>fixedInstant - 1 min</c>) is still an hour in the
     ///         future by <c>now()</c>, so the sweep leaves it alone and the
     ///         count query has to do its own job. Every date in both tests is
-    ///         derived from this instant, so no fake-clock relationship
-    ///         changes - only the real-clock one, which was the bug.
+    ///         derived from this instant, so only the real-clock relationship
+    ///         changes.
     ///     </para>
     /// </summary>
     private static DateTimeOffset InstantOutliving(TimeSpan sweepMargin) =>
@@ -576,13 +572,9 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     [Fact]
     public async Task Handle_AfterFiveSuccessfulBookings_SixthHoldStillSucceeds()
     {
-        // Regression test: the active-hold count previously included
-        // 'booked' holds, which never revert to 'held' for a completed
-        // booking (ConfirmHoldAsync sets 'booked' and only an explicit
-        // release ever clears it, so the row persists for the life of the
-        // booking). That meant a real customer would be locked out of
-        // new holds after their 5th completed booking. 'booked' rows must
-        // never count toward the cap.
+        // 'booked' rows never count toward the cap: nothing reverts a completed
+        // booking's hold, so counting them would lock a real customer out of
+        // new holds after their Nth stay.
         Unit unit = CreateTestUnit(maxCapacity: 10);
         await SeedCatalogAsync(unit);
 
@@ -636,18 +628,16 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     [Fact]
     public async Task Handle_AlternatingHoldAndConfirmWithoutPaying_StillHitsTheCap()
     {
-        // The cap's escape hatch. It used to count 'held' only, so submitting
-        // the checkout form - which moves a row to 'pending_payment' without
-        // any money changing hands - took that row out of the count while the
-        // exclusion constraint went on blocking its range. Hold, confirm,
-        // repeat: a caller with no account and no card accumulated blocked
-        // ranges without limit, and the per-client cap, the only concurrency
-        // bound on this, never fired.
+        // The cap counts 'pending_payment' as well as 'held'. Submitting the
+        // checkout form moves a row to 'pending_payment' without money changing
+        // hands while the exclusion constraint keeps blocking its range; if that
+        // freed a slot, hold, confirm, repeat would accumulate blocked ranges
+        // without limit.
         //
         // Alternating rather than seeding five 'pending_payment' rows
         // directly: the seeded version passes against a cap that counts the
-        // status but still lets the transition itself free a slot, which is
-        // the actual bug. The loop below is the exploit, written out.
+        // status but still lets the transition itself free a slot. The loop
+        // below is the exploit, written out.
         Unit unit = CreateTestUnit(maxCapacity: 10);
         await SeedCatalogAsync(unit);
 
@@ -684,10 +674,9 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
                 ClientKey = clientKey
             }, CancellationToken.None);
 
-            // Checkout submitted, nothing paid. Under the old cap this line
-            // is what made the loop unbounded.
+            // Checkout submitted, nothing paid.
             //
-            // In a transaction because HoldConfirmation now insists on one for
+            // In a transaction because HoldConfirmation insists on one for
             // every status transition: each is half of a decision whose other
             // half is a Bookings row, and this test is standing in for the
             // handler that would own both.
@@ -781,15 +770,13 @@ public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory f
     [Fact]
     public async Task Handle_CheckInIsYesterdayAtTheProperty_ButTodayInUtc_IsRejected()
     {
-        // The behavioural proof for docs/adr/0018, and it fails under the old
-        // UTC logic.
+        // The behavioural proof for docs/adr/0018.
         //
         // 21:30 UTC on 2026-08-20 is already 00:30 on the 21st in
         // Asia/Kuwait, where this property is. So 2026-08-20 is *yesterday*
         // for the hotel and must not be bookable - but a UTC-derived "today"
-        // reads 2026-08-20 and lets it through. That is the permissive
-        // direction this app's own market sits on: holding a unit for a date
-        // that has already passed locally.
+        // reads 2026-08-20 and lets it through, holding a unit for a date that
+        // has already passed locally.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
 

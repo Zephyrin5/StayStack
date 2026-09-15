@@ -31,10 +31,9 @@ namespace IntegrationTests.Features.Transactions;
 [Collection("Integration Tests")]
 public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
 {
-    // The management token buys a session now, and the session is what every
-    // management call carries - so a test that used to hand the raw token to
-    // an endpoint has to make the same round trip a real client makes. See
-    // docs/adr/0023.
+    // The management token buys a session, and the session is what every
+    // management call carries, so tests make the same round trip a real client
+    // makes. See docs/adr/0023.
     private async Task<string> OpenSessionAsync(Guid bookingId, string managementToken)
     {
         HttpResponseMessage response = await _client.PostAsJsonAsync(
@@ -90,7 +89,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
 
-        // Owners first - a Unit without its Property no longer resolves.
+        // Owners first - a Unit without its Property does not resolve.
         context.AddRange(_pendingProperties);
         _pendingProperties.Clear();
         context.AddRange(entities);
@@ -521,19 +520,18 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task Initiate_WithoutOwnershipProof_Returns404_AndCannotBlockTheRealGuestsPayment()
     {
-        // This endpoint used to accept a bare booking id from anyone, alone
-        // among the anonymous booking-scoped endpoints. Two things followed,
-        // and this covers both.
+        // This endpoint requires ownership proof, and this covers what it
+        // prevents.
         //
-        // First, the 404-vs-409 split was a status oracle: an unauthenticated
-        // caller could tell "no such booking" from "that booking exists but
-        // isn't payable". Impractical to enumerate against Guid v7's 74 random
-        // bits, but the codebase avoids exactly this elsewhere -
+        // First, a status oracle: without proof, an unauthenticated caller could
+        // tell "no such booking" from "that booking exists but isn't payable".
+        // Impractical to enumerate against Guid v7's 74 random bits, but the
+        // codebase avoids exactly this elsewhere -
         // HostAuthorization.RequireOwnership returns 404 rather than 403.
         //
         // Second, and worse: a stranger holding the id could open a Pending
         // transaction on it, and ix_transactions_booking_id_active would then
-        // reject the real guest's payment with 409. A payment-denial vector.
+        // reject the real guest's payment with 409.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         (Guid bookingId, string managementToken) = await HoldAndConfirmBookingAsync(unit.Id);
@@ -637,7 +635,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(snapshot);
 
         // Null, not a throw: the one Succeeded transaction moved on to
-        // RefundPending, so nothing matches that filter any more.
+        // RefundPending, so nothing matches that filter.
         Assert.Null(await transactionReversal.GetSucceededTransactionAmountAsync(bookingId, TestContext.Current.CancellationToken));
     }
 }

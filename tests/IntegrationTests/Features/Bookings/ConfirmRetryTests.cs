@@ -17,16 +17,15 @@ using System.Net.Http.Json;
 namespace IntegrationTests.Features.Bookings;
 
 // ConfirmBookingHandler's recovery for a booking insert that committed and lost
-// its acknowledgement - reasoned about over several rounds, and never run until
-// this test.
+// its acknowledgement.
 //
 // The booking id and the management token's plaintext are chosen before the
 // insert, so a retry that collides on the booking's primary key can read the
 // committed booking back and answer with it. The assertion that matters is the
-// token: an earlier version of this recovery returned a 200 and a real booking
-// id with a management token whose hash row had been rolled back, a credential
-// that failed at first use. A test asserting the status and the id passed over
-// that. This one uses the token.
+// token: a recovery that returns a 200 and a real booking id with a token whose
+// hash row rolled back hands out a credential that fails at first use, and a
+// test asserting only the status and id passes over that. This one uses the
+// token.
 [Collection("Integration Tests")]
 public class ConfirmRetryTests(IntegrationTestWebApplicationFactory factory)
 {

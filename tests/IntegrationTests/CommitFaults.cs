@@ -16,11 +16,10 @@ namespace IntegrationTests;
 ///         not. <see cref="FailAfterAutocommit{TContext}"/> is the same for a
 ///         single statement EF sent with no transaction, which never reaches a
 ///         commit hook. <see cref="FailBeforeCommit{TContext}"/> is a failed
-///         commit: nothing was written. An execution strategy retries both identically, which is why
-///         the difference is invisible from inside a test - and six tests in this
-///         suite ended up on the wrong side of it, most of them silently, when an
-///         explicit transaction was added around the code they exercised and a
-///         hook that used to follow the commit started preceding it.
+///         commit: nothing was written. An execution strategy retries both
+///         identically, so the difference is invisible from inside a test, and a
+///         hook that follows a commit silently starts preceding it when an
+///         explicit transaction is added around the code under test.
 ///     </para>
 ///     <para>
 ///         So no test names an interceptor. The hook lives here, and the entry
@@ -32,9 +31,8 @@ namespace IntegrationTests;
 ///         Every fault is targeted. Test hosts run TickerQ, whose jobs commit on
 ///         their own schedule, and an untargeted fault lets one of those take the
 ///         injection: the request then runs clean, the fault reports that it
-///         fired, and the test passes having proved nothing. That was
-///         demonstrated, not supposed. <c>when</c> must identify the commit under
-///         test.
+///         fired, and the test passes having proved nothing. <c>when</c> must
+///         identify the commit under test.
 ///     </para>
 /// </summary>
 public static class CommitFaults

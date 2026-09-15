@@ -19,13 +19,11 @@ using System.Net.Http.Json;
 using Bookings.Outbox;
 namespace IntegrationTests.Features.Bookings;
 
-// The durable-intent redesign (docs/adr/0017). ConfirmHoldAsync commits to
-// Availability's own database before anything exists in Bookings, so a process
-// death on the next line used to leave nothing anywhere to recover from -
-// covered only by a job that asked Availability for candidates and joined them
-// against Bookings in memory. An intent row states the fact directly, and its
-// deletion on the success path is what makes the recovery job and a live
-// request safe to run concurrently.
+// Durable intents (docs/adr/0017). The redemption commits in Promotions before
+// the Booking exists, so a process death between them would leave nothing to
+// recover from without a marker. An intent row states the fact directly, and
+// its tracked deletion on the success path is what makes the recovery job and a
+// live request safe to run concurrently.
 [Collection("Integration Tests")]
 public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory factory)
 {
@@ -110,7 +108,7 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
 
-        // Owner first - a Unit without its Property no longer resolves.
+        // Owner first - a Unit without its Property does not resolve.
         context.Add(property);
         context.Add(unit);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -286,17 +284,15 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
     [Fact]
     public async Task ConfirmBooking_WhileAnotherConfirmationHoldsTheIntent_Returns409()
     {
-        // The unique index on hold_id is what makes dropping the old
-        // cross-module join safe: without it a second intent for the same hold
-        // would survive, and the job would later release a hold out from under
-        // a live request.
+        // The unique index on hold_id keeps a second intent for one hold from
+        // surviving; the reconcile job releases the hold behind any intent past
+        // its grace period, and would release it under a live request.
         //
         // The state seeded below - a live intent for a hold that is back to
-        // 'held' - is no longer how a losing race looks (the conditional
-        // UPDATE settles those, and the loser gets 404). It is what
-        // CompensateAsync leaves between releasing a hold and discarding the
-        // intent that went with it, which is a real window and a retryable
-        // one.
+        // 'held' - is not how a losing race looks (the conditional UPDATE
+        // settles those, and the loser gets 404). It is what CompensateAsync
+        // leaves between releasing a hold and discarding its intent: a real
+        // window, and a retryable one.
         Unit unit = await SeedUnitAsync();
         Guid holdId = await HoldUnitAsync(unit.Id);
 
@@ -467,15 +463,11 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
             timeProvider,
             scope.ServiceProvider.GetRequiredService<ILogger<ReconcileOrphanedBookingIntentsJob>>());
 
-        // The run completes rather than propagating. It used to rethrow, and
-        // this asserted that - but the throw was incidental to what this test
-        // is named for: a failed compensation must leave the intent behind for
-        // the next run, which is the assertion below and is unchanged.
-        //
-        // Swallowing it per item is the point: the exception escaping here
-        // abandoned every candidate queued behind this one, and nothing it can
-        // throw is classified transient, so EnableRetryOnFailure never absorbed
-        // it either.
+        // The run completes rather than propagating: a failed compensation leaves
+        // the intent behind for the next run, which is the assertion below.
+        // Letting the exception escape would abandon every candidate queued
+        // behind this one, and nothing it can throw is classified transient,
+        // so EnableRetryOnFailure would not absorb it either.
         await job.ReconcileAsync(null!, TestContext.Current.CancellationToken);
 
         Assert.NotNull(await GetIntentAsync(holdId));

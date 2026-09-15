@@ -266,18 +266,15 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
     public async Task AResolverLosingTheRaceInsideADispatcher_StillMarksItsMessageProcessed()
     {
         // The previous race test calls the resolver directly, so it cannot see
-        // this at all: the damage is to an entity only the dispatcher is
+        // this at all: the damage would be to an entity only the dispatcher is
         // tracking.
         //
         // TransactionsOutboxDispatcher loads its OutboxMessage tracked on the
         // scoped AppTransactionsDbContext and assigns ProcessedAt after the
-        // handler returns. The resolver's concurrency catch used to call
-        // ChangeTracker.Clear() on that same context, detaching the message -
-        // so ProcessedAt went to a detached entity, SaveChangesAsync wrote
-        // nothing, and the dispatch reported success over a message still
-        // pending. It self-healed on redelivery, which is worse rather than
-        // better: the reported outcome and the persisted state disagreed, and
-        // nothing anywhere said so.
+        // handler returns. If the resolver's concurrency catch cleared that
+        // context's change tracker, the message would be detached, ProcessedAt
+        // would never be saved, and the dispatch would report success over a
+        // message still pending - with nothing anywhere saying so.
         (Guid bookingId, Guid transactionId) = await SeedCancelledAndPaidAsync(daysUntilCheckIn: 163);
 
         Guid messageId = Guid.CreateVersion7();
@@ -331,15 +328,13 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
     [Fact]
     public async Task ARefundPendingAttemptBesideASucceededOne_ResolvesTheRightOne()
     {
-        // A state the schema permits and every booking-wide query used to throw
-        // on. The active-transaction index filters
+        // A state the schema permits. The active-transaction index filters
         // transaction_status IN ('Pending','Succeeded'), so a RefundPending
-        // attempt and a Succeeded one coexist legally - and SingleOrDefault
-        // over "this booking's transactions" then threw on every retry and
-        // every sweep pass for as long as both rows existed.
+        // attempt and a Succeeded one coexist legally, and SingleOrDefault over
+        // "this booking's transactions" would throw on every retry and every
+        // sweep pass for as long as both rows exist.
         //
-        // Reachable in practice from an initiation racing a cancellation, which
-        // is why that race stopped being merely untidy.
+        // Reachable in practice from an initiation racing a cancellation.
         (Guid bookingId, Guid refundedId) = await SeedCancelledAndPaidAsync(daysUntilCheckIn: 164);
 
         using (IServiceScope scope = factory.Services.CreateScope())
@@ -362,7 +357,7 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
             AppTransactionsDbContext transactions =
                 scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
 
-            // B succeeded afterwards - the pair the old query could not read.
+            // B succeeded afterwards - the pair a SingleOrDefault query cannot read.
             Transaction second = Transaction.Create(Guid.CreateVersion7(), bookingId, Money.Of(200m, Currency.KWD));
             second.MarkSucceeded(DateTimeOffset.UtcNow);
             transactions.Transactions.Add(second);
@@ -397,15 +392,15 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
     [Fact]
     public async Task APaymentStateRead_DescribesOneMomentRatherThanTwo()
     {
-        // 4b, at the level the defect actually lived: cancellation asked two
-        // questions - "is there a refund" then "is anything owed" - and a
-        // dispatcher or the sweep can move the payment Succeeded ->
-        // RefundPending in between. The first read saw no refund, the second no
-        // succeeded payment, and the response reported neither state.
+        // 4b: describing a payment takes one read. As two - "is there a refund"
+        // then "is anything owed" - a dispatcher or the sweep can move the
+        // payment Succeeded -> RefundPending in between; the first read sees no
+        // refund, the second no succeeded payment, and the response reports
+        // neither state.
         //
-        // A single read cannot produce that answer, and this pins the property
-        // directly: for a payment in the RefundPending state, one observation
-        // reports the refund rather than "nothing to refund".
+        // This pins the property directly: for a payment in the RefundPending
+        // state, one observation reports the refund rather than "nothing to
+        // refund".
         (Guid bookingId, Guid transactionId) = await SeedCancelledAndPaidAsync(daysUntilCheckIn: 165);
 
         using (IServiceScope scope = factory.Services.CreateScope())
@@ -427,10 +422,8 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
 
         Assert.NotNull(state);
 
-        // The refund is visible. Under the old pair, the second read - which
-        // asked only for Succeeded - reported nothing for this exact state, and
-        // whichever of the two the response happened to trust decided the
-        // answer.
+        // The refund is visible. A read asking only for Succeeded reports
+        // nothing for this exact state.
         Assert.Equal(100m, state.RefundAmount!.Value.Amount);
         Assert.Equal(RefundStatus.Pending, state.RefundStatus);
 
@@ -446,10 +439,9 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
         // The already-finalized branch. Both read a Succeeded transaction, one
         // writes, and the loser's MarkRefundPending throws.
         //
-        // It used to return without marking, so the obligation was left for the
-        // sweep to retry indefinitely against a transaction that would never be
-        // Succeeded again - the same permanent unresolved row as the mirror
-        // case, reached from a race instead of a crash.
+        // The loser must still mark the obligation resolved. Returning without
+        // marking would leave the sweep retrying indefinitely against a
+        // transaction that will never be Succeeded again.
         (Guid bookingId, Guid transactionId) = await SeedCancelledAndPaidAsync(daysUntilCheckIn: 162);
 
         await Task.WhenAll(ResolveAsync(bookingId), ResolveAsync(bookingId));

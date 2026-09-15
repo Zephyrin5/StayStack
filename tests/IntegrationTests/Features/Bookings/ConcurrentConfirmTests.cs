@@ -121,10 +121,9 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
 
         Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
 
-        // The loser is told the hold is gone, which is what actually happened
-        // and what a caller can act on - the same answer an expired hold gets,
-        // because the remedy is identical. It used to be a 409 naming another
-        // request's confirmation, which is a fact about someone else.
+        // The loser is told the hold is gone, which is what happened and what a
+        // caller can act on - the same answer an expired hold gets, because the
+        // remedy is identical.
         Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.NotFound));
 
         using IServiceScope scope = factory.Services.CreateScope();
@@ -138,20 +137,12 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
             .CountAsync(i => i.HoldId == holdId, TestContext.Current.CancellationToken));
     }
 
-    // The two halves of what used to be one test asserting a scheduler
-    // outcome.
-    //
-    // TwoConfirmationsUnderOneIdempotencyKey_DoNotReport404 fired both requests
-    // with Task.WhenAll and demanded exactly one 200 and one 409. Nothing makes
-    // both attempts reach the in-progress state: if the second arrives after
-    // the first has finished, it observes a completed record and replays, which
-    // is a perfectly correct double-200 and failed the assertion. Worse, it
-    // meant the completed-replay path - the one carrying the rolled-back-token
-    // defect - was only exercised when the scheduler happened to produce it,
-    // and the test asserted that outcome was wrong.
-    //
-    // Both cases are real and both are pinned below, each driven from a barrier
-    // rather than from whoever wins.
+    // Two confirmations under one idempotency key, split into two tests
+    // because firing both with Task.WhenAll asserts a scheduler outcome: if the
+    // second arrives after the first finishes, it replays a completed record
+    // (a correct double 200), and the completed-replay path is exercised only
+    // when the scheduler happens to produce it. Each case below is driven from a
+    // barrier rather than from whoever wins.
 
     // Pauses a confirmation *before* it attempts the hold - after its
     // top-of-handler idempotency read has already missed.
@@ -255,21 +246,20 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
     [Fact]
     public async Task AConfirmationThatArrivesBeforeTheWinnerCommits_ReplaysAUsableToken()
     {
-        // The completed-replay case, and the regression test for a token that
-        // was minted inside a transaction nobody committed.
+        // The completed-replay case: a replay must not hand out a token minted
+        // inside a transaction nobody committed.
         //
         // The replaying request has to pass its top-of-handler idempotency read
         // *before* the winner commits, or it replays from there - a path with
-        // no transaction at all, where the defect cannot appear. So it is the
-        // one that gets paused, parked after that read has missed and before it
-        // touches the hold, while the winner runs to completion beside it.
+        // no transaction at all. So it is the one that gets paused, parked after
+        // that read has missed and before it touches the hold, while the winner
+        // runs to completion beside it.
         //
         // Released, it walks into the recovery: the hold is gone, the intent
         // under its own booking id does not exist, and the key resolves to a
-        // completed record. That is the branch that used to call ReplayAsync
-        // with the caller's transaction still open, returning a 200 for a real
-        // booking with a management token whose hash row was rolled back on the
-        // way out - a credential that fails at first use.
+        // completed record. Replaying with that transaction still open would
+        // return a 200 and a real booking with a management token whose hash row
+        // rolls back on the way out - a credential that fails at first use.
         Guid holdId = await SeedHeldUnitAsync(daysUntilCheckIn: 17);
         ConfirmBookingRequest request = RequestFor(holdId);
         string key = Guid.NewGuid().ToString();
@@ -309,8 +299,8 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
         Assert.Equal(original.BookingId, repeat.BookingId);
         Assert.NotNull(repeat.ManagementToken);
 
-        // The assertion that would have caught it. A test stopping at the 200
-        // and the booking id passes against the old code.
+        // The token must work. A test stopping at the 200 and the booking id
+        // cannot see a rolled-back token hash.
         HttpResponseMessage exchange = await factory.CreateClient().PostAsJsonAsync(
             $"/api/bookings/{repeat.BookingId}/manage/session",
             new CreateBookingSessionRequest
@@ -337,9 +327,8 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
     [Fact]
     public async Task AConfirmationAfterTheHoldIsTaken_IsToldTheHoldIsGone()
     {
-        // The sequential version, which used to take a different path through
-        // the recovery than the concurrent one and produce different wording
-        // depending on how old the other request's intent was. One answer now.
+        // The sequential version must get the same answer as the concurrent
+        // one, whatever the age of the other request's intent.
         Guid holdId = await SeedHeldUnitAsync(daysUntilCheckIn: 23);
         ConfirmBookingRequest request = RequestFor(holdId);
 

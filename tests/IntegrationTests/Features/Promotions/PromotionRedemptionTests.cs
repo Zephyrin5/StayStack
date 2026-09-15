@@ -159,17 +159,16 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
     public async Task ConfirmBooking_WhenTheCodeDoesNotBeatTheLengthOfStayDiscount_ReleasesTheHoldAndFreesTheDates()
     {
         // The compensation half of the "code doesn't beat the LoS discount"
-        // rejection. ConfirmHoldAsync has already flipped the hold to
-        // 'booked' by the time this branch decides to reject, so a 400 that
-        // reverses only the redemption leaves that row behind - and nothing
-        // collects it: ExpiredHoldsSweepJob only deletes status = 'held',
-        // and the intent a reconcile job would work from is discarded on this
-        // very path. The dates would be blocked permanently.
+        // rejection. ConfirmHoldAsync has already moved the hold to
+        // 'pending_payment' by the time this branch rejects, so a 400 that
+        // reverses only the redemption would leave that row behind - and
+        // nothing would collect it: ExpiredHoldsSweepJob only deletes
+        // status = 'held', and the intent a reconcile job would work from is
+        // discarded on this very path.
         //
         // Asserting the hold row is not enough on its own, so this asserts
         // the thing a guest would actually notice: the same range can be held
-        // again afterwards. Under the old behaviour that second hold is
-        // refused by the exclusion constraint.
+        // again afterwards.
         (_, string hostToken, Guid unitId) = await SeedHostWithUnitAsync(100m);
 
         // 3 nights at 100 = 300 subtotal, less a 20% LoS discount = 240 quoted.
@@ -356,10 +355,8 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         // The error key, not just the status. ConfirmBookingHandler passes a
         // bare nameof(request.PromoCode) - PascalCase - and relies on
         // GlobalExceptionHandler.BuildValidationProblem to camelCase it on the
-        // way out, so this is what proves that central conversion actually
-        // runs for a handler-thrown ValidationException. It previously
-        // converted the key at the throw site instead, and nothing asserted
-        // the result either way.
+        // way out, so this proves that central conversion runs for a
+        // handler-thrown ValidationException.
         string body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("\"promoCode\"", body);
         Assert.DoesNotContain("PromoCode", body);
@@ -573,14 +570,12 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         // ComputeDiscountAmount caps a FixedAmount discount at the subtotal
         // too, so a large enough fixed code lands in the same place.
         //
-        // The guard here is "discountedPrice >= hold.TotalPrice", and
-        // 0 >= 300 is false - so a zero-total Booking used to be created
-        // happily. Transaction.Create then refuses it
-        // (Guard.Against.NegativeOrZero), leaving the guest holding a booking
-        // they can never pay for: stuck Pending forever, with a raw
-        // guard-clause message surfacing on every payment attempt. Rejected
-        // at checkout now, with Booking.Create enforcing the same invariant
-        // so no other path can reintroduce it.
+        // "discountedPrice >= hold.TotalPrice" alone does not catch this
+        // (0 >= 300 is false). A zero-total Booking could never be paid -
+        // Transaction.Create refuses it - leaving the guest a booking stuck
+        // Pending with a raw guard-clause message on every payment attempt. So
+        // checkout rejects it, and Booking.Create enforces the same invariant
+        // for every other path.
         (_, string hostToken, Guid unitId) = await SeedHostWithUnitAsync(100m);
         string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
         await CreatePromotionAsync(hostToken, code, PromotionDiscountType.Percentage, 100m);

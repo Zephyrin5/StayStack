@@ -9,13 +9,9 @@ namespace IntegrationTests;
 /// <summary>
 ///     The administrator these tests sign in as.
 ///     <para>
-///         There used to be one in the schema: <c>UserConfiguration.HasData</c>
-///         seeded admin@staystack.com with the password "1234", so every
-///         deployment that ran migrations came up with a known-credential
-///         account holding the Administrator role. Tests signing in with it
-///         was the reason it stayed. That is no longer a reason - a test
-///         fixture can make its own account, and a production migration
-///         should not be the thing that provides one.
+///         Created by the test host, not seeded by the schema: a seeded
+///         administrator would give every deployment that runs migrations a
+///         known-credential account holding the Administrator role.
 ///     </para>
 ///     <para>
 ///         The password is generated per run rather than being a constant, so
@@ -79,8 +75,7 @@ public static class IntegrationTestAdmin
     }
 
     /// <summary>
-    ///     Signs in and returns the access token, the same way every test's
-    ///     own helper used to with the seeded credentials.
+    ///     Signs in and returns the access token.
     /// </summary>
     public static async Task<string> SignInAsync(HttpClient client, CancellationToken cancellationToken)
     {

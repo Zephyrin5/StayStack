@@ -11,10 +11,9 @@ namespace UnitTests.Persistence;
 // causes it.
 //
 // BookingPaymentLock only excludes initiation from a cancellation if every path
-// that cancels a booking takes it. ExpireUnpaidBookingsJob was added as a
-// cancelling path, the lock was later added to CancelBookingHandler, and the job
-// was not updated - it held the booking row alone, which initiation never
-// touches, so the two raced freely. Every file looked complete on its own.
+// that cancels a booking takes it. A new cancelling path holding only the
+// booking row races initiation freely, because initiation never touches that
+// row - and every file looks complete on its own.
 //
 // Source-based, deliberately. The lock is a SQL statement issued through Dapper;
 // nothing about it is visible to reflection, and a behavioural test per path is

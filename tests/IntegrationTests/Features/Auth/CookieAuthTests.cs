@@ -93,18 +93,14 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task SignIn_WithSecureCookiesRequired_SetsSecure_EvenOverPlainHttp()
     {
-        // The regression this pins: the Secure flag used to be
-        // Request.IsHttps. That reads the proxy's scheme only when
-        // UseForwardedHeaders has trusted the proxy, and
-        // ForwardedHeaders:KnownProxies ships empty - so behind a
-        // TLS-terminating proxy at any non-loopback address it was false and
-        // the refresh token went out unprotected.
+        // The Secure flag is configured, not derived from Request.IsHttps.
+        // IsHttps reads the proxy's scheme only when UseForwardedHeaders trusts
+        // the proxy, so behind a TLS-terminating proxy missing from
+        // ForwardedHeaders:KnownProxies it is false and a derived flag would send
+        // the refresh token unprotected.
         //
-        // TestServer's transport is plain HTTP, which makes it exactly the
-        // shape of that failure: IsHttps is false here too. With the flag
-        // declared by configuration rather than derived, the cookie is Secure
-        // anyway - which is the whole point, since the app cannot see the
-        // TLS the proxy terminated.
+        // TestServer's transport is plain HTTP, the same shape: IsHttps is false
+        // here, and the cookie must be Secure anyway.
         //
         // appsettings.Testing.json turns RequireSecure off so the rest of the
         // suite's cookie jar behaves like a browser on HTTP; this test opts
@@ -211,8 +207,7 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task SignIn_WithoutUseCookies_ShouldBeUnchanged_TokenModeStillWorks()
     {
-        // Guards the token-mode path mobile/non-browser clients depend on
-        // against a regression from this change.
+        // Guards the token-mode path mobile/non-browser clients depend on.
 
         // Arrange
         HttpClient client = factory.CreateClient();

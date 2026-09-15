@@ -64,14 +64,14 @@ internal static class BookingAccessChecker
     }
 
     /// <summary>
-    ///     The management-token path, now reachable from exactly one caller:
+    ///     The management-token path, reachable from exactly one caller:
     ///     CreateBookingSessionHandler, which trades the token for a session.
     ///     <para>
     ///         Separated from <see cref="ResolveAsync"/> rather than left as
     ///         an optional parameter on it, because a parameter every other
     ///         caller passes null to is an invitation to start passing
-    ///         something. The long-lived credential is now validated in one
-    ///         place, and the type system says so.
+    ///         something. The long-lived credential is validated in one place,
+    ///         and the type system says so.
     ///     </para>
     ///     <para>
     ///         No authenticated-customer path either. A signed-in owner does

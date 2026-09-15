@@ -10,19 +10,16 @@ using System.Net;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Auth;
 
-// A refresh is consume-once, and that is what made a lost acknowledgement fatal.
-//
-// The first attempt revoked the presented token and committed its replacement.
-// The retry then presented the same token, found it already revoked - which is
-// exactly what genuine reuse looks like - and revoked the whole family,
-// including the replacement it had just committed. A transient blip on the
-// commit's acknowledgement logged the user out. Probed before the fix: 401
-// "reuse detected", 0 of 2 tokens left live.
+// A refresh is consume-once, which makes a lost acknowledgement dangerous. The
+// first attempt revokes the presented token and commits its replacement; a
+// retry presenting the same token finds it revoked - exactly what genuine reuse
+// looks like - and, without recovery, revokes the whole family including the
+// replacement it just committed: 401 "reuse detected", the user logged out.
 //
 // The retry cannot tell its own earlier attempt from an attacker by the token
-// alone; that is the point of the design. What distinguishes them is the
-// replacement's identity, which the handler now chooses once, outside the
-// retry, and which an attacker replaying a stolen token never has.
+// alone. What distinguishes them is the replacement's identity, which the
+// handler chooses once, outside the retry, and which an attacker replaying a
+// stolen token never has.
 [Collection("Integration Tests")]
 public class RefreshTokenRetryTests(IntegrationTestWebApplicationFactory factory)
 {

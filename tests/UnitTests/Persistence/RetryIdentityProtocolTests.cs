@@ -8,37 +8,28 @@ namespace UnitTests.Persistence;
 // A change-detector for docs/adr/0025's identity rule: an identity a retry needs
 // to recognise its own committed write is generated OUTSIDE the retried
 // delegate. An identity, not a Guid - RefreshTokenHandler's replacement token is
-// a string from SecureToken.Generate, and missing that is how the seventh case
-// got past the first version of this test.
+// a string from SecureToken.Generate.
 //
 // EnableRetryOnFailure cannot tell a failed commit from one that landed and lost
 // its acknowledgement, so it re-runs the delegate either way. A delegate that
-// mints its identity inside gets a different one on the second attempt, can no
-// longer find the row the first attempt wrote, and reports that row as somebody
-// else's conflict. CancelBookingHandler, DeleteUnitHandler,
-// DeletePropertyHandler, UpdatePricingRuleHandler, InitiateTransactionHandler
-// and CreatePricingRuleHandler each broke this rule, and each was found by
-// grepping by hand - which is how the last one was missed.
+// mints its identity inside gets a different one on the second attempt, cannot
+// find the row the first attempt wrote, and reports that row as somebody else's
+// conflict.
 //
 // What counts as minting: Guid.CreateVersion7(), Guid.NewGuid() or
 // SecureToken.Generate() written in the delegate or in a same-file method it
-// calls (followed transitively - InitiateTransactionHandler minted two calls
-// deep); a call to a static factory anywhere in src that mints
-// (Transaction.Create, PricingRule.Create*); an instance call to a method whose
-// name is declared once in src and mints (authTokenProvider.GenerateRefreshToken
-// did, through an interface, from another file); or `new T` where T mints in a
-// field or property initializer or its constructor (RefreshToken's Id did).
+// calls (followed transitively); a call to a static factory anywhere in src that
+// mints; an instance call to a method whose name is declared once in src and
+// mints (through an interface, from another file); or `new T` where T mints in a
+// field or property initializer or its constructor.
 //
-// Entity factories no longer mint at all (EntityIdentityProtocolTests checks that
-// by direct match), which removes one route here but not the need to follow
-// calls: three of the real violations went through a same-file helper or a
-// service method, never an entity factory, and a scan of delegate bodies alone
-// misses all three. That was probed against the pre-fix sources before this
-// resolution was kept.
+// Entity factories do not mint (EntityIdentityProtocolTests checks that by
+// direct match), but calls must still be followed: identities also reach a
+// delegate through same-file helpers and service methods, which a scan of
+// delegate bodies alone misses.
 //
 // Crude by design - a regex over brace-matched bodies - so it carries an
-// allow-list. Every entry is a deliberate decision with a reason attached, which
-// is exactly what the violations never had.
+// allow-list. Every entry is a deliberate decision with a reason attached.
 public partial class RetryIdentityProtocolTests
 {
     // Keyed by what mints, not by where: a factory whose ids are never used for
@@ -242,7 +233,7 @@ public partial class RetryIdentityProtocolTests
         List<(string File, string Body)> delegates = RetryDelegates(sources);
 
         // Not vacuous: the scan must find retry delegates, and must recognise a
-        // factory that mints. Entity factories no longer do (EntityIdentityProtocolTests),
+        // factory that mints. Entity factories do not (EntityIdentityProtocolTests),
         // so the anchor is IssuedRefreshToken.New, which mints by design and is
         // exactly the kind of call that must stay outside a delegate.
         Assert.True(delegates.Count >= 15, $"Found only {delegates.Count} retry delegates - the scan is broken.");

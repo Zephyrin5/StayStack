@@ -17,9 +17,8 @@ using SeedWork.ValueObjects;
 using Transactions.Contracts;
 namespace UnitTests.Features.Bookings.CancelBooking;
 
-// Proves the fix for a response that couldn't distinguish "nothing to
-// refund" from "a refund is queued but the inline dispatch attempt hasn't
-// landed yet" - both used to read back as every refund field being null. See
+// The cancellation response must distinguish "nothing to refund" from "a refund
+// is queued but its dispatch has not landed yet". See
 // CancelBookingResponse.RefundPending's own doc comment and
 // ITransactionReversal.GetPaymentStateAsync.
 public class CancelBookingHandlerTests : IDisposable
@@ -142,9 +141,8 @@ public class CancelBookingHandlerTests : IDisposable
         Assert.False(response.RefundPending);
     }
 
-    // Both settled outcomes, and they must be told apart. The response used to
-    // carry RefundPending alone, false for each, so a refund that reached the
-    // card and one the provider refused read back identically.
+    // Both settled outcomes, and they must be told apart: a refund that reached
+    // the card and one the provider refused cannot both read as "not pending".
     [Theory]
     [InlineData(RefundStatus.Refunded)]
     [InlineData(RefundStatus.Failed)]
@@ -276,8 +274,7 @@ public class CancelBookingHandlerTests : IDisposable
     [Fact]
     public async Task Handle_RefundTier_IsMeasuredAtTheProperty_NotInUtc()
     {
-        // The money proof for docs/adr/0018, and it fails under the old UTC
-        // logic.
+        // The money proof for docs/adr/0018.
         //
         // At 21:30 UTC on 2026-08-20 it is already 00:30 on the 21st in
         // Asia/Kuwait. Against a 2026-08-25 check-in that is 4 days out
@@ -332,15 +329,13 @@ public class CancelBookingHandlerTests : IDisposable
     [Fact]
     public async Task Handle_FreshCancel_ReturnsTheSameResponse_WhetherTheInlineDispatchLandsOrNot()
     {
-        // The response used to be a function of whether this request's own
-        // inline dispatch happened to win: if ReverseTransactionAsync landed,
-        // the read-back below it saw a snapshot and reported
-        // RefundPending: false with the settled figure; if it failed, the same
-        // request reported RefundPending: true with a computed one. One
-        // action, two shapes, decided by a race the caller cannot see.
+        // The response must not depend on whether this request's own inline
+        // dispatch happened to win. Whether the refund landed before the
+        // read-back or not, one action gets one shape - the caller cannot see
+        // that race.
         //
-        // Both scenarios below are now driven through the handler and the
-        // whole response compared field by field.
+        // Both scenarios below are driven through the handler and the whole
+        // response compared field by field.
         CancelBookingResponse landed = await CancelFreshBookingAsync(reversalLandsInline: true);
         CancelBookingResponse didNotLand = await CancelFreshBookingAsync(reversalLandsInline: false);
 
@@ -380,9 +375,8 @@ public class CancelBookingHandlerTests : IDisposable
 
         if (reversalLandsInline)
         {
-            // ReverseTransactionAsync succeeds (Moq's default), so by the time
-            // the old code re-read, a snapshot existed - the exact state that
-            // used to flip the response to RefundPending: false.
+            // The resolver landed inline, so the read-back finds the refund
+            // already recorded.
             transactionReversalMock
                 .Setup(x => x.GetPaymentStateAsync(booking.Id, It.IsAny<CancellationToken>()))
                 // RefundPending: true, because that is what landing means - the

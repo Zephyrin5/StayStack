@@ -23,11 +23,8 @@ namespace IntegrationTests.Features.Bookings;
 
 // Confirming a checkout takes a unit off the market: the hold moves to
 // 'pending_payment' and goes on blocking its range through the exclusion
-// constraint, which has no status predicate. Nothing used to give that back.
-// An anonymous caller could hold a unit, submit the checkout form, and repeat
-// - each submission turning a 15-minute hold into a permanent one, escaping
-// the per-client cap (which counts 'held' only) and never paying. These pin
-// the deadline that makes the claim finite and the job that enforces it.
+// constraint, which has no status predicate. These pin the deadline that makes
+// that claim finite and the job that enforces it (docs/adr/0020).
 [Collection("Integration Tests")]
 public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory factory)
 {
@@ -352,14 +349,11 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
     [Fact]
     public async Task ReleasingAClaimedHold_Works_WhichIsWhatEveryCompensationDependsOn()
     {
-        // Guards the trap this change could most easily have introduced.
-        // ReleaseHoldAsync used to match WHERE status = 'booked'. Once
-        // checkout began producing 'pending_payment' instead, that predicate
-        // would have matched nothing - turning every compensating release
-        // (ConfirmBookingHandler's catch blocks, the promo-rejection branch,
-        // ReconcileOrphanedBookingIntentsJob, CancelBookingHandler, this
-        // expiry job) into a silent zero-row no-op that strands the hold.
-        // Nothing about that failure is loud, so it gets its own test.
+        // ReleaseHoldAsync must match 'pending_payment'. Matching 'booked'
+        // alone would turn every compensating release (ConfirmBookingHandler's
+        // failure paths, ReconcileOrphanedBookingIntentsJob,
+        // CancelBookingHandler, this expiry job) into a silent zero-row no-op
+        // that strands the hold. Nothing about that failure is loud.
         // Arrange
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
@@ -391,15 +385,11 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         // The race the sequential payment/expiry tests cannot reach, because
         // they let one finish before starting the other.
         //
-        // Payment used to do an unlocked read, a status check against that
-        // stale read, and an unconditional EF update - and Booking carries no
-        // concurrency token, so the generated UPDATE keyed on Id alone and
-        // could not fail. Expiry, meanwhile, locks the row and re-checks
-        // under it. One side of the transition participated in the protocol
-        // and the other did not, which is the whole defect: payment reads
-        // Pending, expiry commits Cancelled and releases the hold, payment's
-        // UPDATE unblocks and puts Confirmed back. A Confirmed booking whose
-        // inventory had just been handed to somebody else.
+        // Booking carries no concurrency token, so an EF update keyed on Id
+        // cannot fail. If payment read without the row lock, the interleaving
+        // would be: payment reads Pending, expiry commits Cancelled and releases
+        // the hold, payment's UPDATE puts Confirmed back - a Confirmed booking
+        // whose inventory was just handed to somebody else.
         //
         // Driven from the test rather than by racing the real job, so the
         // interleaving is deterministic: this transaction does exactly what

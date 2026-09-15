@@ -7,18 +7,15 @@ namespace UnitTests.Persistence;
 // id, which the creating handler mints on the first line of Handle
 // (docs/adr/0025).
 //
-// Before this, five factories minted and every caller happened to invoke them
-// outside its retry delegate - correct because of line order, and one moved line
-// away from the defect fixed seven times. RetryIdentityProtocolTests can catch
-// such a call, but only by resolving calls transitively from the delegate; this
-// makes the convention itself checkable by direct match, so a factory cannot
-// start minting again unnoticed.
+// A factory that mints is correct only while every caller invokes it outside
+// its retry delegate - one moved line from a retry that cannot recognise its
+// own row. RetryIdentityProtocolTests can catch such a call only by resolving
+// calls transitively from the delegate; this makes the convention checkable by
+// direct match.
 //
-// It does not replace that transitive resolution. Three of the real violations
-// never went through an entity factory - a same-file helper in
-// InitiateTransactionHandler, a service method in RefreshTokenHandler and
-// SignUpHandler - and a delegate-body-only scan misses all three. That was
-// probed, not supposed.
+// It does not replace that transitive resolution: identities also reach a
+// delegate through same-file helpers and service methods, which a
+// delegate-body-only scan misses.
 public partial class EntityIdentityProtocolTests
 {
     // Keyed by file name. Framework-owned initializers, where the mint is a

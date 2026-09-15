@@ -14,10 +14,10 @@ using Transactions.Outbox;
 using Transactions.Serialization;
 namespace UnitTests.Features.Transactions.Outbox;
 
-// Proves the fix for a dead-lettered ConfirmBookingPaymentOutboxMessage
-// leaving a Succeeded transaction with a permanently Pending booking behind
-// it - money taken, nothing sold, with no automatic path back. See
-// TransactionsOutboxDispatcher.OnDeadLetteredAsync and docs/adr/0003.
+// A dead-lettered ConfirmBookingPaymentOutboxMessage must not leave a Succeeded
+// transaction behind a permanently Pending booking - money taken, nothing sold,
+// no automatic path back. See TransactionsOutboxDispatcher.OnDeadLetteredAsync
+// and docs/adr/0003.
 public class TransactionsOutboxDispatcherTests : IDisposable
 {
     private readonly SqliteConnection _connection;
@@ -113,11 +113,9 @@ public class TransactionsOutboxDispatcherTests : IDisposable
         // otherwise SweepDeadLetteredAsync would keep retrying
         // ConfirmPaymentAsync on it, which could confirm the booking after
         // the transaction was already marked for refund. Reloaded rather
-        // than read off the original `message` reference - ClaimAndDispatchAsync
-        // always re-claims by id through its own query (see
-        // TryDispatchAsync's own doc comment), and now clears the change
-        // tracker before doing so, so it's no longer guaranteed to be
-        // mutating the same tracked instance the caller happens to hold.
+        // than read off the original `message` reference: ClaimAndDispatchAsync
+        // re-claims by id through its own query and clears the change tracker
+        // first, so it does not mutate the instance the caller holds.
         OutboxMessage reloadedMessage = await _dbContext.TransactionsOutboxMessages.AsNoTracking()
             .SingleAsync(m => m.Id == message.Id, TestContext.Current.CancellationToken);
         Assert.Equal(10, reloadedMessage.Attempts);

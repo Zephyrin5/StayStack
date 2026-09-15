@@ -11,12 +11,10 @@ namespace Bookings.Features.CreateBookingSession;
 ///     Turns proof of ownership into a session, once.
 ///     <para>
 ///         The management token is a bearer credential with a lifetime
-///         measured in months (see BookingAccessChecker), and until now it was
-///         presented on every view, cancel, review and payment call - four
-///         requests across three modules, one of them in a query string. Every
-///         one of those was another place it could be logged, cached,
-///         screenshotted or forwarded. The credential has not got weaker; it
-///         has stopped travelling.
+///         measured in months (see BookingAccessChecker). Exchanged here, it is
+///         not presented on the view, cancel, review and payment calls, each of
+///         which would be another place it could be logged, cached,
+///         screenshotted or forwarded (docs/adr/0023).
 ///     </para>
 /// </summary>
 public class CreateBookingSessionHandler(

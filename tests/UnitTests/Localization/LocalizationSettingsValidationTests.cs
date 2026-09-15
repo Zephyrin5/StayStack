@@ -27,9 +27,8 @@ public class LocalizationSettingsValidationTests
     {
         // The bilingual requirement is a product guarantee, so "no languages
         // configured" is a misconfiguration to refuse at boot, not a state to
-        // paper over - it used to fall through to a hardcoded ["en", "ar"] in
-        // ApiServicesRegistration, which meant appsettings could be cleared
-        // without anything noticing.
+        // paper over with hardcoded cultures that would hide appsettings being
+        // cleared.
         LocalizationSettings settings = new LocalizationSettings
         {
             DefaultCulture = "en",

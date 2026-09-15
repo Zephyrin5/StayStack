@@ -204,13 +204,10 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
     {
         // Property.SetTimeZoneId has its own Guard.Against.InvalidInput
         // backstop, but the 400 a caller sees has to come from the request
-        // validator, not from that guard. Guard failures are
-        // ArgumentExceptions, and GlobalExceptionHandler no longer maps those
-        // to 400 - deliberately, since it could not tell one apart from an
-        // ArgumentException thrown inside a library. So if the validator ever
-        // stopped covering this field, the domain guard would surface as a
-        // 500 rather than quietly standing in for it. This test is what makes
-        // that regression visible.
+        // validator. Guard failures are ArgumentExceptions, which
+        // GlobalExceptionHandler deliberately does not map to 400, so if the
+        // validator stopped covering this field the guard would surface as a
+        // 500. This test makes that visible.
         string hostAccessToken = await SeedHostUserAsync();
 
         HttpResponseMessage response = await _client.SendAsync(

@@ -142,15 +142,10 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
     [Fact]
     public async Task DayOfWeekMultiplier_OverlappingDaysForTheSameUnit_IsRejectedByTheDatabase()
     {
-        // This test used to assert the opposite, and said so on purpose: array
-        // overlap has no built-in GiST opclass, so the third invariant rested on
-        // PricingRuleOverlapChecker under Serializable alone. The audit showed
-        // what that meant - lowered to ReadCommitted, six concurrent overlapping
-        // Saturday multipliers all committed.
-        //
-        // Closed without intarray: the domain is seven weekdays, so one partial
-        // unique index per day holds "each day in at most one active rule", and
-        // the violation names the day that collided - Saturday here.
+        // Array overlap has no built-in GiST opclass, and intarray is not used.
+        // The domain is seven weekdays, so one partial unique index per day holds
+        // "each day in at most one active rule", and the violation names the day
+        // that collided - Saturday here.
         Guid unitId = await SeedUnitAsync();
 
         await AddRuleAsync(PricingRule.CreateDayOfWeekMultiplier(Guid.CreateVersion7(), unitId, [5, 6], 1.5m));

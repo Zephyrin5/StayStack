@@ -4,8 +4,7 @@ namespace UnitTests.Time;
 
 // The heart of docs/adr/0018: a business date is only meaningful relative to
 // a place. Every case below is pinned to an instant where UTC and the
-// property's own zone disagree about what day it is - the situation the old
-// UTC-everywhere logic silently got wrong.
+// property's own zone disagree about what day it is.
 public class PropertyTimeZoneTests
 {
     // 21:30 UTC on the 20th is 00:30 on the 21st in Kuwait (UTC+3).
@@ -20,16 +19,16 @@ public class PropertyTimeZoneTests
 
         Assert.Equal(new DateOnly(2026, 8, 21), PropertyTimeZone.Today(timeProvider, "Asia/Kuwait"));
 
-        // What the old code would have produced - kept explicit so the
-        // difference this whole change turns on is visible in one place.
+        // The UTC-derived date, kept explicit so the difference is visible in
+        // one place.
         Assert.Equal(new DateOnly(2026, 8, 20), DateOnly.FromDateTime(LateEveningUtc.UtcDateTime));
     }
 
     [Fact]
     public void Today_WestOfUtc_IsStillThePreviousDay()
     {
-        // 02:30 UTC on the 21st is 22:30 on the 20th in Toronto - the Toronto
-        // guest whose same-day booking used to be rejected.
+        // 02:30 UTC on the 21st is 22:30 on the 20th in Toronto - a UTC "today"
+        // would reject that guest's same-day booking.
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 21, 2, 30, 0, TimeSpan.Zero));
 

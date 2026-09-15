@@ -100,8 +100,7 @@ public class SignInIntegrationTests(IntegrationTestWebApplicationFactory factory
     public async Task SignIn_ShouldLockAccount_AfterFiveFailedAttempts()
     {
         // IdentityServicesRegistration configures MaxFailedAccessAttempts =
-        // 5 - lockoutOnFailure: true in SignInHandler is what actually arms
-        // it (previously false, so failed attempts never counted at all).
+        // 5; lockoutOnFailure: true in SignInHandler is what arms it.
         string email = _faker.Internet.Email();
         string correctPassword = $"P@1{_faker.Internet.Password()}!";
         string wrongPassword = $"P@2{_faker.Internet.Password()}!";

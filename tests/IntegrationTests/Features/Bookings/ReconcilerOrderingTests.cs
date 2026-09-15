@@ -143,7 +143,7 @@ public class ReconcilerOrderingTests(IntegrationTestWebApplicationFactory factor
         // ReversedAt, not row existence: ReverseRedemptionAsync is an UPDATE
         // setting reversed_at, never a DELETE, so a test asserting the row is
         // still there passes just as happily against a fully reversed
-        // redemption. It did, until this was checked.
+        // redemption.
         PromotionRedemption redemptionRow = await promotionsDb.PromotionRedemptions.AsNoTracking()
             .SingleAsync(r => r.BookingId == bookingId, TestContext.Current.CancellationToken);
 
@@ -178,11 +178,9 @@ public class ReconcilerOrderingTests(IntegrationTestWebApplicationFactory factor
     [Fact]
     public async Task AConfirmationReconciledWhileItsRedemptionWasStillCommitting_DoesNotBurnTheCode()
     {
-        // The mirror image of the test above, and the one the outbox rewrite
-        // did not fix. There the reconciler reversed too early and the request
-        // succeeded; here the reconciler reverses too early against a
-        // redemption that does not exist yet, so the reversal no-ops and is
-        // marked processed - and then the request's RedeemAsync commits.
+        // The mirror image of the test above: the reconciler reverses too early,
+        // against a redemption that does not exist yet, so the reversal no-ops
+        // and is marked processed - and then the request's RedeemAsync commits.
         //
         //   reconciler:   releases the hold, deletes the intent, commits
         //                 dispatches its reversal -> nothing to reverse -> no-op
@@ -190,12 +188,11 @@ public class ReconcilerOrderingTests(IntegrationTestWebApplicationFactory factor
         //                 the tracked intent delete affects 0 rows
         //                   -> DbUpdateConcurrencyException
         //
-        // That branch used to compensate nothing, on the reasoning that the
-        // reconciler had already done it. End state: no booking, and a code
-        // burned for good.
+        // That branch must compensate the redemption itself. Relying on the
+        // reconciler ends with no booking and a code burned for good.
         //
-        // Running the reconciler twice proves nothing about this. Its second
-        // run is a no-op, and the no-op is the defect.
+        // Running the reconciler twice proves nothing about this: its second
+        // run is a no-op, and the no-op is the problem.
         Unit unit = CreateTestUnit();
         Guid holdId = Guid.CreateVersion7();
         DateOnly checkIn = CatalogSeeding.Today().AddDays(52);

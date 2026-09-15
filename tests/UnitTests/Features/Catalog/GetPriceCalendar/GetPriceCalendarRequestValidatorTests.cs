@@ -8,7 +8,7 @@ namespace UnitTests.Features.Catalog.GetPriceCalendar;
 public class GetPriceCalendarRequestValidatorTests
 {
 
-    // Fixed instant: From is now bounded relative to "today" at both ends, so
+    // Fixed instant: From is bounded relative to "today" at both ends, so
     // these cases need a known one rather than the wall clock.
     private static readonly DateTimeOffset FixedInstant = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
     private static readonly DateOnly Today = DateOnly.FromDateTime(FixedInstant.UtcDateTime);

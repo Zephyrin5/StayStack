@@ -23,9 +23,9 @@ namespace IntegrationTests.Features.Bookings;
 
 // A cancellation response reporting a refund that has not been recorded yet
 // must report the refund that will be. The resolver decides that amount from
-// the obligation; the response used to recompute guest policy instead, and the
-// two disagreed exactly where the amount is not guest policy - so a guest was
-// shown 50% pending against a durable 100%.
+// the obligation (RefundDecision); a response recomputing guest policy would
+// disagree exactly where the amount is not guest policy, showing 50% pending
+// against a durable 100%.
 //
 // Check-in is three days out in both tests, inside the default policy's 50%
 // tier, so a response computing guest policy is visibly wrong rather than

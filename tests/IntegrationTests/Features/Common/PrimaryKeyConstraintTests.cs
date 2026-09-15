@@ -19,17 +19,16 @@ namespace IntegrationTests.Features.Common;
 // that match correct, and neither is visible from the handler:
 //
 // 1. The primary key constraint carries the model's name. A migration that
-//    renamed it would make the match silently stop, and the handler would go
-//    back to answering an error for a row that exists.
+//    renamed it would make the match silently stop, and the handler would
+//    answer an error for a row that exists.
 //
 // 2. The primary key is the table's oldest unique index. A retried insert of our
 //    own row violates the primary key AND every other unique index at once, and
-//    Postgres reports only the first one it checks - in index OID order. Probed:
-//    with a unique index created before the primary key, the same duplicate row
-//    is reported under that index's name, not the key's. Here that would turn
-//    "our review is already there" into "already reviewed", the confident wrong
-//    answer the recovery exists to remove. A migration that ever recreates one
-//    of these primary keys would flip it.
+//    Postgres reports only the first one it checks - in index OID order. With a
+//    unique index created before the primary key, the same duplicate row is
+//    reported under that index's name, turning "our review is already there"
+//    into "already reviewed". A migration that ever recreates one of these
+//    primary keys would flip it.
 [Collection("Integration Tests")]
 public class PrimaryKeyConstraintTests(IntegrationTestWebApplicationFactory factory)
 {

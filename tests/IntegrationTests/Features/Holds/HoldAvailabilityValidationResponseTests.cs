@@ -7,12 +7,10 @@ using System.Net;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Holds;
 
-// The response *body* of a rejected hold, not just its status code.
-// GlobalExceptionHandler used to map every ArgumentException to a 400
-// carrying argEx.Message verbatim, which meant Guard.Against.OutOfRange's
-// BCL-formatted message - parameter name and actual value appended - was
-// what reached the client, in production. These assert the curated
-// ValidationProblemDetails shape that replaced it.
+// The response *body* of a rejected hold, not just its status code: the
+// curated ValidationProblemDetails shape, never an exception message. A guard's
+// BCL-formatted message - parameter name and actual value appended - must not
+// reach the client.
 [Collection("Integration Tests")]
 public class HoldAvailabilityValidationResponseTests(IntegrationTestWebApplicationFactory factory)
 {
@@ -64,11 +62,9 @@ public class HoldAvailabilityValidationResponseTests(IntegrationTestWebApplicati
         // The business fact the caller needs, kept verbatim.
         Assert.Contains("maximum occupancy of 2", body);
 
-        // The BCL decoration that used to ride along with it. "(Parameter
-        // 'guestCount')" names an internal argument, and ArgumentOutOfRange
-        // appends the rejected value too - neither belongs in a public
-        // response, and both arrived there purely because the message came
-        // off an exception type the handler had no business trusting.
+        // No BCL decoration. "(Parameter 'guestCount')" names an internal
+        // argument, and ArgumentOutOfRange appends the rejected value too -
+        // neither belongs in a public response.
         Assert.DoesNotContain("Parameter", body);
         Assert.DoesNotContain("Actual value", body);
     }

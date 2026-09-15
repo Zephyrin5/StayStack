@@ -14,16 +14,15 @@ namespace UnitTests.Persistence;
 // ApplySoftDeleteQueryFilter excludes archived rows from every EF query. A
 // query filter is an EF construct, so Dapper never sees it - which is why
 // GetPriceCalendarHandler's Tier 3 statement (docs/adr/0014) restates the
-// predicate by hand as `u.status <> @ArchivedStatus`. It once returned an
-// archived unit's priced calendar for exactly that reason.
+// predicate by hand as `u.status <> @ArchivedStatus`.
 //
-// The two agree today only because both are a single status comparison.
+// The two agree only because both are a single status comparison.
 // Add a second condition to the filter - "and not expired", "and belongs to
 // an active host" - and the hand-written copy silently stops matching it,
 // with nothing in the change to say so and no test that fails, because every
 // EF-based test would still pass. This asserts the shape the SQL twin
 // assumes, so that edit breaks here and the author is told where the other
-// copy lives rather than finding out from a bug.
+// copy lives.
 //
 // In-memory model only, no database: building the model is what applies the
 // filter, same as ModelHasNoPendingChangesTests.

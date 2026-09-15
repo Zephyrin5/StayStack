@@ -43,16 +43,14 @@ public class ConfirmBookingHandlerTests : IDisposable
 
         // Then drop exactly one table, so the guest-checkout management-token
         // insert fails and rolls the whole save back with it - a
-        // deterministic "the hold was already flipped, the Bookings-side
+        // deterministic "the hold was already claimed, the Bookings-side
         // write then failed" without breaking anything else.
         //
-        // This used to work by creating no schema at all beyond the outbox
-        // table. That stopped being viable once ConfirmBookingHandler began
-        // asking the database whether the Booking actually committed before
-        // compensating (docs/adr/0017): with no bookings table, that read
-        // throws instead of answering, and no compensation happens. Dropping
-        // one table keeps the failure realistic - in production the schema
-        // exists and the read succeeds - while still failing the save.
+        // Not an empty schema: ConfirmBookingHandler asks the database whether
+        // the Booking committed before compensating (docs/adr/0017), and with no
+        // bookings table that read throws instead of answering. Dropping one
+        // table keeps the failure realistic - in production the schema exists
+        // and the read succeeds - while still failing the save.
         _dbContext.Database.ExecuteSqlRaw("DROP TABLE booking_management_tokens");
     }
 
@@ -220,23 +218,20 @@ public class ConfirmBookingHandlerPromoPricingTests : IDisposable
     [Fact]
     public async Task Handle_WhenRedeemedDiscountIsSmallerThanTheLengthOfStayDiscountItReplaces_RejectsTheCodeAndReleasesTheHold()
     {
-        // Reproduces the reported bug: a hold quoted at 180 KWD (200
-        // subtotal, 20 KWD LOS discount already applied), with a 5 KWD
-        // promo redeemed on top. The promo applies against the pre-LOS
-        // subtotal - naive arithmetic gives 200 - 5 = 195, MORE than the
-        // 180 KWD the guest already saw. Rather than silently falling back
-        // to 180 (burning the code for zero benefit), the code is rejected
-        // outright: a promoCode validation error, the redemption already
-        // created is reversed, AND the hold is released.
+        // A hold quoted at 180 KWD (200 subtotal, 20 KWD LOS discount already
+        // applied), with a 5 KWD promo redeemed on top. The promo applies
+        // against the pre-LOS subtotal - naive arithmetic gives 200 - 5 = 195,
+        // MORE than the 180 KWD the guest already saw. Rather than silently
+        // falling back to 180 (burning the code for zero benefit), the code is
+        // rejected outright: a promoCode validation error, the redemption
+        // already created is reversed, AND the hold is released.
         //
-        // This test used to assert the opposite - ReleaseHoldAsync Times.Never
-        // - on the reasoning that the code was valid so the guest shouldn't
-        // lose their hold. It pinned a bug. ConfirmHoldAsync only matches
-        // WHERE status = 'held', so the 'booked' hold this leaves behind can
-        // never be confirmed by a retry, and nothing else collects it either:
-        // the expiry sweep only sees 'held' rows, and the intent that would
-        // have led a reconcile job to it is discarded on this very path. The
-        // dates were blocked permanently.
+        // The hold must be released even though the code was valid.
+        // ConfirmHoldAsync only matches status = 'held', so the claimed hold
+        // left behind could never be confirmed by a retry, and nothing else
+        // would collect it: the expiry sweep only sees 'held' rows, and the
+        // intent that would lead a reconcile job to it is discarded on this
+        // very path.
         Guid holdId = Guid.NewGuid();
         ConfirmedHold hold = new ConfirmedHold
         {

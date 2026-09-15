@@ -160,12 +160,10 @@ public class OutboxRelayJobTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task SweepDeadLetteredAsync_RetriesAndClearsAMessage_PastItsCooldown()
     {
-        // The scenario docs/adr/0003's dead-letter-sweep section exists for:
-        // a message that exhausted its fast retry loop and got dead-lettered
-        // (e.g. Availability was down for an hour), but the underlying
-        // action is fine to retry now that whatever was wrong has cleared -
-        // replayed from its own original Payload, no reconciliation job
-        // needed.
+        // The case docs/adr/0003's dead-letter sweep exists for: a message
+        // that exhausted its retries and was dead-lettered while something it
+        // depends on was failing, and succeeds once that clears - replayed from
+        // its own stored Payload, with no reconciliation job.
         UnitAvailabilityHold hold = CreateBookedHold();
         await SeedHoldAsync(hold);
         Guid messageId = await SeedDeadLetteredReleaseHoldMessageAsync(hold.Id, DateTimeOffset.UtcNow.AddHours(-2));

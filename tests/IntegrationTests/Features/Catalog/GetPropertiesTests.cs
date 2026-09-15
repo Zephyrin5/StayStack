@@ -219,8 +219,8 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(page1);
         Assert.NotNull(page2);
 
-        // HasNextPage rather than a TotalCount of 3: this endpoint no longer
-        // pays for a count nothing displays. See PagedSliceTests for why.
+        // HasNextPage rather than a TotalCount of 3: this endpoint does not pay
+        // for a count nothing displays (docs/adr/0019).
         Assert.Equal(2, page1.Items.Count);
         Assert.True(page1.HasNextPage);
         Assert.Equal(1, page1.Page);
@@ -271,25 +271,22 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task GetProperties_ShouldReturnPropertiesFromEveryHost_HostIdQueryParamIsNoLongerSupported()
     {
-        // GetPropertiesRequest no longer has a HostId field - it used to,
-        // but that made "list properties for host X" reachable by any
-        // anonymous caller who guessed a host id. An unrecognized
-        // ?HostId= query param is ignored by binding, not an error - this
-        // asserts the filter genuinely doesn't apply, not just that the
-        // request 400s. See GetMyProperties_ShouldReturnOnlyTheCallersOwnProperties
+        // GetPropertiesRequest has no HostId field: "list properties for host X"
+        // must not be reachable by an anonymous caller who guessed a host id.
+        // An unrecognized ?HostId= query param is ignored by binding, not an
+        // error - this asserts the filter genuinely doesn't apply, not just that
+        // the request 400s. See GetMyProperties_ShouldReturnOnlyTheCallersOwnProperties
         // for the auth-derived equivalent.
         // Arrange
         (string firstHostToken, Guid firstHostId) = await SeedHostUserAsync();
         (string secondHostToken, _) = await SeedHostUserAsync();
 
-        // A city unique to this run, so the assertions below see exactly
-        // these two properties. Maxing out PageSize used to be enough, but
-        // the shared Testcontainers DB accumulates properties from every
-        // test in this collection - and since docs/adr/0018 every seeded
-        // unit brings a property with it - so even a full page stopped
-        // reliably containing two specific freshly-created rows. Scoping by
-        // city doesn't weaken what this asserts: both hosts' properties
-        // still have to come back, which is the whole point.
+        // A city unique to this run, so the assertions below see exactly these
+        // two properties. The shared Testcontainers DB accumulates properties
+        // from every test in this collection, so even a full page is not
+        // guaranteed to contain two specific rows. Scoping by city doesn't
+        // weaken what this asserts: both hosts' properties still have to come
+        // back.
         string city = $"Testville-{Guid.NewGuid():N}";
         Guid firstHostPropertyId = await CreatePropertyAsync(firstHostToken, city);
         Guid secondHostPropertyId = await CreatePropertyAsync(secondHostToken, city);

@@ -81,11 +81,10 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
     [Fact]
     public async Task AHoldWhoseCommitLosesItsAcknowledgement_ReturnsTheHoldItAlreadyCreated()
     {
-        // The retry used to mint a second id, so the insert overlapped attempt
-        // one's committed range and the exclusion constraint refused it. The
-        // caller got 409 for a hold that exists - and that hold carries the
-        // same client_key, so it also consumed one of this guest's concurrent
-        // slots for its full lifetime, unreachable and uncancellable.
+        // A retry minting a second id would overlap attempt one's committed
+        // range, and the exclusion constraint would refuse it: 409 for a hold
+        // that exists, carrying the same client_key and so consuming one of
+        // this guest's concurrent slots for its full lifetime.
         Unit unit = await SeedUnitAsync();
         DateOnly checkIn = CatalogSeeding.Today().AddDays(140);
 
@@ -153,10 +152,10 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     // App:Holds, not Bookings:HoldCap - HoldCapOptions binds
-                    // AppSection("Holds"), and AppSection prefixes "App". The
-                    // first version of this key overrode nothing, leaving the
-                    // testing default of 100000 in place and the test green
-                    // without ever reaching the cap.
+                    // AppSection("Holds"), and AppSection prefixes "App". A
+                    // wrong key overrides nothing, leaving the testing default
+                    // of 100000 in place and the test green without reaching
+                    // the cap.
                     ["App:Holds:MaxActiveHoldsPerClient"] = "1"
                 }));
         }).WithCommitFault(lostAck);

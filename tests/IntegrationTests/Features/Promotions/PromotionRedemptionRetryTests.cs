@@ -12,14 +12,11 @@ using SeedWork.Enums;
 using SeedWork.ValueObjects;
 namespace IntegrationTests.Features.Promotions;
 
-// The sixth instance of docs/adr/0025's identity rule, and the first one found by
-// RetryIdentityProtocolTests rather than by hand.
-//
-// RedeemAsync minted the redemption id inside its retried delegate. After a
-// commit lost its acknowledgement, the retry held a new id, re-ran the cap
-// increment, and its insert met the first attempt's committed row on the
-// one-redemption-per-email index - so the guest's own redemption came back as
-// "already used by this email address", and the checkout it belonged to failed.
+// docs/adr/0025's identity rule for RedeemAsync. With the redemption id minted
+// inside the retried delegate, a retry after a lost acknowledgement holds a new
+// id, re-runs the cap increment, and meets the first attempt's committed row on
+// the one-redemption-per-email index - so the guest's own redemption comes back
+// as "already used by this email address", and the checkout fails.
 [Collection("Integration Tests")]
 public class PromotionRedemptionRetryTests(IntegrationTestWebApplicationFactory factory)
 {

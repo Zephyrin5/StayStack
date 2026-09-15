@@ -378,24 +378,16 @@ if (corsOrigins.Length > 0 && cookieSecurity.SameSite == SameSiteMode.Lax)
     }
 }
 
-// A throw now, not a warning, and the escalation is about blast radius rather
-// than about anyone being more careful. When the only things keyed on the
-// caller's address were the auth/hold limiters and the concurrent-hold cap, a
-// collapsed partition weakened controls: abuse got easier and a few real
-// callers hit spurious 429s. Four anonymous read endpoints - GetProperties,
-// GetPropertyById, GetPriceCalendar, GetPropertyReviews - are now keyed on it
-// too, and those are the site. Collapsed, every visitor on earth shares one
-// 300-per-minute budget, so the deployment serves 429s to everyone and reads
-// as an outage with nothing wrong in any log.
-//
-// It is also the check that never fired, so nobody has been relying on the
-// warning to tell them: every proxied deployment until now was silently
-// running on one partition.
+// A throw, because of blast radius. Four anonymous read endpoints -
+// GetProperties, GetPropertyById, GetPriceCalendar, GetPropertyReviews - are
+// rate-limited per caller address alongside the auth/hold limiters and the
+// concurrent-hold cap. Collapsed into one partition, every visitor shares one
+// 300-per-minute budget, so the deployment serves 429s to everyone and reads as
+// an outage with nothing wrong in any log.
 //
 // ExposedDirectly is the escape hatch, and it is the reason this can be a
 // throw at all. An app terminating its own TLS has no proxy to list, which is
-// a legitimate deployment that must still be able to start. Turning "silently
-// wrong" into "cannot deploy" would just move the pain; what the pair of
+// a legitimate deployment that must still be able to start. What the pair of
 // settings buys is that somebody chose - either these are the proxies, or
 // there are none.
 bool exposedDirectly = app.Configuration.AppSection("ForwardedHeaders:ExposedDirectly").Get<bool>();

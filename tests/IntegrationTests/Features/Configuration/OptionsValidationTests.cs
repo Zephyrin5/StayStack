@@ -67,9 +67,8 @@ public class OptionsValidationTests(IntegrationTestWebApplicationFactory factory
     public void AZeroRateLimit_RefusesToStart()
     {
         // "PermitLimit" rather than "AuthPermitLimit": each policy binds its
-        // own nested section now, so the property no longer carries its
-        // policy's name. The DataAnnotations failure names the member, not the
-        // options type, so this asserts the field and the key path together
+        // own nested section. The DataAnnotations failure names the member, not
+        // the options type, so this asserts the field and the key path together
         // identify which limit was rejected.
         AssertRefusesToStart(
             "PermitLimit",
@@ -87,11 +86,11 @@ public class OptionsValidationTests(IntegrationTestWebApplicationFactory factory
     [Fact]
     public void ASigningKeyTooShortForHmacSha256_RefusesToStart()
     {
-        // Non-empty, so Required is satisfied and this used to boot - then
-        // fail the first sign-in, because SymmetricSecurityKey's constructor
-        // only rejects a zero-length key and the 128-bit floor is enforced
-        // later, when SymmetricSignatureProvider signs a token. An auth
-        // outage on first use, from a value that looked configured.
+        // Non-empty, so Required is satisfied, yet unusable:
+        // SymmetricSecurityKey's constructor rejects only a zero-length key, and
+        // the 128-bit floor is enforced when SymmetricSignatureProvider signs a
+        // token. Without startup validation this is an auth outage on first
+        // sign-in, from a value that looked configured.
         AssertRefusesToStart(
             "Key",
             ("App:Auth:Token:Key", "too-short-for-hmac"));
@@ -118,11 +117,9 @@ public class OptionsValidationTests(IntegrationTestWebApplicationFactory factory
     [Fact]
     public void AnEmptySupportedCulturesList_RefusesToStart()
     {
-        // The bilingual requirement is a product guarantee. This used to bind
-        // cleanly and fall through to a hardcoded ["en", "ar"] in
-        // ApiServicesRegistration, so a cleared section still served two
-        // languages and nothing anywhere said the config had stopped being
-        // read.
+        // The bilingual requirement is a product guarantee, so a cleared section
+        // refuses to start rather than falling back to hardcoded cultures that
+        // would hide that the config is not being read.
         AssertRefusesToStart(
             nameof(LocalizationSettings.SupportedCultures),
             o => o.SupportedCultures = []);

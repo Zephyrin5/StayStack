@@ -119,9 +119,8 @@ public class RefreshTokenTests(IntegrationTestWebApplicationFactory factory)
     {
         // refresh_tokens has no FK to users, so deleting an account leaves
         // its tokens behind and they still validate - the handler then finds
-        // no user. That used to throw UnauthorizedAccessException, which is a
-        // plain BCL type GlobalExceptionHandler has no arm for, so a
-        // genuinely unauthorized caller got a 500.
+        // no user, and must answer 401 rather than let an unmapped exception
+        // become a 500.
         //
         // Asserts the body too, not just the status: this response has to
         // stay indistinguishable from the unknown/expired/revoked paths, or

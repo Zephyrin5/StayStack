@@ -37,17 +37,15 @@ using Transactions.Features.MarkTransactionSucceeded;
 namespace IntegrationTests.Features.Bookings;
 
 // A specification, not a regression suite: these describe what the booking
-// lifecycle must guarantee. All four pass today. They were written when three of
-// them failed, and the header said so for some time after it stopped being true.
+// lifecycle must guarantee.
 //
 // Every one of them is the same shape - a write commits, and then the caller
 // never learns that it did. That is not an exotic failure. It is what a
 // dropped connection, a killed process or a timeout on the acknowledgement
 // looks like from the outside, and it is the case that distinguishes a
 // system that recovers from one that strands inventory or money. The
-// compensating machinery here was built for exactly this and is tested for
-// the paths where the *call* fails; what is untested is the path where the
-// call succeeds and the answer is lost.
+// compensating machinery is tested elsewhere for the paths where the *call*
+// fails; these cover the path where the call succeeds and the answer is lost.
 //
 // Do not weaken an assertion here to match current behaviour. If one of
 // these has to change, the reason should be that the guarantee itself was
@@ -134,12 +132,10 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
 
     // ---- 1: the hold transition is written, then its transaction fails -----
 
-    // Delegates to the real implementation and then throws. This used to say the
-    // UPDATE ... RETURNING had committed by then, making it a lost
-    // acknowledgement. It stopped being true when HoldConfirmation began joining
-    // the caller's transaction: the transition is written but not committed, so
-    // the throw rolls it back. What this exercises is a failure after the write
-    // and before the commit. The genuine lost acknowledgement of the confirmation
+    // Delegates to the real implementation and then throws. HoldConfirmation
+    // joins the caller's transaction, so the transition is written but not
+    // committed and the throw rolls it back: this exercises a failure after the
+    // write and before the commit. The lost acknowledgement of the confirmation
     // commit is ConfirmRetryTests', on CommitFaults.FailAfterCommit.
     private sealed class ConfirmHoldThenFailTheTransaction(IHoldConfirmation inner) : IHoldConfirmation
     {
@@ -162,13 +158,9 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
     [Fact]
     public async Task AHoldTransitionWhoseTransactionFailsBeforeCommitting_LeavesNoHoldMovedWithoutAMarker()
     {
-        // The marker and the transition must agree. ConfirmBookingHandler
-        // used to open a PendingBookingIntent and confirm the hold in two
-        // independent commits, with a catch that discarded the intent on
-        // failure - so a lost acknowledgement (rather than a failed write)
-        // removed the only marker pointing at a hold that was now
-        // pending_payment with no booking behind it. Nothing released it and
-        // nothing knew it existed.
+        // The marker and the transition must agree. A hold left
+        // pending_payment with no intent and no booking is invisible to every
+        // recovery path: nothing releases it and nothing knows it exists.
         //
         // Note what this test does NOT pin down: which of the two outcomes
         // occurs. Rolling the transition back and recording a recoverable
@@ -256,16 +248,11 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
     [Fact]
     public async Task AnExpiryThatFailsAfterReleasingTheHold_DoesNotLeaveTheBookingHoldingNothing()
     {
-        // ExpireUnpaidBookingsJob used to release the hold on a different
-        // DbContext, so that write committed immediately and only then did the
-        // job cancel the booking inside its own transaction. A failure in
-        // between rolled back the cancellation but could not roll back the
-        // release: the booking stayed Pending while its inventory had already
-        // gone back on sale, and the next sweep would try to release a hold
-        // somebody else might own by then.
-        //
-        // Both halves are one DbContext and one transaction now, so the
-        // failure injected below has to take the release with it.
+        // The release and the cancellation share one DbContext and one
+        // transaction, so the failure injected below must take the release with
+        // it. Were the release to commit on its own, the booking would stay
+        // Pending while its inventory went back on sale, and the next sweep
+        // would release a hold somebody else might own.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
 

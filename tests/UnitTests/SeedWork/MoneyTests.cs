@@ -2,8 +2,7 @@ using SeedWork.Enums;
 using SeedWork.ValueObjects;
 namespace UnitTests.SeedWork;
 
-// Money is the newest primitive in the codebase (docs/adr/0015) and is now
-// load-bearing for every amount in the system, with genuinely surprising
+// Money (docs/adr/0015) is load-bearing for every amount in the system, with genuinely surprising
 // semantics of its own: non-associative arithmetic, operators that throw on
 // currency mismatch, a factory that rejects Currency.None, and a per-
 // currency rounding scale. Each deserves direct coverage here rather than

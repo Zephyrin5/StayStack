@@ -52,7 +52,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
 
-        // Owners first - a Unit without its Property no longer resolves.
+        // Owners first - a Unit without its Property does not resolve.
         context.AddRange(_pendingProperties);
         _pendingProperties.Clear();
         context.AddRange(entities);
@@ -129,10 +129,9 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
             .AsNoTracking()
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
         // 'pending_payment', not 'booked'. Submitting a checkout form does
-        // not pay for anything, and writing 'booked' here made every
-        // submission permanent inventory: nothing reclaimed such a row and it
-        // held its range through the exclusion constraint forever. 'booked'
-        // is now written only once a payment succeeds.
+        // not pay for anything, and 'booked' is inventory nothing reclaims:
+        // it would hold its range through the exclusion constraint forever.
+        // 'booked' is written only once a payment succeeds.
         Assert.Equal("pending_payment", persistedHold.Status);
 
         // The other half of that: the claim is finite. The unit comes back if

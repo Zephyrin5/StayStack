@@ -33,8 +33,8 @@ public class SecureTokenTests
     {
         // The property that actually matters, stated directly: the token is
         // its own escaped form, so no hop in the chain from receipt link to
-        // request can alter it. The old encoding failed this - '+' escapes to
-        // "%2B", and decodes back as a space wherever some hop forgets.
+        // request can alter it. Base64's '+' escapes to "%2B" and decodes back
+        // as a space wherever some hop forgets.
         string token = SecureToken.Generate();
 
         Assert.Equal(token, WebUtility.UrlEncode(token));

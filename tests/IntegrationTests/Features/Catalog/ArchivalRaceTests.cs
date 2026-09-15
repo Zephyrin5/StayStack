@@ -49,16 +49,15 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
             100m);
     }
 
-    // Parks the archiving transaction at the one point that reproduces the
-    // defect: this unit has passed *every* check and the archive has not
-    // committed.
+    // Parks the archiving transaction at the one point the race needs: this
+    // unit has passed *every* check and the archive has not committed.
     //
     // It decorates the hold lookup rather than IUnitArchivalGuard, and that is
     // load-bearing rather than arbitrary. The pause has to leave the archive
     // with *both* checks behind it; parking it between them means the check
     // that has not run yet sees whatever the test just did and refuses
-    // correctly, with or without a lock - so the test passes against the broken
-    // code. The first draft did exactly that.
+    // correctly, with or without a lock - so the test would pass against
+    // unlocked code.
     //
     // UnitArchival checks holds first and bookings second, so the hold lookup
     // is the earlier of the two and this decorator alone would park the archive
@@ -222,14 +221,13 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task AHoldTakenWhileAPropertyArchiveIsDeciding_IsNotLost()
     {
-        // The unit path was fixed and the property path was not, which is the
-        // more dangerous of the two: it guards several units in a loop, so the
-        // gap between the first unit's check and the last unit's archive is as
-        // wide as the loop is long.
+        // The property path is the more dangerous of the two: it guards several
+        // units in a loop, so the gap between the first unit's check and the
+        // last unit's archive is as wide as the loop is long.
         //
-        // And it had no explicit transaction at all - which with an advisory
-        // lock is not a weaker guard but a useless one, since each lock would
-        // be released before the next unit was even checked.
+        // It also needs its explicit transaction: without one an advisory lock
+        // is useless, since each lock is released before the next unit is even
+        // checked.
         Property property = CatalogSeeding.CreateProperty();
 
         List<Unit> units = Enumerable.Range(0, 3)

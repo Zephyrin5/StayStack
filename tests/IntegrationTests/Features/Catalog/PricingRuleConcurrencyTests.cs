@@ -28,9 +28,7 @@ namespace IntegrationTests.Features.Catalog;
 // approach as HoldAvailabilityConcurrencyTests.
 //
 // What decides each race is the schema - one constraint per rule type (see
-// docs/adr/0012) - not the isolation level. The handlers used to run at
-// Serializable; that turned out to be the only defence for day-of-week rules,
-// which had no constraint, and no test here raced that type until one was added.
+// docs/adr/0012) - not the isolation level.
 [Collection("Integration Tests")]
 public class PricingRuleConcurrencyTests(IntegrationTestWebApplicationFactory factory)
 {
@@ -157,11 +155,9 @@ public class PricingRuleConcurrencyTests(IntegrationTestWebApplicationFactory fa
     [Fact]
     public async Task CreatePricingRule_ConcurrentOverlappingDayOfWeekMultipliers_ExactlyOneSucceeds()
     {
-        // The third rule type, and until this test the only one with nothing in
-        // the database behind it. The other two creates in this file passed with
-        // both handlers lowered to ReadCommitted, because their constraints decide
-        // the race; day-of-week had only the in-memory check, a read-then-insert
-        // that two concurrent writers can both pass. PricingCalculator takes the
+        // The third rule type. Without its per-day unique indexes, day-of-week
+        // has only the in-memory check, a read-then-insert that two concurrent
+        // writers can both pass at ReadCommitted. PricingCalculator takes the
         // first matching multiplier per night, so two would make a Saturday's
         // price depend on row order.
         //

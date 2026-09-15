@@ -260,12 +260,10 @@ public class GetHostBookingsTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task GetHostBookings_ShouldStillReturnABooking_AfterItsUnitHasBeenArchived()
     {
-        // Archiving a unit is a decision about future bookings. It used to
-        // reach backwards: GetUnitIdsForHostAsync ran through the soft-delete
-        // filter, so the host's own completed bookings vanished from their
-        // list the moment they archived the unit - along with the guest
-        // details and the money attached to them.
-        // Arrange
+        // Archiving a unit is a decision about future bookings. It must not
+        // reach backwards: through the soft-delete filter, the host's completed
+        // bookings on that unit would vanish from their list, along with the
+        // guest details and the money attached to them.
         string hostToken = await SeedHostUserAsync();
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);

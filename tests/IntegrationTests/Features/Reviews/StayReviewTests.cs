@@ -43,10 +43,9 @@ namespace IntegrationTests.Features.Reviews;
 [Collection("Integration Tests")]
 public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
 {
-    // The management token buys a session now, and the session is what every
-    // management call carries - so a test that used to hand the raw token to
-    // an endpoint has to make the same round trip a real client makes. See
-    // docs/adr/0023.
+    // The management token buys a session, and the session is what every
+    // management call carries, so tests make the same round trip a real client
+    // makes. See docs/adr/0023.
     private async Task<string> OpenSessionAsync(Guid bookingId, string managementToken)
     {
         HttpResponseMessage response = await _client.PostAsJsonAsync(
@@ -216,15 +215,10 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task CreateStayReview_ForAStayPastTheReviewWindow_IsRejected_ForAnAuthenticatedCustomerToo()
     {
-        // Reviews had only a lower bound ("has the stay ended"), so the
-        // effective deadline came from the guest management token's lifetime -
-        // which meant it applied to guest checkout only. An authenticated
-        // customer could review the same stay forever, and two people in the
-        // same room on the same night had different rights depending on
-        // whether they had an account.
-        //
-        // The window is now explicit and applies to both. This is the path
-        // that had no deadline at all before.
+        // The review window applies to authenticated customers too, not only
+        // through the guest management token's lifetime: two people in the
+        // same room on the same night have the same rights whether or not they
+        // have an account. This is the path with no token to expire.
         string hostToken = await SeedHostUserAsync();
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
@@ -288,13 +282,11 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task GetConfirmedBookingsForCustomer_ReturnsOnlyCheckoutsInsideTheRequestedRange()
     {
-        // The contract itself, not the endpoint. This lookup used to be
-        // unbounded, so a customer with years of history had every confirmed
-        // booking loaded to build a list that can only span the review window.
-        // Bounding the query bounds the response too - nobody can have more
-        // reviewable stays than fit in the window - which is what makes the
-        // absence of pagination on this endpoint acceptable rather than
-        // merely unnoticed.
+        // The contract itself, not the endpoint. The lookup is bounded to the
+        // review window, so a customer with years of history does not load
+        // every confirmed booking, and the response is bounded too - nobody can
+        // have more reviewable stays than fit in the window - which is what
+        // makes the absence of pagination on this endpoint acceptable.
         string hostToken = await SeedHostUserAsync();
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);
@@ -412,7 +404,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         return rawToken;
     }
 
-    // No managementToken parameter any more: a guest reviewer proves ownership
+    // No managementToken parameter: a guest reviewer proves ownership
     // with a booking session on the Authorization header, which the caller
     // attaches - see OpenSessionAsync.
     private static CreateStayReviewRequest CreateValidReviewRequest(Guid bookingId) =>
@@ -511,12 +503,11 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task CreateStayReview_ShouldReturn404_ForGuestCheckoutWithNoSession()
     {
-        // Was "with the wrong management token". The endpoint no longer takes
-        // a management token at all, so a wrong one is now refused one step
-        // earlier, at the exchange - BookingSessionTests covers that. What
-        // this endpoint still owes is the other half: an anonymous caller who
-        // cannot prove ownership must not be able to review a stranger's stay,
-        // and must not be told whether the booking exists.
+        // The endpoint takes no management token; a wrong one is refused at the
+        // exchange (BookingSessionTests). What this endpoint owes is the other
+        // half: an anonymous caller who cannot prove ownership must not be able
+        // to review a stranger's stay, and must not be told whether the booking
+        // exists.
         string hostToken = await SeedHostUserAsync();
         Guid propertyId = await CreatePropertyAsync(hostToken);
         Guid unitId = await CreateUnitAsync(propertyId, hostToken);

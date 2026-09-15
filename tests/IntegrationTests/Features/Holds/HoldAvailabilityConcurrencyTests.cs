@@ -47,7 +47,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
 
-        // Owner first - a Unit without its Property no longer resolves.
+        // Owner first - a Unit without its Property does not resolve.
         context.Add(property);
         context.Add(unit);
         await context.SaveChangesAsync();
@@ -242,11 +242,8 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         Unit[] units = await Task.WhenAll(Enumerable.Range(0, Cap + 4).Select(_ => SeedUnitAsync()));
         DateOnly today = CatalogSeeding.Today();
 
-        // No cookie warm-up any more. It used to exist so every "concurrent"
-        // request shared one hold-session token instead of racing to mint its
-        // own - which is precisely the property that made the old cap
-        // worthless. The key is now the caller's network, which is shared
-        // across these clients whether they cooperate or not.
+        // No warm-up: the cap keys on the caller's network, which these clients
+        // share whether they cooperate or not.
         using WebApplicationFactory<Program> cappedFactory = CappedFactoryFor("198.51.100.10");
 
         Task<HttpResponseMessage>[] tasks =
@@ -285,16 +282,13 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
     [Fact]
     public async Task Hold_DiscardingTheHoldSessionCookie_DoesNotGrantAFreshBudget()
     {
-        // The reason the cap moved off the hold-session cookie. That cookie
-        // is whatever the caller sends: delete it, get a new one, get five
-        // more holds, repeat - which made a "cap" that a scripted caller
-        // never encountered, while holds block real inventory through the
-        // exclusion constraint.
+        // A key the caller controls is not a cap: a caller discarding a
+        // session cookie would get a fresh budget per request, while holds
+        // block real inventory through the exclusion constraint.
         //
         // A brand new HttpClient per request is exactly that attack: each has
-        // its own cookie jar, so each mints a fresh hold-session token. Under
-        // the old per-session cap every one of these succeeds. They now share
-        // a client network, so the cap applies across all of them.
+        // its own cookie jar. They share a client network, so the cap applies
+        // across all of them.
         Unit[] units = await Task.WhenAll(Enumerable.Range(0, Cap + 1).Select(_ => SeedUnitAsync()));
         DateOnly today = CatalogSeeding.Today();
 

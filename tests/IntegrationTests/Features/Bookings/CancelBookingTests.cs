@@ -29,10 +29,9 @@ namespace IntegrationTests.Features.Bookings;
 [Collection("Integration Tests")]
 public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
 {
-    // The management token buys a session now, and the session is what every
-    // management call carries - so a test that used to hand the raw token to
-    // an endpoint has to make the same round trip a real client makes. See
-    // docs/adr/0023.
+    // The management token buys a session, and the session is what every
+    // management call carries, so tests make the same round trip a real client
+    // makes. See docs/adr/0023.
     private async Task<HttpResponseMessage> ExchangeAsync(Guid bookingId, string managementToken) =>
         await _client.PostAsJsonAsync(
             $"/api/bookings/{bookingId}/manage/session",
@@ -83,7 +82,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         using IServiceScope scope = factory.Services.CreateScope();
         AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
 
-        // Owners first - a Unit without its Property no longer resolves.
+        // Owners first - a Unit without its Property does not resolve.
         context.AddRange(_pendingProperties);
         _pendingProperties.Clear();
         context.AddRange(entities);
@@ -237,7 +236,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
 
         // Exactly one Authorization header either way: an account's access
         // token, or the booking session exchanged from the link. The endpoint
-        // no longer takes a credential anywhere else.
+        // takes no credential anywhere else.
         string? bearer = accessToken
                          ?? (managementToken is null ? null : await OpenSessionAsync(bookingId, managementToken));
 
@@ -263,11 +262,10 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         return result.AccessToken;
     }
 
-    // Carries the customer's token: initiating a payment now requires proof
-    // of ownership, the same two-path check CancelBooking uses. These
-    // bookings are confirmed by a signed-in customer, so the CustomerId path
-    // is the realistic one - previously this posted anonymously with nothing
-    // but the booking id.
+    // Carries the customer's token: initiating a payment requires proof of
+    // ownership, the same two-path check CancelBooking uses. These bookings are
+    // confirmed by a signed-in customer, so the CustomerId path is the
+    // realistic one.
     private async Task<Guid> InitiateTransactionAsync(Guid bookingId, string customerToken)
     {
         using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/transactions")
@@ -343,9 +341,9 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
     [InlineData(5, 100)] // exactly the 5-day boundary - still the 100% tier
     [InlineData(4, 50)] // just inside the 5-day boundary - the 50% tier
     [InlineData(1, 50)] // exactly the 1-day boundary - still the 50% tier
-    // No check-in-day case any more: cancellation is refused once the stay
-    // has started, so the 0% floor tier is unreachable through this
-    // endpoint. The tier itself is still real and still exercised, by
+    // No check-in-day case: cancellation is refused once the stay has
+    // started, so the 0% floor tier is unreachable through this endpoint.
+    // The tier itself is real and exercised, by
     // CancellationPolicyTests against ResolveRefundPercent directly, and
     // by CancelBooking_ShouldReturn409_OnTheCheckInDayItself for the
     // endpoint's half of it.
@@ -594,11 +592,10 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task AWrongManagementToken_BuysNoSessionAndSoCancelsNothing()
     {
-        // Was asserted against the cancel endpoint, which no longer sees a
-        // management token. A wrong one is refused one step earlier now, so
-        // that is where this asserts - and the second half is what actually
-        // matters to this endpoint: with no session, cancelling is refused
-        // and the booking survives.
+        // The cancel endpoint never sees a management token; a wrong one is
+        // refused at the exchange, so that is where this asserts - and the
+        // second half is what matters to this endpoint: with no session,
+        // cancelling is refused and the booking survives.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         DateOnly today = CatalogSeeding.Today();
@@ -625,7 +622,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         Guid bookingId = await SeedBookingAsync(unit.Id, today.AddDays(-95), today.AddDays(-91));
         string managementToken = await SeedManagementTokenAsync(bookingId);
 
-        // The window is enforced where the token is now read - at the
+        // The window is enforced where the token is read - at the
         // exchange - so an expired link buys no session, and without one
         // there is nothing to cancel with.
         HttpResponseMessage exchange = await ExchangeAsync(bookingId, managementToken);
@@ -641,12 +638,9 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         // authorizes - and long past any point where cancelling means
         // anything.
         //
-        // This test used to assert 200. That was the two questions conflated
-        // into one: a token's authorization lifetime deciding cancellation
-        // eligibility by default, because nothing else was asking. The
-        // guarantee it was really pinning - that the link still works this
-        // far out - is asserted below by the status being 409 rather than
-        // 404. Authorized, and refused on its merits.
+        // Two questions, kept apart: the token's authorization lifetime does not
+        // decide cancellation eligibility. 409 rather than 404 is what shows the
+        // link still works this far out - authorized, and refused on its merits.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         DateOnly today = CatalogSeeding.Today();

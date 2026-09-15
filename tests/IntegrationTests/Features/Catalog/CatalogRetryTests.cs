@@ -201,8 +201,8 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         PricingRule persisted = await db.PricingRules.AsNoTracking()
             .SingleAsync(r => r.Id == rule.PricingRuleId, TestContext.Current.CancellationToken);
 
-        // 275, not the 150 it was created with. The old shape returned 200 and
-        // left 150 in the database.
+        // 275, not the 150 it was created with: a retry re-applying values EF
+        // already accepted would return 200 and leave 150.
         Assert.Equal(275m, persisted.OverridePrice);
     }
 

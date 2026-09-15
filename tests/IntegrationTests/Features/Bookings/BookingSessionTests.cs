@@ -15,10 +15,9 @@ using System.Net.Http.Json;
 namespace IntegrationTests.Features.Bookings;
 
 // The management token is a bearer credential with a lifetime measured in
-// months, and it used to be presented on every management call - four
-// requests across three modules, one of them in a query string. These cover
-// the exchange that replaces it, and the boundaries that keep a session from
-// being worth more than the token it came from.
+// months, exchanged once for a short-lived session (docs/adr/0023). These cover
+// the exchange, and the boundaries that keep a session from being worth more
+// than the token it came from.
 [Collection("Integration Tests")]
 public class BookingSessionTests(IntegrationTestWebApplicationFactory factory)
 {

@@ -45,11 +45,9 @@ public class LocalizationSettingsBindingTests(IntegrationTestWebApplicationFacto
     [Fact]
     public void LocalizationSettings_MatchesTheCultureTheRequestPipelineUses()
     {
-        // The two used to be read separately - handlers through
-        // IOptions<LocalizationSettings>, and RequestLocalizationOptions
-        // through raw configuration string paths. One source now feeds both,
-        // so a configured default culture cannot mean one thing to a
-        // LocalizedText and another to culture negotiation.
+        // One source feeds both IOptions<LocalizationSettings> and
+        // RequestLocalizationOptions, so a configured default culture cannot
+        // mean one thing to a LocalizedText and another to culture negotiation.
         using IServiceScope scope = factory.Services.CreateScope();
 
         LocalizationSettings settings =
