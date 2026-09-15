@@ -22,10 +22,14 @@ Several pairs of operations must exclude each other but share no row to lock: on
 
 ### Order
 
-**Advisory lock, then the booking row lock, then the hold.**
+**Advisory lock, then the booking row lock, then the hold, then the transaction row, then the refund obligation.**
 
-- Two paths take both `BookingPaymentLock` and the booking's `FOR UPDATE` row lock - cancellation and expiry - so they take them in one order. Advisory first also means a path waiting on it holds no row lock while it waits, so `BookingPaymentConfirmation`, which takes the row lock alone, never queues behind an unrelated initiation.
-- Booking before hold: `BookingPaymentConfirmation` locks the booking and then marks the hold paid, so cancellation locks the booking before releasing the hold. The reverse order deadlocks against a concurrent payment; `40P01` is retried, but only by redoing the whole transaction under contention.
+Cancellation, expiry and payment success each run as one atomic scope spanning Bookings, Transactions and Promotions (docs/design/transaction-ownership.md), so every lock a workflow takes is held until its single commit, across modules. The order is derived over the merged scopes:
+
+- Two paths take both `BookingPaymentLock` and the booking's `FOR UPDATE` row lock - cancellation and expiry - so they take them in one order. Advisory first also means a path waiting on it holds no row lock while it waits, so payment success, which takes the row lock and no advisory lock, never queues behind an unrelated initiation.
+- Booking before hold: payment success (`BookingPaymentConfirmation`) locks the booking and then marks the hold paid, so cancellation locks the booking before releasing the hold. The reverse order deadlocks against a concurrent payment; `40P01` is retried, but only by redoing the whole scope under contention.
+- Booking before transaction row: `MarkTransactionSucceededHandler` marks the transaction `Succeeded` in memory, calls `ConfirmPaymentAsync` (booking row lock, then hold), and only then saves the transaction row. Cancellation locks the booking before its refund decision writes that row. A payment waiting on the booking lock therefore holds no transaction row. Under Read Committed a cancellation's resolver reads only the committed status, so it would not block on an uncommitted `Succeeded` even in the other order; the order is kept so no waiter holds a lock the holder of the booking lock could come to need.
+- Transaction row before obligation: the resolver records the refund on the transaction row and then marks the obligation resolved, in every caller - cancellation, payment success and `ResolveOutstandingRefundsJob`.
 - Archiving a property takes `PropertyUnitsLock`, then each unit's `UnitAvailabilityLock`.
 
 ### Taking a lock is not re-reading
@@ -34,7 +38,7 @@ A lock orders two operations; it says nothing about what the other did first. Ev
 
 ### Sweeps skip rather than wait
 
-`ExpireUnpaidBookingsJob` takes `BookingPaymentLock` with `pg_try_advisory_xact_lock` and its row with `FOR UPDATE SKIP LOCKED`, and steps over a booking when either is held; it is found again on the next run. A blocking acquisition would put every booking behind one contended row. Both are inside one transaction, so skipping at either releases the other with the rollback.
+`ExpireUnpaidBookingsJob` takes `BookingPaymentLock` with `pg_try_advisory_xact_lock` and its row with `FOR UPDATE SKIP LOCKED`, and steps over a booking when either is held; it is found again on the next run. A blocking acquisition would put every booking behind one contended row. Both are inside one scope, so skipping at either releases the other when the scope ends.
 
 ### Checks against a moving state machine are ordered
 
@@ -50,5 +54,6 @@ A lock orders two operations; it says nothing about what the other did first. Ev
 ## Consequences
 
 - `BookingPaymentLockProtocolTests` scans source: every file calling `Booking.Cancel` takes `BookingPaymentLock` before its row lock and before the cancel. It proves the lock is present, not that it is taken on the right transaction or in the right mode.
-- The behavioural evidence is `PaymentInitiationRaceTests` (in-lock cancellation and expiry fail with the lock removed), `ArchivalRaceTests`, and `HoldExclusionConstraintTests`.
-- `BookingPaymentLock` does not exclude an existing `Pending` payment succeeding: `MarkTransactionSucceededHandler` does not take it. That interleaving is compensated by the refund obligation ([ADR-0027](0027-refunds-are-decided-once-from-a-durable-obligation.md)).
+- The behavioural evidence is `PaymentInitiationRaceTests` (in-lock cancellation and expiry fail with the lock removed), `ArchivalRaceTests`, `HoldExclusionConstraintTests`, and `RefundDeterminismTests`' two concurrency tests, which pin a cancellation and a payment on one booking in each order and assert the waiter holds no lock on `transactions` (saving the transaction before `ConfirmPaymentAsync` fails the first).
+- Locks are held longer. The advisory and booking row locks now span the hold release, the redemption reversal and the refund decision, all on one connection, instead of only the Bookings transaction. The order above is unchanged by that; the duration is what to revisit if contention on one booking appears.
+- `BookingPaymentLock` does not exclude an existing `Pending` payment succeeding: `MarkTransactionSucceededHandler` does not take it. It queues on the booking row lock instead, and a payment that finds the booking cancelled is refunded from the obligation in its own scope ([ADR-0027](0027-refunds-are-decided-once-from-a-durable-obligation.md)).
