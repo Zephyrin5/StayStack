@@ -36,7 +36,6 @@ public static class ObservabilityServicesRegistration
 
         services.AddOptions<ObservabilityConfiguration>()
             .Bind(configuration.AppSection(ObservabilityConfiguration.SectionName))
-            .ValidateDataAnnotations()
             .ValidateOnStart();
 
         if (observability.CommandTracingEnabled)

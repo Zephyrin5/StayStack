@@ -1,4 +1,5 @@
 ﻿using Api.Common;
+using Api.Configuration;
 using Api.Localization;
 using Api.Security;
 using Bookings.Contracts;
@@ -82,10 +83,11 @@ public static class ApiServicesRegistration
         // so one setting would have meant two different things.
         services.AddOptions<LocalizationSettings>()
             .Bind(configuration.AppSection(LocalizationSettings.SectionName))
-            .ValidateDataAnnotations()
             .ValidateOnStart();
-        // Picked up by the same ValidateOnStart pass above - ValidateDataAnnotations
-        // covers the per-field rules, this covers the one that spans two fields.
+        // Both run in the same ValidateOnStart pass: the generated validator
+        // covers the per-field rules, LocalizationSettingsValidator the one that
+        // spans two fields.
+        services.AddSingleton<IValidateOptions<LocalizationSettings>, LocalizationSettingsAttributesValidator>();
         // See LocalizationSettingsValidator for why it isn't a post-Build() check
         // in Program.cs like the other two cross-field invariants.
         services.AddSingleton<IValidateOptions<LocalizationSettings>, LocalizationSettingsValidator>();

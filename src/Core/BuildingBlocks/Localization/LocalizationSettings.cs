@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Diagnostics.CodeAnalysis;
 namespace BuildingBlocks.Localization;
 
 /// <summary>
@@ -18,8 +19,7 @@ public class LocalizationSettings
     // binder assigns properties directly - which it cannot do to an init-only
     // setter outside an object initializer, so it skips them without
     // complaint. Bound against init, both of these silently kept the defaults
-    // below. Every other options type in the codebase already uses set; this
-    // was the odd one out.
+    // below.
     [Required(AllowEmptyStrings = false)]
     public string DefaultCulture { get; set; } = "en";
     /// <summary>
@@ -34,6 +34,13 @@ public class LocalizationSettings
     ///         to start - the same treatment as DefaultCulture above.
     ///     </para>
     /// </summary>
+    // MinLengthAttribute is flagged for trimming because its IsValid reflects
+    // over a Count property on types that are not collections. It is validated
+    // by the source-generated LocalizationSettingsAttributesValidator, which
+    // emits its own reflection-free length check; the attribute's IsValid is
+    // never called at runtime.
     [MinLength(1, ErrorMessage = "At least one supported culture must be configured.")]
+    [UnconditionalSuppressMessage("Trimming", "IL2026",
+        Justification = "Validated by the source-generated options validator, not MinLengthAttribute.IsValid.")]
     public string[] SupportedCultures { get; set; } = [];
 }

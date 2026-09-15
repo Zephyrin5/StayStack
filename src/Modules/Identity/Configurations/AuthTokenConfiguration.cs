@@ -29,7 +29,9 @@ public class AuthTokenConfiguration
     ///     </para>
     /// </summary>
     [Required(AllowEmptyStrings = false)]
-    [MinLength(32, ErrorMessage =
+    // StringLength rather than MinLength: MinLength's reflective path for
+    // non-collection types makes it a trimming hazard (docs/adr/0001).
+    [StringLength(int.MaxValue, MinimumLength = 32, ErrorMessage =
         "Auth:Token:Key must be at least 32 characters. HMAC-SHA256 requires at least 128 bits of key " +
         "material, and a shorter key would start the application but fail the first sign-in.")]
     public string Key { get; set; } = string.Empty;

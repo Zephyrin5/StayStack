@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Persistence;
 using Persistence.Interceptors;
 namespace Bookings;
@@ -58,8 +59,8 @@ public static class BookingsServicesRegistration
         // the contracts projects are separate assemblies.
         services.AddOptions<HoldCapOptions>()
             .Bind(configuration.AppSection(HoldCapOptions.SectionName))
-            .ValidateDataAnnotations()
             .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<HoldCapOptions>, HoldCapOptionsValidator>();
         services.AddScoped<IHoldConfirmation, HoldConfirmation>();
         services.AddScoped<IUnitAvailabilityLookup, UnitAvailabilityLookup>();
 

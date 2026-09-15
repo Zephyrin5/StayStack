@@ -24,6 +24,7 @@ The constraint shaped these choices:
 - **TickerQ** over Hangfire ([ADR-0002](0002-tickerq-for-background-jobs.md)).
 - **`CreateSlimBuilder`** in `Program.cs`.
 - **The configuration binding source generator** (`EnableConfigurationBindingGenerator`).
+- **Source-generated options validators** (`[OptionsValidator]`) instead of `ValidateDataAnnotations`, registered beside each options type's `Bind`. `MinLength` on a string is `StringLength` instead, since `MinLengthAttribute` is itself flagged for trimming; the one `MinLength` on an array (`LocalizationSettings.SupportedCultures`) carries a justified suppression, because the generated validator emits its own check and never calls the attribute's reflective `IsValid`.
 
 ### Known diagnostics
 
@@ -33,8 +34,6 @@ Warnings are left visible rather than suppressed, so the list below is what the 
 |---|---|---|
 | `IL2026`/`IL3050` on `DbContext(DbContextOptions)` | `StayStackDbContext` | EF Core; waits on EF's NativeAOT support |
 | `IL2026`/`IL3050` on `Expression.Property`/`Expression.Lambda` | `ModelBuilderExtensions.ApplySoftDeleteQueryFilter` | Model building; revisit with EF compiled models |
-| `IL2026` on `ValidateDataAnnotations` | options registrations in `Program.cs`, `ApiServicesRegistration`, `BookingsServicesRegistration`, `IdentityServicesRegistration`, `ObservabilityServicesRegistration` | Replaceable by the options validation source generator (`[OptionsValidator]`) |
-| `IL2026` on `MinLengthAttribute` | `LocalizationSettings`, `AuthTokenConfiguration` | Follows the options validation above |
 
 Generic helpers that pass a type parameter to EF (`CommittedInsertRecovery`, `ConstraintViolations`) carry the `DynamicallyAccessedMembers` annotation EF's `Set<TEntity>` and `FindEntityType` require.
 
@@ -42,11 +41,12 @@ Generic helpers that pass a type parameter to EF (`CommittedInsertRecovery`, `Co
 
 - **Consider AOT only when a deployment needs it.** Rejected: by then the reflection-heavy choices are load-bearing, and the migration is larger and riskier than choosing compatible options up front.
 - **A failing AOT check in CI.** Rejected for now: EF Core's diagnostics cannot be fixed in this project, so the check would either always fail or rest on suppressions. It becomes the right shape once EF supports NativeAOT.
-- **Suppressing the known diagnostics.** Rejected: suppressions hide the list above, and a suppression justified as "not using Native AOT" argues against the constraint it silences.
+- **Suppressing diagnostics that are not fixed.** Rejected: suppressions hide the list above, and a suppression justified as "not using Native AOT" argues against the constraint it silences. A suppression is reserved for a verified false positive, with the reason in its justification.
 - **Dropping the constraint and keeping only the library choices.** Rejected: without the analyzers, reflection-dependent code accumulates unnoticed. Code written while the analyzers were off introduced two new trim warnings, found as soon as they were re-enabled.
 
 ## Consequences
 
 - A new `IL2xxx`/`IL3xxx` warning in the build output is a finding: fix it with an annotation or a source-generated alternative, or add it to the table above with its reason.
-- Reviving AOT publishing needs EF Core NativeAOT support, the options validation moved to source generation, a `PublishAot` build that is deployed, and the CI step changed from advisory to failing.
+- Reviving AOT publishing needs EF Core NativeAOT support, a `PublishAot` build that is deployed, and the CI step changed from advisory to failing.
+- A new options type registers an `[OptionsValidator]` rather than calling `ValidateDataAnnotations`.
 - Some choices are less batteries-included than their reflection-based alternatives (TickerQ especially). That trade is deliberate and should keep being made deliberately.

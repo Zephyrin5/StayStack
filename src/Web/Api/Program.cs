@@ -1,4 +1,5 @@
 using Api;
+using Api.Configuration;
 using Api.RateLimiting;
 using Api.Security;
 using Api.Serialization;
@@ -71,8 +72,8 @@ builder.Services.ConfigureJobsServices(builder.Configuration, builder.Environmen
 // BookingLifecyclePolicyOptions, and the consistency check after Build().
 builder.Services.AddOptions<BookingLifecyclePolicyOptions>()
     .Bind(builder.Configuration.AppSection(BookingLifecyclePolicyOptions.SectionName))
-    .ValidateDataAnnotations()
     .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<BookingLifecyclePolicyOptions>, BookingLifecyclePolicyOptionsValidator>();
 // How far ahead a stay can start and how long it can run - read by the search
 // path (Catalog) and the hold path (Availability) alike, so the two cannot
 // disagree about what is bookable. No consistency check after Build() to pair
@@ -80,8 +81,8 @@ builder.Services.AddOptions<BookingLifecyclePolicyOptions>()
 // to be kept in step. See StaySearchPolicyOptions.
 builder.Services.AddOptions<StaySearchPolicyOptions>()
     .Bind(builder.Configuration.AppSection(StaySearchPolicyOptions.SectionName))
-    .ValidateDataAnnotations()
     .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<StaySearchPolicyOptions>, StaySearchPolicyOptionsValidator>();
 
 builder.Services.AddSingleton(TimeProvider.System);
 // A bare AddHealthChecks() registers nothing, and an endpoint with no checks
@@ -106,23 +107,22 @@ builder.Services.AddHealthChecks()
 // overrides it back down to actually exercise a 429.
 builder.Services.AddOptions<CookieSecurityOptions>()
     .Bind(builder.Configuration.AppSection(CookieSecurityOptions.SectionName))
-    .ValidateDataAnnotations()
     .ValidateOnStart();
 builder.Services.AddOptions<AuthRateLimitOptions>()
     .Bind(builder.Configuration.AppSection(AuthRateLimitOptions.SectionName))
-    .ValidateDataAnnotations()
     .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<AuthRateLimitOptions>, AuthRateLimitOptionsValidator>();
 // Each policy binds its own nested section under RateLimiting rather than
 // sharing one and prefixing property names to stay out of each other's way -
 // see AuthRateLimitOptions.SectionName.
 builder.Services.AddOptions<HoldRateLimitOptions>()
     .Bind(builder.Configuration.AppSection(HoldRateLimitOptions.SectionName))
-    .ValidateDataAnnotations()
     .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<HoldRateLimitOptions>, HoldRateLimitOptionsValidator>();
 builder.Services.AddOptions<ReadRateLimitOptions>()
     .Bind(builder.Configuration.AppSection(ReadRateLimitOptions.SectionName))
-    .ValidateDataAnnotations()
     .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<ReadRateLimitOptions>, ReadRateLimitOptionsValidator>();
 
 builder.Services.AddRateLimiter(options =>
 {

@@ -29,7 +29,7 @@ jobs:
 
       # Advisory: keeps IL2xxx/IL3xxx trimming and Native AOT diagnostics
       # visible on every change without a native toolchain, and without failing
-      # CI on the known EF Core and options-validation gaps (docs/adr/0001).
+      # CI on the known EF Core gaps (docs/adr/0001).
       - name: Analyze trimming and Native AOT compatibility
         continue-on-error: true
         run: >

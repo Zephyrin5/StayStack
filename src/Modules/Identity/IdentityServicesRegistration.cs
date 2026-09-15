@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Persistence;
 using System.Text;
@@ -37,8 +38,8 @@ public static class IdentityServicesRegistration
 
         services.AddOptions<AuthTokenConfiguration>()
             .Bind(configuration.AppSection(AuthTokenConfiguration.SectionName))
-            .ValidateDataAnnotations()
             .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<AuthTokenConfiguration>, AuthTokenConfigurationValidator>();
         services.AddScoped<IAuthTokenProvider, AuthTokenProvider>();
         services.AddScoped<IdentityOutboxDispatcher>();
 
