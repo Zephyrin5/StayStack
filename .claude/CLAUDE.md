@@ -2,14 +2,18 @@
 
 ## This codebase
 
-- Read `docs/adr/` before changing Bookings, Transactions, or the outbox.
+- Read `docs/adr/` before changing Bookings, Transactions, or cross-module
+  transaction boundaries.
 - Lock order is advisory lock, then row lock. `BookingPaymentLock` on every path
   that cancels a booking. `UnitAvailabilityLock` and `PropertyUnitsLock` around
   archival.
 - Identities are minted by callers, outside retry delegates. Entity factories
   take a `Guid id`.
 - Failure injection goes through `CommitFaults`. Tests never name an EF
-  interceptor directly.
+  interceptor directly. In an atomic scope, target the owner's context.
+- A write that spans modules runs in one `IAtomicScope` naming every module it
+  touches (ADR-0029). Nothing inside a scope calls outside the database. A new
+  or changed scope updates `docs/extraction-inventory.md`.
 - Protocol tests in `tests/UnitTests/Persistence/` enforce invariants by
   scanning source. If one fails, fix the code. Adding an allow-list entry
   requires a justification written in the entry itself.
@@ -56,8 +60,9 @@
 - Match constraint violations by constraint name. Matching on SQL state alone
   turns a recoverable duplicate into a false conflict.
 - Treat independently committed side effects as separate failure boundaries.
-  Use the established durable delivery and recovery mechanisms.
-- Consider existing persisted data and queued messages when changing schemas,
+  An effect outside the database (a provider call, a message) runs after the
+  commit, driven by state the commit recorded.
+- Consider existing persisted data when changing schemas,
   contracts, or serialization. State any deployment assumptions.
 
 ## Tests and verification
