@@ -256,25 +256,17 @@ if (app.Environment.IsDevelopment())
 // actual proxy addresses. Registered before anything else reads
 // Request.IsHttps or Connection.RemoteIpAddress.
 //
-// This does NOT trust nothing by default, despite what this comment used to
-// claim: ForwardedHeadersOptions ships with KnownProxies = { ::1 } and
-// KnownNetworks = { 127.0.0.0/8 }, and the loop below only adds to them. So
-// with the shipped empty config, a loopback caller is trusted and every
-// other address is not.
+// ForwardedHeadersOptions ships with KnownProxies = { ::1 } and
+// KnownNetworks = { 127.0.0.0/8 }, and the loop below only adds to them: with
+// the shipped empty config, a loopback caller is trusted and nothing else is.
 //
-// The consequence is the reason ForwardedHeaders:KnownProxies has to be
-// populated in any proxied deployment. Without it, a TLS-terminating proxy
-// at a non-loopback address has its headers dropped, and two controls read
-// the wrong thing: RemoteIpAddress becomes the proxy's own address, so the
-// "holds"/"auth" rate-limit partitions and HoldAvailabilityHandler's
-// concurrent-hold cap collapse into one shared bucket for every caller.
-// AuthCookies used to be a third victim - its Secure flag is now declared
-// by configuration instead (see CookieSecurityOptions), precisely because a
-// security flag should not depend on transport details the app may not be
-// able to see.
-//
-// The startup check below makes that misconfiguration loud rather than
-// silent.
+// So ForwardedHeaders:KnownProxies must be populated in any proxied
+// deployment. Otherwise a TLS-terminating proxy at a non-loopback address has
+// its headers dropped, RemoteIpAddress becomes the proxy's own address, and
+// the "holds"/"auth" rate-limit partitions and HoldAvailabilityHandler's
+// concurrent-hold cap collapse into one bucket for every caller. The cookie
+// Secure flag is configured (CookieSecurityOptions) so it does not depend on
+// this. The startup check below makes the misconfiguration loud.
 ForwardedHeadersOptions forwardedHeadersOptions = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
@@ -282,9 +274,8 @@ ForwardedHeadersOptions forwardedHeadersOptions = new ForwardedHeadersOptions
 
 // Counted from configuration, not from the options object. ForwardedHeaders-
 // Options seeds KnownProxies with ::1 and KnownIPNetworks with 127.0.0.0/8, so
-// `KnownProxies.Count == 0` is false on a completely unconfigured app - which
-// is exactly the case worth catching, and is why the check that used to ask
-// that question never once fired.
+// `KnownProxies.Count == 0` is false on a completely unconfigured app - the
+// case worth catching.
 string[] configuredProxies = app.Configuration.AppSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [];
 string[] configuredNetworks = app.Configuration.AppSection("ForwardedHeaders:KnownNetworks").Get<string[]>() ?? [];
 
@@ -301,7 +292,7 @@ foreach (string proxy in configuredProxies)
 foreach (string network in configuredNetworks)
 {
     // Fully qualified: Microsoft.AspNetCore.HttpOverrides also defines an
-    // IPNetwork, and that one is the obsolete type KnownNetworks used to take.
+    // obsolete IPNetwork.
     forwardedHeadersOptions.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network));
 }
 // A throw for the same reason as the SameSite check below: this misconfiguration
@@ -429,11 +420,9 @@ app.UseRequestLocalization();
 
 app.UseHttpsRedirection();
 
-// Registered before the /api exception-handler branch below (rather than
-// after it, as it was originally) so CORS headers still get applied to
-// responses the exception handler generates - CORS is the outer wrapper on
-// the way back out, so a 4xx/5xx from /api no longer looks like a CORS
-// failure to a cross-origin frontend instead of the real error.
+// Before the /api exception-handler branch, so CORS headers are applied to
+// responses the exception handler generates; otherwise a 4xx/5xx from /api
+// looks like a CORS failure to a cross-origin frontend.
 app.UseCors(ApiServicesRegistration.ClientAppCorsPolicy);
 
 // Scope global error and status code handling strictly to /api routes

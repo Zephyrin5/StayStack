@@ -11,14 +11,6 @@ public record InitiateTransactionRequest : IRequest<InitiateTransactionResponse>
     ///     CancelBookingRequest and GetBookingForManagementRequest carry it.
     ///     Optional because an authenticated customer proves ownership with
     ///     their CustomerId instead - BookingAccessChecker accepts either.
-    ///     <para>
-    ///         This endpoint previously took a bare BookingId and nothing
-    ///         else, unlike every other anonymous booking-scoped endpoint.
-    ///         That made possession of the id the only credential, which is
-    ///         also why the handler's "not found" versus "not payable"
-    ///         answers were a status oracle: there was no caller identity to
-    ///         withhold them from.
-    ///     </para>
     /// </summary>
 
 }

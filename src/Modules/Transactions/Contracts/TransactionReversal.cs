@@ -5,8 +5,7 @@ using Transactions.Entities;
 using Transactions.Exceptions;
 namespace Transactions.Contracts;
 
-// internal, same reasoning as Catalog.Contracts.HoldConfirmation - Bookings
-// should only ever reach this through ITransactionReversal, resolved via DI.
+// Bookings reaches this only through ITransactionReversal, resolved via DI.
 internal class TransactionReversal(
     AppTransactionsDbContext dbContext,
     IBookingLookup bookingLookup,
@@ -133,41 +132,19 @@ internal class TransactionReversal(
         }
         catch (Exception ex) when (ex is TransactionAlreadyFinalizedException or DbUpdateConcurrencyException)
         {
-            // Two exception types for one situation, and catching only the
-            // first left a real race unhandled.
+            // Somebody else may have recorded the refund. The in-memory guard
+            // throws when this context loaded the transaction already moved; two
+            // resolvers loading it concurrently both pass that guard, and the
+            // loser's UPDATE fails the xmin concurrency token instead. Either way
+            // the row is re-read rather than the exception trusted.
             //
-            // TransactionAlreadyFinalizedException is the in-memory guard, hit
-            // when this context loaded the transaction after somebody else had
-            // already moved it. But two resolvers running concurrently each
-            // load it as Succeeded, so both pass that guard and both issue an
-            // UPDATE - and the loser is caught by the xmin concurrency token
-            // instead, which surfaces as DbUpdateConcurrencyException. That
-            // showed up as an intermittent failure rather than a consistent
-            // one, which is the only reason it was not obvious.
-            //
-            // Re-read rather than assume: the point of both branches is that
-            // somebody else recorded the refund, and the way to know that is to
-            // ask, not to infer it from which exception arrived.
-            //
-            // Reload this one entity rather than ChangeTracker.Clear(). This
-            // context is scoped, and when the caller is
-            // TransactionsOutboxDispatcher the very same instance is tracking
-            // the OutboxMessage that dispatcher is in the middle of processing.
-            // Clearing detached it, so the ProcessedAt assigned afterwards went
-            // to a detached entity, SaveChangesAsync wrote nothing, and the
-            // dispatcher reported success over a message still pending. It
-            // self-healed on redelivery, which is worse rather than better: the
-            // reported outcome and the persisted state disagreed and nothing
-            // said so.
-            //
-            // Reload rather than Detach because the check below wants this
-            // row's current state anyway.
+            // Reload this one entity, not ChangeTracker.Clear(): when the caller
+            // is TransactionsOutboxDispatcher, this scoped context also tracks the
+            // OutboxMessage being processed. Clearing would detach it, its
+            // ProcessedAt would never be saved, and the dispatcher would report
+            // success over a message still pending.
             await dbContext.Entry(transaction).ReloadAsync(cancellationToken);
 
-            // The same question as step 2 above, asked the same way. The two
-            // used to disagree: step 2 accepted RefundPending only, while this
-            // was written as != Succeeded - which also matches Failed, where no
-            // refund was written at all.
             bool refundExists = HasRecordedARefund(transaction.TransactionStatus);
 
             if (!refundExists)
@@ -179,20 +156,17 @@ internal class TransactionReversal(
             }
 
             // Someone else recorded the refund between the read above and this
-            // write. The refund exists, so finish the bookkeeping rather than
-            // abandoning it - the old comment here claimed the obligation was
-            // "still marked below", which the return made false, and the row
-            // was left unresolved for the sweep to retry forever.
+            // write, so finish the bookkeeping.
             await bookingLookup.MarkRefundObligationResolvedAsync(
                 bookingId, timeProvider.GetUtcNow(), cancellationToken);
 
             return null;
         }
 
-        // Two commits, and this is the second. They stay non-atomic, which is
-        // fine now that neither can veto the other: a crash in between leaves
-        // the obligation unresolved and a later run takes step 2 above, while a
-        // marker that committed without its refund is simply ignored.
+        // Two commits, and this is the second. A crash in between leaves the
+        // obligation unresolved and a later run takes step 2 above; a marker
+        // committed without its refund is ignored, because step 1 reads the
+        // transaction status.
         //
         // MarkRefundObligationResolvedAsync filters ResolvedAt == null in its
         // own ExecuteUpdate, so every repeat is a zero-row no-op.
@@ -204,16 +178,10 @@ internal class TransactionReversal(
 
     /// <summary>
     ///     Whether this status means a refund has been recorded against the
-    ///     payment - in any state, settled or not.
-    ///     <para>
-    ///         One definition, because two places need it and they had drifted.
-    ///         The repair step accepted RefundPending alone, so a refund that
-    ///         reached Refunded or RefundFailed before its marker was written
-    ///         became invisible: the main query matched nothing and the
-    ///         obligation never settled, polling forever behind its backoff.
-    ///         The concurrency catch asked the looser <c>!= Succeeded</c>, which
-    ///         wrongly counts Failed - a payment that produced no refund at all.
-    ///     </para>
+    ///     payment - in any state, settled or not. Failed is excluded: that
+    ///     payment produced no refund. Step 2 and the concurrency catch share it,
+    ///     so a refund that reached Refunded or RefundFailed before its marker
+    ///     was written still settles the obligation.
     /// </summary>
     private static bool HasRecordedARefund(TransactionStatus status) =>
         status is TransactionStatus.RefundPending
@@ -223,9 +191,8 @@ internal class TransactionReversal(
     public async Task<PaymentStateSnapshot?> GetPaymentStateAsync(
         Guid bookingId, CancellationToken cancellationToken)
     {
-        // One query, one ordering, one answer. The pair of reads it replaces
-        // could straddle a Succeeded -> RefundPending transition and report a
-        // state that never existed.
+        // One query, so the answer cannot straddle a Succeeded -> RefundPending
+        // transition.
         //
         // Succeeded first, then newest, matching the resolver: the payment
         // actually outstanding is the one worth describing, and a refunded
@@ -258,14 +225,8 @@ internal class TransactionReversal(
 
     public async Task<Money?> GetSucceededTransactionAmountAsync(Guid bookingId, CancellationToken cancellationToken)
     {
-        // Same query ReverseTransactionAsync itself uses to decide whether
-        // there's anything to do - exposed as a standalone read so a caller
-        // can ask the same question before dispatch, not just infer it from
-        // whatever ReverseTransactionAsync eventually did.
-        // FirstOrDefault, ordered. The active-transaction index keeps at most
-        // one Succeeded row per booking at a time, so this is one row today -
-        // but that index is not a uniqueness guarantee for anything else, and
-        // every sibling query here learned the same lesson the hard way.
+        // FirstOrDefault, ordered: the active-transaction index keeps at most one
+        // Succeeded row per booking, but nothing here should depend on that.
         Transaction? transaction = await dbContext.Transactions.AsNoTracking()
             .Where(t => t.BookingId == bookingId && t.TransactionStatus == TransactionStatus.Succeeded)
             .OrderByDescending(t => t.Id)
@@ -276,26 +237,14 @@ internal class TransactionReversal(
 
     public async Task<TransactionRefundSnapshot?> GetRefundSnapshotAsync(Guid bookingId, CancellationToken cancellationToken)
     {
-        // Most recent refund, not "the" refund.
-        //
-        // This used to be a SingleOrDefaultAsync, justified on the grounds that
-        // MarkRefundPending is only reachable from Succeeded and never
-        // reversible, so at most one transaction per booking can carry a refund
-        // amount. Every clause of that is true of a single payment attempt and
-        // none of it bounds a booking: a booking can accumulate several
-        // transactions, the active-transaction index constrains only Pending
-        // and Succeeded, and two refunded attempts are a state the schema
-        // permits. It threw when they occurred.
-        //
-        // Ordered by SucceededAt so the answer is deterministic rather than
-        // whatever the planner returned first. Materialize first, map after -
-        // see docs/adr/0006, applied to Amount's ComplexProperty mapping the
-        // same way BookingLookup.GetBookingAsync already does for TotalPrice.
+        // Most recent refund, not "the" refund: a booking can accumulate several
+        // transactions, and the active-transaction index constrains only Pending
+        // and Succeeded, so two refunded attempts are a state the schema permits.
+        // Ordered by Id so the answer is deterministic.
         Transaction? transaction = await dbContext.Transactions.AsNoTracking()
             .Where(
-                // EF.Property, because RefundAmount is now computed from the
-                // backing field and Amount's currency, and a computed property
-                // has no SQL translation.
+                // EF.Property: RefundAmount is computed from the backing field
+                // and Amount's currency, and has no SQL translation.
                 t => t.BookingId == bookingId
                      && EF.Property<decimal?>(t, Transaction.RefundAmountField) != null)
             .OrderByDescending(t => t.Id)

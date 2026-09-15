@@ -6,13 +6,9 @@ using Microsoft.EntityFrameworkCore;
 using Bookings.Contracts;
 namespace Bookings.Contracts;
 
-// internal, same reasoning as Catalog.Contracts.UnitLookup - Transactions/
-// Reviews should only ever reach this through IBookingLookup, resolved via DI.
-// TimeProvider and the lifecycle policy are gone from here: both existed
-// solely to bound the management token's own lifetime, and this type no longer
-// sees that token - it is exchanged for a session before anything reaches
-// here. See BookingAccessChecker.ResolveByManagementTokenAsync, which is now
-// the only place that reasoning lives.
+// internal: Transactions and Reviews reach this only through IBookingLookup,
+// resolved via DI. The management token never reaches here; it is exchanged
+// for a session first (BookingAccessChecker.ResolveByManagementTokenAsync).
 internal class BookingLookup(
     AppBookingsDbContext dbContext, IBookingSessions bookingSessions) : IBookingLookup
 {

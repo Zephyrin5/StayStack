@@ -10,15 +10,10 @@ namespace Catalog.Archival;
 /// <summary>
 ///     The one way to decide a unit may be archived.
 ///     <para>
-///         This used to be a bare static check hanging off
-///         <c>DeleteUnitHandler</c> and called from
-///         <c>DeletePropertyHandler</c>, which was fine while it really was
-///         just a check. It stopped being fine when its correctness came to
-///         depend on running under a lock inside a transaction: the locking
-///         lived in one caller and the other reproduced the bug, which is the
-///         failure mode a shared helper is supposed to prevent rather than
-///         cause. So the lock and the check are one call now, and the
-///         precondition they need is asserted rather than assumed.
+///         The check is correct only under the unit's lock inside a
+///         transaction, so the lock and the check are one call, shared by
+///         DeleteUnitHandler and DeletePropertyHandler, and the transaction is
+///         asserted rather than assumed (docs/adr/0028).
 ///     </para>
 /// </summary>
 public static class UnitArchival

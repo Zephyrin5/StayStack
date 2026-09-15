@@ -9,13 +9,11 @@ namespace Bookings.Jobs;
 /// <summary>
 ///     Resolves refund obligations nobody has settled yet.
 ///     <para>
-///         This is what makes the refund independent of message ordering, and
-///         it is the reason the obligation exists as a row rather than as a
-///         conditional. The outbox messages that usually trigger resolution are
-///         latency optimisations over this sweep - the same relationship
-///         PendingBookingIntent has with its reconciler (docs/adr/0017) - so
-///         every interleaving that previously ended with both paths declining
-///         now ends here instead.
+///         This makes the refund independent of message ordering. The outbox
+///         messages that usually trigger resolution are latency optimisations
+///         over this sweep - the same relationship PendingBookingIntent has with
+///         its reconciler (docs/adr/0017) - so any interleaving in which no
+///         message resolves an obligation ends here (docs/adr/0027).
 ///     </para>
 ///     <para>
 ///         Lives in Bookings because the obligations are Bookings' rows. It

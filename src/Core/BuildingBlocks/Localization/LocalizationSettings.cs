@@ -23,21 +23,15 @@ public class LocalizationSettings
     [Required(AllowEmptyStrings = false)]
     public string DefaultCulture { get; set; } = "en";
     /// <summary>
-    ///     No default value, deliberately. The binder does not replace a
-    ///     collection that already has elements, it appends to it - so an
-    ///     initializer of ["en", "ar"] plus a configured ["ar", "fr"] produced
-    ///     ["en", "ar", "ar", "fr"], meaning a deployment could add supported
-    ///     cultures but never remove one, and would silently get duplicates
-    ///     trying.
+    ///     No default value, deliberately. The binder appends to a collection
+    ///     that already has elements rather than replacing it, so an initializer
+    ///     of ["en", "ar"] plus a configured ["ar", "fr"] yields
+    ///     ["en", "ar", "ar", "fr"]: a deployment could add cultures but never
+    ///     remove one.
     ///     <para>
-    ///         That leaves empty as the only safe initializer, which is why
-    ///         MinLength carries the requirement instead: a deployment that
-    ///         clears or misspells this section is misconfigured, not
-    ///         defaulted. It used to fall back to a hardcoded ["en", "ar"] at
-    ///         the consumer, so the bilingual guarantee this platform is built
-    ///         on lived in C# and silently outvoted appsettings - the endpoint
-    ///         went on reporting two languages nothing had configured. Same
-    ///         treatment as DefaultCulture above: refuse to start.
+    ///         So MinLength carries the requirement: a deployment that clears or
+    ///         misspells this section is misconfigured, not defaulted, and refuses
+    ///         to start - the same treatment as DefaultCulture above.
     ///     </para>
     /// </summary>
     [MinLength(1, ErrorMessage = "At least one supported culture must be configured.")]

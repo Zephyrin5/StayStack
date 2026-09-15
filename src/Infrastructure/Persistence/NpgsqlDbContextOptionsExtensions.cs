@@ -35,18 +35,13 @@ public static class NpgsqlDbContextOptionsExtensions
             // its migrations assembly explicitly.
             npgsql.MigrationsHistoryTable($"__ef_migrations_history_{moduleName}");
 
-            // Npgsql doesn't classify 40P01 (deadlock_detected) as transient
-            // by default - confirmed against a real deadlock
-            // HoldAvailabilityConcurrencyTests reproduced under 10-way
-            // concurrent contention (this only makes it retriable;
-            // HoldAvailabilityHandler's own CreateExecutionStrategy wrap
-            // actually invokes the retry). 40001 (serialization_failure)
-            // added alongside it once CreatePricingRuleHandler started using
-            // IsolationLevel.Serializable (docs/adr/0012) - without it, a
-            // genuine conflict there would surface as an unhandled 500
-            // instead of retrying. Widens retry semantics for every
-            // DbContext, accepted since a serialization failure is
-            // retriable by definition everywhere it occurs.
+            // Npgsql does not classify 40P01 (deadlock_detected) or 40001
+            // (serialization_failure) as transient. Deadlocks occur under
+            // concurrent holds (HoldAvailabilityConcurrencyTests), and the hold
+            // transaction is Serializable. Widens retry semantics for every
+            // DbContext, accepted because both are retriable by definition. An
+            // explicit transaction is retried only inside
+            // CreateExecutionStrategy().ExecuteAsync.
             npgsql.EnableRetryOnFailure(
                 maxRetryCount: 6,
                 maxRetryDelay: TimeSpan.FromSeconds(30),

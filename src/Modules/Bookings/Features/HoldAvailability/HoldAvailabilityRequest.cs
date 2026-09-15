@@ -18,13 +18,9 @@ public record HoldAvailabilityRequest : IRequest<HoldAvailabilityResponse>
     // blocks the rest; HandleAsync then assigns it unconditionally after
     // binding, which is what makes the value trustworthy for this endpoint
     // while keeping it non-bindable for any other caller sending this
-    // request type through Mediator directly.
-    //
-    // It matters more here than it did for the holder_token that used to sit
-    // beside it: this one IS a security control - it is what the
-    // concurrent-hold cap counts by - so a caller who could set it from the
-    // body would be back to choosing their own budget, which is exactly the
-    // defect that moved the cap off the cookie in the first place.
+    // request type through Mediator directly. It is a security control: the
+    // concurrent-hold cap counts by it, so a caller who could set it would
+    // choose their own budget.
     //
     // [Sensitive] because the other two attributes keep it out of the request
     // and say nothing about the response side: PayloadRedactor is a deny-list,

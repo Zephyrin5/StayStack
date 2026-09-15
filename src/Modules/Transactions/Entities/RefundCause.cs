@@ -1,10 +1,8 @@
 namespace Transactions.Entities;
 
 /// <summary>
-///     Why a refund was started. Recorded because two independent paths can
-///     reach <see cref="Transaction.MarkRefundPending"/> for the same
-///     transaction, and until this existed the only trace of which one won was
-///     the amount - which is exactly the thing in dispute when someone asks.
+///     Why a refund was started, recorded with the amount so the reason is
+///     not inferred from the figure.
 /// </summary>
 public enum RefundCause
 {

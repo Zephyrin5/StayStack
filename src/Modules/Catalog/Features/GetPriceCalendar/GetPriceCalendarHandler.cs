@@ -86,13 +86,10 @@ public class GetPriceCalendarHandler(
         DbConnection connection,
         CancellationToken cancellationToken)
     {
-        // No longer joins unit_availability_holds directly - that table
-        // moved to the Availability module (docs/adr/0004), so a raw SQL
-        // join by table name would be the exact boundary violation
-        // ADR-0004 exists to prevent. Availability answers "which ranges
-        // are blocking this unit" through IUnitAvailabilityLookup instead;
-        // the per-day containment check below is cheap enough in C# that
-        // it isn't worth pushing back into one SQL statement.
+        // Holds are Bookings' table, so a raw join by table name would cross
+        // the module boundary (docs/adr/0004). IUnitAvailabilityLookup answers
+        // which ranges block this unit; the per-day containment check below is
+        // cheap enough in C#.
         //
         // Column aliases are cased to match PriceCalendarDayRow's property
         // names exactly - Dapper matches case-insensitively but does NOT
@@ -100,13 +97,11 @@ public class GetPriceCalendarHandler(
         //
         // Raw SQL against `units` (Entity-derived, soft-delete-governed)
         // bypasses EF's ApplySoftDeleteQueryFilter, so the status predicate
-        // is restated by hand - see docs/adr/0014's Tier 3 rule; without it
-        // an archived unit's calendar was still returned and priced.
-        // EntityStatus.Status is stored as a raw integer ordinal, not via
-        // HasConversion<string>() like Currency, so ArchivedStatus is
-        // passed as a parameter derived from the enum rather than a
-        // hardcoded `2` literal - the same ordinal-safety reasoning
-        // docs/adr/0015 already applies to Currency.
+        // is restated by hand (docs/adr/0014's Tier 3 rule); without it an
+        // archived unit's calendar is returned and priced.
+        // EntityStatus.Status is stored as a raw integer ordinal, so
+        // ArchivedStatus is passed as a parameter derived from the enum rather
+        // than a hardcoded `2` literal.
         const string sql = """
                            SELECT
                                d::date AS "Date",
@@ -160,9 +155,8 @@ public class GetPriceCalendarHandler(
     {
         public DateOnly Date { get; init; }
         public decimal BasePrice { get; init; }
-        // Currency, not string: CurrencyTypeHandler converts the
-        // character(3) column, so this no longer needs parsing at the use
-        // site. Same as Date above relying on DateOnlyTypeHandler.
+        // Currency, not string: CurrencyTypeHandler converts the character(3)
+        // column, as DateOnlyTypeHandler does for Date above.
         public Currency Currency { get; init; }
     }
 }

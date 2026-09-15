@@ -34,27 +34,14 @@ public sealed class PendingBookingIntent
     ///     How long an intent may sit unresolved before
     ///     ReconcileOrphanedBookingIntentsJob treats it as abandoned.
     ///     <para>
-    ///         One reader now, not two. ConfirmBookingHandler used to date
-    ///         another request's intent against this window to choose between
-    ///         "already in progress" and "being cleaned up" - a guess at which
-    ///         of two situations it was looking at, made necessary only
-    ///         because the intent's unique index was arbitrating races for the
-    ///         hold. The conditional UPDATE in ExecuteConfirmAsync does that
-    ///         now, so the handler never reads another request's intent and
-    ///         this value is the job's alone.
-    ///     </para>
-    ///     <para>
     ///         Correctness does not depend on this value: the success path's
-    ///         tracked delete is what makes a reconciled booking impossible to
-    ///         write (docs/adr/0017). It only trades how long a crashed
-    ///         confirm holds inventory against how often the job needlessly
-    ///         races a slow-but-healthy request - which is now the only thing
-    ///         it trades, rather than also setting the wording of a
-    ///         user-facing conflict. Ten minutes comfortably
-    ///         exceeds worst-case request duration under
-    ///         EnableRetryOnFailure's 6 retries. Shortening it should follow
-    ///         from an enforced request timeout, so the bound is real rather
-    ///         than assumed.
+    ///         tracked delete makes a reconciled booking impossible to write
+    ///         (docs/adr/0017). It trades how long a crashed confirm holds
+    ///         inventory against how often the job needlessly races a
+    ///         slow-but-healthy request. Ten minutes comfortably exceeds
+    ///         worst-case request duration under EnableRetryOnFailure's 6
+    ///         retries. Shortening it should follow from an enforced request
+    ///         timeout, so the bound is real rather than assumed.
     ///     </para>
     /// </summary>
     public static readonly TimeSpan ReconcileGrace = TimeSpan.FromMinutes(10);

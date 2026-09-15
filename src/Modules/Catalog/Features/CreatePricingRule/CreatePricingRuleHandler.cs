@@ -46,25 +46,18 @@ public class CreatePricingRuleHandler(
         // The in-memory overlap check below is a read-then-insert, and two
         // concurrent creates can both pass it. The database decides that race,
         // not the isolation level: all three overlap invariants are schema
-        // constraints now (docs/adr/0012), and the loser's violation is
-        // translated into the same 409 by IsOverlapViolation.
+        // constraints (docs/adr/0012), and the loser's violation is translated
+        // into the same 409 by IsOverlapViolation. Serializable would add a
+        // 40001 retry on ordinary contention and guard nothing further.
         //
-        // This ran at Serializable while day-of-week had no constraint, and
-        // Serializable was all that stood between two hosts and two Saturday
-        // multipliers - lowered to ReadCommitted, six concurrent overlapping
-        // creates all committed. With every invariant in the schema it guarded
-        // nothing further, and cost a 40001 retry on ordinary contention.
-        //
-        // ChangeTracker.Clear() is still required - this calls dbContext.Add(),
-        // and a retried delegate would otherwise re-add a second entity on top
-        // of the first attempt's still-tracked, rolled-back one.
+        // ChangeTracker.Clear() is required - this calls dbContext.Add(), and a
+        // retried delegate would otherwise re-add a second entity on top of the
+        // first attempt's still-tracked, rolled-back one.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
-
-        // Once, outside the retry (docs/adr/0025). The factories used to mint it
-        // inside, so an attempt whose commit lost its acknowledgement was
-        // followed by one holding a different id - which then met the first
-        // attempt's committed rule in the overlap check below and reported the
-        // host's own new rule as a conflict with an existing one.
+        // Once, outside the retry (docs/adr/0025). A fresh id per attempt would
+        // make a retry after a lost acknowledgement meet the first attempt's
+        // committed rule in the overlap check and report the host's own new rule
+        // as a conflict.
         Guid pricingRuleId = Guid.CreateVersion7();
 
         await strategy.ExecuteAsync(async () =>

@@ -33,22 +33,11 @@ public class SignUpHandler(
             Email = request.Email
         };
 
-        // One transaction, replacing a compensating delete. All three writes -
-        // the user, the role assignment, the refresh token - land in
-        // AppIdentityDbContext, on the connection this transaction owns, so
-        // there is nothing here that cannot be rolled back.
-        //
-        // The delete was copied from BecomeHostHandler, where it is correct:
-        // that handler's first write goes to another module's database, which
-        // no local transaction can reach, so compensation is the only option
-        // (docs/adr/0003). Nothing about that applies here, and the copy was
-        // strictly worse than the transaction it stood in for - DeleteAsync's
-        // own result was discarded, so a failed compensation left exactly the
-        // roleless account it was written to prevent, silently.
-        //
-        // It also covered less than it appeared to. A failure in
-        // GenerateRefreshToken below was not compensated at all, leaving a
-        // registered account whose caller was told registration failed.
+        // One transaction. All three writes - the user, the role assignment, the
+        // refresh token - land in AppIdentityDbContext on the connection this
+        // transaction owns, so a failure anywhere rolls back all of them.
+        // BecomeHostHandler compensates instead because its first write goes to
+        // another module's database (docs/adr/0003); nothing here does.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
         // Chosen once, outside the retry, like the account's own id above

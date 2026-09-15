@@ -80,11 +80,11 @@ public class CreateUnitHandler(
 
             // An earlier attempt may already have committed and lost its
             // acknowledgement. The unit and its id were built before this
-            // delegate, so without this a retry re-added the same entity and
-            // collided with its own committed row on the primary key - a 500 for
-            // a unit that exists. Asked before the property re-read below, and
-            // past the soft-delete filter: the commit is the outcome, and an
-            // archive landing in between must not hide it (docs/adr/0025).
+            // delegate, so a retry would re-add the same entity and collide with
+            // its own committed row on the primary key - a 500 for a unit that
+            // exists. Asked before the property re-read below, and past the
+            // soft-delete filter: the commit is the outcome, and an archive
+            // landing in between must not hide it (docs/adr/0025).
             if (await dbContext.Units.IgnoreQueryFilters().AnyAsync(u => u.Id == unit.Id, cancellationToken))
             {
                 await transaction.RollbackAsync(cancellationToken);
@@ -100,12 +100,10 @@ public class CreateUnitHandler(
                     cancellationToken: cancellationToken));
             }
 
-            // Re-read under the lock, and this is what makes the lock worth
-            // anything. The property was resolved before this transaction
-            // opened, so it was seen while it still existed; ordering the two
-            // operations does not tell either what the other did. The
-            // soft-delete query filter is what answers here - an archived
-            // property is simply not found.
+            // Re-read under the lock. The property was resolved before this
+            // transaction opened, and the lock only orders this against
+            // archival; the soft-delete filter answers what archival did - an
+            // archived property is not found.
             if (!await dbContext.Properties.AnyAsync(p => p.Id == request.PropertyId, cancellationToken))
             {
                 throw new NotFoundException(nameof(Property), request.PropertyId);

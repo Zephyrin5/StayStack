@@ -63,26 +63,16 @@ public class UpdatePricingRuleHandler(
         // only with the other's new state are caught by the constraint on
         // whichever commits second.
         //
-        // This used to skip ChangeTracker.Clear() on purpose, arguing that
-        // `rule` "stays the SAME tracked instance across every retry" and that
-        // clearing it would break SaveChangesAsync's ability to see the
-        // mutations. That is backwards, and it was the most dangerous place in
-        // the codebase to get backwards: the mutations are applied *inside*
-        // this delegate, so clearing and reloading yields a fresh instance that
-        // then receives them.
-        //
-        // Keeping the instance is what broke it. SaveChangesAsync accepts its
+        // ChangeTracker.Clear() and a reload inside the delegate, with the
+        // mutations applied to the fresh instance. SaveChangesAsync accepts its
         // changes when it returns (acceptAllChangesOnSuccess defaults to true),
-        // so the new price becomes the entity's *original* value before
-        // CommitAsync has run. Any transient commit failure - a 40001 was
-        // routine here while this ran at Serializable, and a dropped connection
-        // still is - retries a delegate that then re-applies values EF no longer
-        // sees as changes. No UPDATE for them, commit succeeds, caller gets
-        // 200, row unchanged. See docs/adr/0025.
+        // so a tracked instance kept across attempts has the new price as its
+        // original value before CommitAsync runs. A transient commit failure
+        // would retry a delegate that re-applies values EF no longer sees as
+        // changes: no UPDATE, commit succeeds, caller gets 200, row unchanged
+        // (docs/adr/0025).
         //
-        // AsNoTracking() below stays. Clear() now removes the identity-map
-        // hazard it was originally added for, but the query is read-only and
-        // saying so is worth a word either way.
+        // AsNoTracking() below is for a read-only query.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
         await strategy.ExecuteAsync(async () =>

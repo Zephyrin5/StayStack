@@ -2,26 +2,16 @@ using System.ComponentModel.DataAnnotations;
 namespace Bookings.Contracts;
 
 /// <summary>
-///     Two post-stay deadlines that have to be set together, and used to be
-///     one number doing both jobs.
+///     Two post-stay deadlines that have to be set together.
 ///     <para>
-///         Lives in Bookings.Contracts because it is a Bookings concept:
-///         checkout dates, review windows and management-token lifetimes have
-///         business meaning, and BuildingBlocks is otherwise Exceptions,
-///         Identity, Localization, Observability, Pagination, Security and
-///         Time - things with none. It started there on the reasoning that
-///         Bookings and Reviews both need it and neither may reference the
-///         other (docs/adr/0004), which is true of the first half only:
-///         Reviews already references Bookings.Contracts for IBookingLookup
-///         and BookingAccessResult, so this home costs nothing and keeps
-///         booking-lifecycle rules off every future module's dependency graph.
-///         Five places decide something from these values -
-///         <c>CreateStayReviewHandler</c>, <c>CreateGuestReviewHandler</c>,
-///         <c>ListMyReviewableBookingsHandler</c>,
+///         In Bookings.Contracts because checkout dates, review windows and
+///         management-token lifetimes are Bookings concepts, and Reviews already
+///         references this assembly for IBookingLookup. Five places decide
+///         something from these values - <c>CreateStayReviewHandler</c>,
+///         <c>CreateGuestReviewHandler</c>, <c>ListMyReviewableBookingsHandler</c>,
 ///         <c>GetBookingForManagementHandler</c>'s <c>CanReview</c>, and
-///         <c>BookingAccessChecker</c> - and their own comments already warn
-///         that a mismatch means "the UI offers a review the API rejects".
-///         One shared value is what keeps them agreeing.
+///         <c>BookingAccessChecker</c> - and a mismatch means the UI offers a
+///         review the API rejects. One shared value keeps them agreeing.
 ///     </para>
 /// </summary>
 public class BookingLifecyclePolicyOptions
@@ -32,23 +22,12 @@ public class BookingLifecyclePolicyOptions
     ///     How long after checkout a stay can still be reviewed, by either
     ///     party.
     ///     <para>
-    ///         There was no such limit before, and that was not a decision -
-    ///         Reviews only ever checked the lower bound ("has the stay
-    ///         ended"). The effective deadline came from the guest management
-    ///         token's lifetime, which meant it applied to guest checkout only:
-    ///         an authenticated customer could review the same stay forever,
-    ///         while a guest lost access at 90 days. Two people in the same
-    ///         room on the same night had different rights depending on
-    ///         whether they had an account.
-    ///     </para>
-    ///     <para>
-    ///         Defaults to 90 days, which preserves what guest checkout
-    ///         already did - so the change in behaviour is that the
-    ///         authenticated path now matches it, rather than guests losing
-    ///         anything. Limiting reviews is normal for the industry (Airbnb
-    ///         is far stricter at 14 days; Booking.com is in this range), and
-    ///         the reasons are freshness, fraud pressure on old stays, and
-    ///         closing disputes.
+    ///         Applies to authenticated customers and guest checkouts alike, so
+    ///         two people in the same room have the same rights whether or not
+    ///         they have an account. Defaults to 90 days, the guest management
+    ///         token's lifetime. Limiting reviews is normal for the industry
+    ///         (Airbnb allows 14 days; Booking.com is in this range), for
+    ///         freshness, fraud pressure on old stays, and closing disputes.
     ///     </para>
     /// </summary>
     [Range(1, 3650)]

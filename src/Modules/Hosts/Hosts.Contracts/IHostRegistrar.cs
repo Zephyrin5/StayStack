@@ -11,13 +11,10 @@ public interface IHostRegistrar
     ///     Registers a Host under a caller-supplied id, idempotently: calling
     ///     it again with the same id is a no-op rather than a second Host.
     ///     <para>
-    ///         It used to generate the id and return it, which made a retry
-    ///         after a timeout indistinguishable from a first attempt - the
-    ///         caller's "am I already a host" guard still saw null, so a
-    ///         client retrying three times on a flaky connection left three
-    ///         orphaned Hosts. The id has to come from the caller because the
-    ///         caller is what durably records it (Identity's
-    ///         PendingHostLinkIntent) before this is ever called.
+    ///         The id comes from the caller because the caller durably records it
+    ///         (Identity's PendingHostLinkIntent) before calling, so a retry after
+    ///         a timeout re-registers the same Host instead of orphaning one per
+    ///         attempt.
     ///     </para>
     /// </summary>
     Task RegisterHostAsync(

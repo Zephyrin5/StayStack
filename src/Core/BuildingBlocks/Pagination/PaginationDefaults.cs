@@ -7,11 +7,8 @@ namespace BuildingBlocks.Pagination;
 ///         default to <see cref="DefaultPageSize"/> and validators reject
 ///         anything past <see cref="MaxPageSize"/> - as does the query helper
 ///         itself, so a paged caller that arrives without a validator is
-///         bounded too. They used to sit on
-///         PaginationExtensions, which has since moved to Persistence because
-///         it needs EF Core - taking them along would have meant every paged
-///         request shape depending on the data-access assembly to know how big
-///         a page may be.
+///         bounded too. Here rather than beside PaginationExtensions, so request
+///         shapes do not depend on the EF Core assembly.
 ///     </para>
 /// </summary>
 public static class PaginationDefaults

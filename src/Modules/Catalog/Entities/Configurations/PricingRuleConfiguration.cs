@@ -21,18 +21,11 @@ public class PricingRuleConfiguration : IEntityTypeConfiguration<PricingRule>
 
         builder.Property(r => r.DateRange).HasColumnType("daterange");
         // numeric(12,3), matching ConfigureMoney's mapping and every other
-        // monetary column in the app. This was numeric(10,2), which is a
-        // currency assumption the rest of the codebase does not make: KWD has
-        // three minor-unit digits (CurrencyMinorUnits, docs/adr/0015), so
-        // Money.Of happily produces 10.125 KWD and Postgres then rounded it
-        // to 10.13 on the way in - silently, since narrowing scale is a
-        // rounding rule rather than an error. A unit's base price kept its
-        // third digit while an override on that same unit lost it.
-        //
-        // The type is spelled out rather than reusing ConfigureMoney because
-        // this is a bare decimal?, not a Money: an override inherits the
-        // unit's currency instead of carrying its own, which is exactly how
-        // the two mappings drifted apart in the first place.
+        // monetary column: KWD has three minor-unit digits (CurrencyMinorUnits,
+        // docs/adr/0015), and a narrower scale makes Postgres round 10.125 to
+        // 10.13 silently. Spelled out rather than reusing ConfigureMoney because
+        // this is a bare decimal?, not a Money: an override inherits the unit's
+        // currency instead of carrying its own.
         builder.Property(r => r.OverridePrice).HasColumnType("numeric(12,3)");
 
         builder.Property(r => r.DaysOfWeek).HasColumnType("integer[]");

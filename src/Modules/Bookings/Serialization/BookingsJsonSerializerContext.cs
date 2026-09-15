@@ -15,8 +15,6 @@ namespace Bookings.Serialization;
 [JsonSerializable(typeof(ReleaseHoldOutboxMessage))]
 [JsonSerializable(typeof(ReverseTransactionOutboxMessage))]
 [JsonSerializable(typeof(ReverseRedemptionOutboxMessage))]
-// Availability's own context is gone with the module; a hold is a booking in
-// progress and its request/response belong here now.
 [JsonSerializable(typeof(HoldAvailabilityRequest))]
 [JsonSerializable(typeof(HoldAvailabilityResponse))]
 [JsonSerializable(typeof(ConfirmBookingRequest))]

@@ -22,26 +22,13 @@ public class InitiateTransactionHandler(
         // Ownership proof first, via the same two-path check
         // CancelBookingHandler and GetBookingForManagementHandler use: a
         // matching CustomerId (authenticated) or a valid management token
-        // (guest checkout). Not distinguishing "doesn't exist" from "isn't
-        // yours" is BookingAccessChecker's own contract.
+        // (guest checkout). Without it, anyone holding a booking id could open a
+        // Pending transaction, and the partial unique index would reject the
+        // real guest's payment with 409.
         //
-        // This endpoint used to call the unauthenticated GetBookingAsync with
-        // nothing but the id, alone among the anonymous booking-scoped
-        // endpoints. Two consequences, both closed by this:
-        //
-        // - The 404-vs-409 split below was a status oracle for a booking id.
-        //   Impractical to enumerate (Guid v7 carries 74 random bits), but the
-        //   codebase is careful about exactly this elsewhere -
-        //   HostAuthorization.RequireOwnership returns 404 rather than 403 for
-        //   the same reason.
-        // - Worse than the oracle: anyone holding an id could open a Pending
-        //   transaction on it, and the partial unique index would then reject
-        //   the real guest's payment with 409. A payment-denial vector.
-        //
-        // The split itself is KEPT, deliberately. It is only an oracle when
-        // anyone can ask; a caller who has proven ownership is entitled to
-        // know why their own booking cannot be paid for, and "not found" for
-        // a booking they are looking at would be actively misleading.
+        // The 404-vs-409 split below is kept: it would be a status oracle only
+        // if anyone could ask, and an owner is entitled to know why their own
+        // booking cannot be paid for.
         BookingAccessResult booking = await bookingLookup.VerifyBookingAccessAsync(
                                           request.BookingId,
                                           currentUserProvider.UserId,
@@ -53,32 +40,21 @@ public class InitiateTransactionHandler(
             throw new BookingNotPayableException(request.BookingId);
         }
 
-        // Everything from here runs under the booking's payment lock, and that
-        // is the whole of this change.
+        // Everything from here runs under the booking's payment lock. The check
+        // above and the insert below are otherwise independent, so a
+        // cancellation committing between them leaves a pending payment against
+        // a cancelled booking - and if that cancellation moved an earlier payment
+        // to RefundPending, the booking ends up with a RefundPending and a
+        // Succeeded transaction at once.
         //
-        // The check above and the insert below used to be independent
-        // operations, so a cancellation committing between them produced a
-        // pending payment against a cancelled booking. Untidy on its own - no
-        // money moves - but it also manufactures a state the refund resolver
-        // cannot read: if that cancellation moved an earlier payment to
-        // RefundPending, the active-transaction check below matches nothing,
-        // this insert succeeds, and the booking ends up with a RefundPending
-        // and a Succeeded transaction at once. The active index permits that
-        // pair, and any booking-wide query that assumes one row then throws on
-        // every retry and every sweep pass, forever.
-        //
-        // The payment lock is the only lock this path takes, so it has no
-        // ordering of its own to get wrong. The paths that take it alongside the
-        // booking row lock take it first - see BookingPaymentLock.
+        // This path takes no other lock. Paths that take it with the booking row
+        // lock take it first (docs/adr/0028).
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
-        // Once, outside the retry. Generated inside, as it used to be, every
-        // attempt minted a new id - so an attempt whose commit lost its
-        // acknowledgement was followed by one that could not recognise the row
-        // it had written, found it as "a transaction already in progress", and
-        // answered 409 to the guest who had just created it. A primary-key
-        // recovery existed for exactly this case and could never fire, which
-        // was worse than its absence: it read as handled.
+        // Once, outside the retry (docs/adr/0025). A fresh id per attempt would
+        // make a retry after a lost acknowledgement find its own row as "a
+        // transaction already in progress" and answer 409 to the guest who just
+        // created it.
         Guid transactionId = Guid.CreateVersion7();
 
         return await strategy.ExecuteAsync(async () =>
@@ -124,10 +100,8 @@ public class InitiateTransactionHandler(
                 return BuildResponse(committed);
             }
 
-            // Re-read under the lock. Taking the lock only orders this against
-            // a cancellation - it says nothing about what that cancellation did
-            // before this got here, which is the same lesson the archival path
-            // learned.
+            // Re-read under the lock: the lock orders this against a
+            // cancellation, and only a read says what that cancellation did.
             BookingAccessResult? current = await bookingLookup.GetBookingDetailsAsync(
                 request.BookingId, cancellationToken);
 

@@ -17,8 +17,7 @@ namespace Api.RateLimiting;
 /// </summary>
 public class ReadRateLimitOptions
 {
-    // Its own section - see AuthRateLimitOptions.SectionName for why the
-    // three policies no longer share one.
+    // Its own section - see AuthRateLimitOptions.SectionName.
     public const string SectionName = "RateLimiting:Reads";
 
     /// <summary>
@@ -32,16 +31,10 @@ public class ReadRateLimitOptions
     ///         invisibly from their side.
     ///     </para>
     ///     <para>
-    ///         This used to carry a second reason - that an unset
-    ///         ForwardedHeaders:KnownProxies put every caller behind the
-    ///         deployment's own proxy into a single partition, so the limit
-    ///         had to be loose enough to survive that. It no longer can:
     ///         Program.cs refuses to start outside Development unless the
-    ///         deployment declares its proxies, its trusted networks, or that
-    ///         it has none. The value below has not been retightened on the
-    ///         strength of that, since the NAT argument above stands on its
-    ///         own - but the worst case it is sized against is now one shared
-    ///         office, not the entire internet.
+    ///         deployment declares its proxies, its trusted networks, or that it
+    ///         has none, so the worst case this is sized against is one shared
+    ///         office rather than every caller behind the deployment's own proxy.
     ///     </para>
     ///     <para>
     ///         So it is set where no plausible human browsing session reaches

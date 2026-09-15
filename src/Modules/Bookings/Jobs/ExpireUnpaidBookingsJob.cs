@@ -17,32 +17,17 @@ namespace Bookings.Jobs;
 /// <summary>
 ///     Releases the inventory behind bookings nobody paid for.
 ///     <para>
-///         Confirming a checkout takes a unit off the market: the hold moves
-///         to 'pending_payment' and goes on blocking its range through the
-///         exclusion constraint, which carries no status predicate. Nothing
-///         reclaimed those rows. An anonymous caller could hold a unit,
-///         submit the checkout form, and repeat - each submission converting
-///         a 15-minute hold into a permanent one, escaping the per-client cap
-///         (which counts only 'held') and never paying. Inventory denial with
-///         no account, no payment, and nothing in the system able to tell
-///         those rows from genuinely sold ones.
+///         A confirmed checkout moves its hold to 'pending_payment', which blocks
+///         the range through the exclusion constraint. <see cref="Booking.PaymentDueAt"/>
+///         makes that claim finite and this job enforces it: past the deadline, the
+///         booking is cancelled and its hold released. Without it, holding a unit
+///         and submitting checkout repeatedly would block inventory permanently
+///         with no account and no payment (docs/adr/0020).
 ///     </para>
 ///     <para>
-///         This is the other half of <see cref="Booking.PaymentDueAt"/>: the
-///         deadline makes the claim finite, and this job is what enforces it.
-///         Together with the hold endpoint's rate limit they bound the whole
-///         abuse - a caller who can create R holds per window can hold at
-///         most R × the payment window at once, and the excess expires
-///         without anyone intervening.
-///     </para>
-///     <para>
-///         Lives in Bookings, not Availability, because the two halves have
-///         to move together. Releasing the hold alone would leave a guest
-///         holding a booking with no inventory behind it; cancelling the
-///         booking alone would leave the range blocked forever. Availability
-///         cannot cancel a booking - it sits upstream of this module and has
-///         no idea one exists (docs/adr/0004) - so the module that owns both
-///         the deadline and the booking owns the sweep.
+///         In Bookings because the cancellation and the release must move
+///         together: a released hold under a live booking, or a cancelled booking
+///         still blocking its range, are both wrong.
 ///     </para>
 /// </summary>
 public partial class ExpireUnpaidBookingsJob(
@@ -53,24 +38,20 @@ public partial class ExpireUnpaidBookingsJob(
     TimeProvider timeProvider,
     ILogger<ExpireUnpaidBookingsJob> logger)
 {
-    // Same cap and same reasoning as ReconcileOrphanedBookingIntentsJob's:
-    // bounds one run's work, and costs nothing in recovery since an overdue
-    // booking stays overdue and is found again next run.
+    // Bounds one run's work; an overdue booking stays overdue and is found again
+    // next run.
     private const int MaxResultsPerRun = 1000;
 
-    // Every minute, not every five. The payment window is measured in tens of
-    // minutes, so a five-minute sweep would add a fifth of that window to how
-    // long an abandoned checkout keeps a unit off the market. The scan is an
-    // indexed range read over a small set of Pending rows.
+    // Every minute: the payment window is tens of minutes, and a slower sweep adds
+    // directly to how long an abandoned checkout keeps a unit off the market. The
+    // scan is an indexed range read over Pending rows.
     [TickerFunction(functionName: "Bookings.ExpireUnpaidBookings", cronExpression: "* * * * *")]
     public async Task ExpireAsync(TickerFunctionContext context, CancellationToken cancellationToken)
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
 
-        // Pending only. A Confirmed booking has been paid for and its hold is
-        // 'booked'; a Cancelled one has already given its hold back. Both
-        // also have a null PaymentDueAt, so this predicate is belt and braces
-        // on the status rather than relying on the field alone.
+    // Pending only. Confirmed and Cancelled bookings also have a null
+    // PaymentDueAt; the status check does not rely on that.
         List<Guid> candidateIds = await dbContext.Bookings.AsNoTracking()
             .Where(b => b.BookingStatus == BookingStatus.Pending
                         && b.PaymentDueAt != null
@@ -92,10 +73,8 @@ public partial class ExpireUnpaidBookingsJob(
 
         foreach (Guid bookingId in candidateIds)
         {
-            // Per booking, so one bad row doesn't end the batch and strand
-            // every unit behind it - the same reasoning, and the same
-            // deliberate non-swallowing of cancellation, as
-            // ReconcileOrphanedBookingIntentsJob's loop.
+            // Per booking, so one failing row does not strand every unit behind
+            // it. Cancellation is not swallowed.
             try
             {
                 await ClaimAndExpireAsync(bookingId, cancellationToken);
@@ -109,35 +88,11 @@ public partial class ExpireUnpaidBookingsJob(
     }
 
     /// <summary>
-    ///     One transaction per booking, mirroring
-    ///     ReconcileOrphanedBookingIntentsJob.ClaimAndReconcileAsync: the
-    ///     cancellation and the hold release must not be able to commit
-    ///     independently in the wrong order.
-    ///     <para>
-    ///         The re-read, the release and the cancellation now all commit
-    ///         together. The hold is in this module's own DbContext, so
-    ///         ReleaseHoldAsync joins this transaction (see
-    ///         HoldConfirmation.AmbientTransaction) instead of autocommitting
-    ///         beside it.
-    ///     </para>
-    ///     <para>
-    ///         That retires an ordering argument this job used to carry. The
-    ///         release had to precede the cancellation's commit, because the
-    ///         two could commit independently and the wrong order would leave
-    ///         a Cancelled booking whose hold nothing would ever release
-    ///         again - the next run's Pending filter would no longer match it,
-    ///         and the range stayed blocked permanently. There is no longer a
-    ///         wrong order to pick: a rollback takes both.
-    ///     </para>
-    ///     <para>
-    ///         ReverseRedemptionAsync is the one piece that cannot join,
-    ///         since it writes AppPromotionsDbContext across a module
-    ///         boundary. It goes on the outbox in the same SaveChangesAsync as
-    ///         the cancellation and is dispatched inline afterwards, matching
-    ///         CancelBookingHandler - so it is durable before anything acts on
-    ///         it, and OutboxRelayJob delivers whatever this run misses
-    ///         (docs/adr/0003).
-    ///     </para>
+    ///     One transaction per booking: the re-read, the hold release and the
+    ///     cancellation commit together, because ReleaseHoldAsync joins this
+    ///     transaction (HoldConfirmation.AmbientTransaction). The redemption
+    ///     reversal crosses into Promotions, so it is an outbox row saved with the
+    ///     cancellation and dispatched after the commit (docs/adr/0003).
     /// </summary>
     private async Task ClaimAndExpireAsync(Guid bookingId, CancellationToken cancellationToken)
     {
@@ -150,42 +105,26 @@ public partial class ExpireUnpaidBookingsJob(
             await using IDbContextTransaction transaction =
                 await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-            // The lock is taken by a bare SELECT ... FOR UPDATE rather than
-            // through FromSqlRaw, unlike ReconcileOrphanedBookingIntentsJob's
-            // otherwise-identical claim. That job's entity is all scalars;
-            // Booking carries Money as a complex property, and EF composes
-            // its own projection over a raw query - asking for
-            // "TotalPrice_Amount", which the snake_case naming convention
-            // never produced. `SELECT *` returns the real columns and the
-            // composed projection then fails on a column that does not
-            // exist. Claiming the id alone sidesteps the projection entirely
-            // and the row lock is held by the transaction just the same, so
-            // the entity can be read back through EF normally.
+            // The row is claimed by a bare SELECT ... FOR UPDATE, then loaded through
+            // EF. A FromSqlRaw over `SELECT *` fails for Booking: EF composes a
+            // projection asking for "TotalPrice_Amount", a column the snake_case
+            // convention never produces for the complex Money property.
             bool supportsSkipLocked = dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL";
 
             if (supportsSkipLocked)
             {
                 DbConnection connection = dbContext.Database.GetDbConnection();
 
-                // The payment lock first, then the row - the order every path
-                // taking both follows (see BookingPaymentLock).
+                // BookingPaymentLock first, then the row - the order every path
+                // taking both follows (docs/adr/0028). Every path that cancels a
+                // booking takes it, because initiation never touches the booking row
+                // and cannot see a cancellation that holds only the row lock.
                 //
-                // This job used to hold the row lock alone, and that could not
-                // exclude initiation: InitiateTransactionHandler never reads or
-                // writes this row, it holds BookingPaymentLock and reads the
-                // booking through IBookingLookup. So initiation could re-read
-                // Pending under its lock, this job cancel and release the unit,
-                // and initiation then commit a payment against a booking that no
-                // longer existed - precisely the state the lock was introduced
-                // to prevent, reachable through the one cancelling path that had
-                // not been given it.
-                //
-                // Try, not wait, for the same reason the row claim below skips
-                // rather than blocks: a sweep steps over contended work and
-                // revisits it next minute. Declining here costs one run's
-                // latency; waiting would stall every booking behind this one.
-                // It is taken inside this transaction, so a skip further down
-                // releases it with the rollback.
+                // TryAcquireExclusiveSql is non-blocking by design: a contended
+                // booking is skipped and found again next run. The blocking form
+                // would put every booking in the batch behind one contended row.
+                // Taken inside this transaction, so a skip below releases it with
+                // the rollback.
                 bool paymentLockTaken = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
                     AdvisoryLock.TryAcquireExclusiveSql,
                     new { LockKey = BookingPaymentLock.KeyFor(bookingId) },
@@ -220,12 +159,9 @@ public partial class ExpireUnpaidBookingsJob(
                 return false;
             }
 
-            // Re-checked under the lock, not trusted from the scan above. A
-            // payment can resolve between the two - the window closing is
-            // exactly when a slow gateway is most likely to land - and
-            // cancelling a booking that has just been paid for would take a
-            // paid stay away from a guest and hand their range to someone
-            // else.
+            // Re-checked under the lock rather than trusted from the scan: a payment
+            // can confirm the booking in between, and expiring it would take a paid
+            // stay away and hand the range to someone else.
             if (booking.BookingStatus != BookingStatus.Pending
                 || booking.PaymentDueAt is null
                 || booking.PaymentDueAt > timeProvider.GetUtcNow())
@@ -234,38 +170,17 @@ public partial class ExpireUnpaidBookingsJob(
                 return false;
             }
 
-            // The one question this module cannot answer from its own state,
-            // and the only thing standing between a successful payment and
-            // being expired out from under it.
+            // A succeeded payment whose confirmation has not reached Bookings yet.
+            // Bookings learns of payment through an outbox message, so a paid booking
+            // can look Pending and overdue until that message is delivered;
+            // expiring it would cancel the stay and refund a payment that arrived on
+            // time.
             //
-            // Everything above is Bookings-side, and Bookings learns about a
-            // payment through an outbox message. MarkTransactionSucceededHandler
-            // commits Succeeded and that message together and then dispatches
-            // it inline as a best effort; when that best effort fails, the row
-            // waits for OutboxRelayJob's cron. Through that whole window a paid
-            // booking is Pending with a lapsed PaymentDueAt, which is precisely
-            // what the scan and the re-check above look for. The re-check does
-            // not help: it re-reads the same rows.
-            //
-            // What followed was not merely a lost booking. The expiry releases
-            // the hold and cancels, the confirmation finally arrives,
-            // ConfirmPaymentAsync sees Cancelled and returns false, and
-            // TransactionsOutboxDispatcher refunds a payment that had
-            // succeeded minutes earlier - a guest who paid on time losing both
-            // the stay and, if the range was re-sold in between, any chance of
-            // getting it back.
-            //
-            // Read last, immediately before the cancellation commits, so the
-            // guarantee is as strong as one read can make it: no payment that
-            // committed Succeeded before this line can be expired. What remains
-            // is a genuine tie - a payment committing between this read and the
-            // commit below, microseconds wide. The payment lock above excludes
-            // a new payment being opened, not an existing one succeeding:
-            // MarkTransactionSucceededHandler does not take it. At that point
-            // the payment really did land as the claim lapsed, and the existing
-            // refund is a defensible answer to it. That is a different thing
-            // from refunding payments that beat the deadline by minutes, which
-            // is what this closes.
+            // Read last, immediately before the commit, so no payment that committed
+            // Succeeded before this line can be expired. A payment succeeding between
+            // this read and the commit remains possible - BookingPaymentLock excludes
+            // opening a payment, not an existing one succeeding - and is refunded in
+            // full through the obligation written below.
             if (await transactionLookup.HasSucceededPaymentAsync(booking.Id, cancellationToken))
             {
                 LogPaidButUnconfirmed(logger, booking.Id);
@@ -273,16 +188,11 @@ public partial class ExpireUnpaidBookingsJob(
                 return false;
             }
 
-            // Idempotent, and still worth being: a no-op unless the hold is
-            // 'pending_payment' or 'booked', so a retried attempt costs
-            // nothing.
+            // A no-op unless the hold is 'pending_payment' or 'booked'.
             await holdConfirmation.ReleaseHoldAsync(booking.HoldId, cancellationToken);
 
-            // The promo code goes back to the guest along with the room. A
-            // redemption is consumed at checkout, so leaving it spent for a
-            // booking that never happened would quietly burn a single-use
-            // code - the same compensation the orphaned-intent job performs
-            // for the same reason.
+            // The promo code goes back with the room: a redemption consumed by a
+            // booking that never completes would burn a single-use code.
             OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
                 new ReverseRedemptionOutboxMessage(booking.Id),
                 BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
@@ -290,18 +200,13 @@ public partial class ExpireUnpaidBookingsJob(
             DateTimeOffset cancelledAt = timeProvider.GetUtcNow();
             booking.Cancel(cancelledAt);
 
-            // An obligation here too, and this is the gap that had no path at
-            // all: this job enqueued a redemption reversal and nothing else, so
-            // a payment committing between the guard above and this
-            // cancellation produced a cancelled booking with a succeeded
-            // payment and no reversal message of any kind - not even a losing
-            // one. Nothing retried, because nothing had been written.
+            // A refund obligation on every expiry, so the payment that can succeed
+            // between the guard above and this commit has a refund path
+            // (docs/adr/0027). On the ordinary path there is no payment and the
+            // resolver records nothing.
             //
-            // The full amount, not a policy percentage. The guest did not ask
-            // for this - the platform reclaimed the inventory at its own
-            // deadline - so charging a cancellation fee would be billing them
-            // for our clock. On the ordinary path there is no payment at all
-            // and the resolver no-ops, which costs one row per expiry.
+            // The full price, not guest policy: the guest did not cancel; the
+            // platform reclaimed the inventory at its own deadline.
             dbContext.RefundObligations.Add(new RefundObligation
             {
                 BookingId = booking.Id,
@@ -314,9 +219,8 @@ public partial class ExpireUnpaidBookingsJob(
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
-            // Dispatched after the commit, not inside it. Inside, a
-            // successful reversal followed by a rollback would strand a
-            // Promotions write with no Bookings state explaining it.
+            // After the commit: dispatched inside, a reversal followed by a rollback
+            // would leave a Promotions write with no Bookings state behind it.
             await dispatcher.TryDispatchAsync(reverseRedemptionRow, cancellationToken);
 
             return true;
@@ -324,9 +228,8 @@ public partial class ExpireUnpaidBookingsJob(
 
         if (expired)
         {
-            // After the commit, for the same reason the reconcile job defers
-            // its counter: a retried delegate would otherwise count one
-            // logical expiry more than once.
+            // After the strategy returns, so a retried delegate counts one expiry
+            // once.
             BookingsTelemetry.UnpaidBookingExpired.Add(1);
             LogExpired(logger, bookingId);
         }

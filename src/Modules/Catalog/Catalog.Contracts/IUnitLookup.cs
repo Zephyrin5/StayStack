@@ -71,9 +71,8 @@ public record UnitSummary
     public int MaxOccupancy { get; init; }
     public Money BasePrice { get; init; }
 
-    // Added for Reviews - resolving "which property/host does this review
-    // belong to" from a unit id, once at review-creation time, without a
-    // second lookup interface.
+    // Lets Reviews resolve which property and host a review belongs to from a
+    // unit id, at review-creation time.
     public Guid PropertyId { get; init; }
     public Guid HostId { get; init; }
 
@@ -94,12 +93,8 @@ public record StayPricingResult
 {
     public int MaxOccupancy { get; init; }
     public Money TotalPrice { get; init; }
-    // Money, not a bare decimal in TotalPrice's currency. It shares that
-    // currency by construction, but "by construction" is exactly the kind of
-    // invariant the type system should be holding rather than each consumer
-    // re-attaching it - ConfirmBookingHandler used to do that literally, with
-    // Money.Of(hold.Subtotal, hold.TotalPrice.Currency), which is a silent
-    // bug the moment someone pairs it with the wrong currency.
+    // Money, sharing TotalPrice's currency, so no consumer re-attaches a
+    // currency by hand.
     public Money Subtotal { get; init; }
     public Money? LengthOfStayDiscountAmount { get; init; }
 

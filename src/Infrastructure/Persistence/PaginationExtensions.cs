@@ -5,19 +5,10 @@ using Persistence;
 namespace Persistence;
 
 /// <summary>
-///     Lives here rather than in BuildingBlocks because it is an EF Core
-///     extension, and this is the project that owns EF Core. It was the only
-///     thing in BuildingBlocks that needed that package - a Core project whose
-///     charter is cross-cutting concerns with no infrastructure attached - and
-///     the csproj comment justifying the reference there read as an apology
-///     for it.
-///     <para>
-///         Only the query half moved. PagedResponse and
-///         PaginationDefaults stay in BuildingBlocks: a response envelope and
-///         two page-size bounds are contract shapes, consumed by request DTOs
-///         and validators that have no business referencing a persistence
-///         assembly.
-///     </para>
+///     An EF Core extension, so it lives in the project that owns EF Core.
+///     PagedResponse and PaginationDefaults stay in BuildingBlocks: they are
+///     contract shapes, consumed by request DTOs and validators that should not
+///     reference a persistence assembly.
 /// </summary>
 public static class PaginationExtensions
 {
@@ -84,11 +75,7 @@ public static class PaginationExtensions
         int offset = GuardOffsetAndCompute(page, pageSize);
 
         // pageSize + 1 cannot overflow: the guard above bounds it at
-        // MaxPageSize. This used to clamp with a `pageSize < int.MaxValue`
-        // ternary, back when the only upper bound lived in the request
-        // validators - which made this read as though an unbounded page size
-        // could arrive here, and left it genuinely possible for a caller that
-        // reached these extensions without one.
+        // MaxPageSize.
         List<T> items = await query
             .Skip(offset)
             .Take(pageSize + 1)
@@ -108,22 +95,16 @@ public static class PaginationExtensions
     // these guards for exactly the same reason.
     private static int GuardOffsetAndCompute(int page, int pageSize)
     {
-        // Before any query, deliberately: a rejected page must cost no database
-        // work at all. It used to run after the count, so a caller asking for
-        // page 20,000,000 paid for the count before anything looked at the
-        // offset.
+        // Before any query: a rejected page costs no database work.
         //
-        // The offset is what needed bounding, not the page. page and pageSize
-        // are both int and C# arithmetic is unchecked, so (page - 1) * pageSize
-        // silently overflowed: page=30000000 with pageSize=100 wrapped
-        // 2,999,999,900 to about -1.29e9, and Postgres refuses a negative
-        // OFFSET - a 500 reachable from an anonymous query string. Below that
-        // threshold nothing overflowed and it was still a scan of two billion
-        // rows to discard them all.
+        // The offset is what needs bounding. page and pageSize are int and C#
+        // arithmetic is unchecked, so (page - 1) * pageSize can wrap negative
+        // (page=30000000, pageSize=100 gives about -1.29e9), and Postgres
+        // refuses a negative OFFSET - a 500 from an anonymous query string.
+        // Below that it is still a scan of billions of rows to discard.
         //
-        // Here rather than only in the twelve request validators, because this
-        // is the one place the arithmetic happens and a thirteenth paged
-        // endpoint cannot forget it.
+        // Here as well as in the request validators, because this is where the
+        // arithmetic happens and a new paged endpoint cannot forget it.
         if (!PaginationDefaults.IsOffsetWithinLimit(page, pageSize))
         {
             throw new ValidationException(

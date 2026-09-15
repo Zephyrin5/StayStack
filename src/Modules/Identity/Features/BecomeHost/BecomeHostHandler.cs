@@ -41,13 +41,9 @@ public class BecomeHostHandler(
             throw new AlreadyAHostException();
         }
 
-        // Durable intent BEFORE the cross-module call, so a hard process
-        // death after RegisterHostAsync commits still leaves something for
-        // ReconcileOrphanedHostLinkIntentsJob to find. This was the last
-        // forward-half cross-module write in the codebase with no such
-        // marker - the failed-update paths below compensate through the
-        // outbox, but a crash between the two wrote nothing anywhere and the
-        // orphaned Host was permanent. See docs/adr/0017.
+        // Durable intent before the cross-module call, so a process death after
+        // RegisterHostAsync commits leaves a marker for
+        // ReconcileOrphanedHostLinkIntentsJob (docs/adr/0017).
         PendingHostLinkIntent intent = await OpenIntentAsync(userId, cancellationToken);
 
         // ExecuteDelete, not a tracked Remove, on the failure paths: a
@@ -83,33 +79,22 @@ public class BecomeHostHandler(
         IdentityResult updateResult = await userManager.UpdateAsync(user);
         if (!updateResult.Succeeded)
         {
-            // UserStore.UpdateAsync already catches EF's DbUpdateConcurrencyException
-            // and surfaces it as a failed IdentityResult (ConcurrencyFailure)
-            // rather than throwing - the compensating delete below already
-            // handles two concurrent BecomeHost calls correctly. Worth
-            // fixing is the error the loser sees: without this branch, a
-            // plain retry that would now correctly hit AlreadyAHostException
-            // above gets a generic concurrency-failure message instead.
+            // UserStore.UpdateAsync reports DbUpdateConcurrencyException as a
+            // failed IdentityResult (ConcurrencyFailure). This branch gives the
+            // loser of two concurrent calls the error a plain retry would get.
             //
-            // Deliberately no host deletion and no intent discard here, which
-            // this branch used to do both of.
+            // No host deletion and no intent discard. The hostId is the intent's
+            // id, and concurrent attempts for one user adopt the same intent (see
+            // OpenIntentAsync), so this may be the Host the winning attempt just
+            // linked. Deleting it would leave the user pointing at a missing row,
+            // with no Host role and AlreadyAHostException on every retry - a
+            // permanent lockout from a double-click; discarding the intent would
+            // remove the only marker that could recover it.
             //
-            // The hostId is the intent's id, and concurrent attempts for one
-            // user now adopt the same intent (see OpenIntentAsync) - so it is
-            // the same Host the winning attempt may have just linked itself
-            // to. Deleting it would leave that user pointing at a row that no
-            // longer exists, with no Host role and AlreadyAHostException
-            // firing forever: the permanent lockout, reachable by a
-            // double-click. Discarding the intent would then remove the only
-            // marker that could recover it.
-            //
-            // Leaving both in place is safe in every case. If a concurrent
-            // attempt won, it deletes the intent itself when it completes and
-            // there is nothing to clean up. If nobody completed, the intent
-            // outlives the grace period and the reconcile job unlinks and
-            // deletes together. The cost is that an abandoned Host lingers for
-            // the grace period rather than going immediately, which is a much
-            // smaller price than deleting a live one.
+            // Leaving both is safe: a winning attempt deletes the intent when it
+            // completes, and if nobody completes, the reconcile job unlinks and
+            // deletes after the grace period. An abandoned Host lingers for that
+            // period.
             if (updateResult.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.ConcurrencyFailure)))
             {
                 // Ask rather than infer. ConcurrencyFailure only says the user
@@ -135,20 +120,12 @@ public class BecomeHostHandler(
                 string.Join(" ", updateResult.Errors.Select(e => e.Description)));
         }
 
-        // Staged here rather than before the HostId write, so the intent spans
-        // the WHOLE cross-module operation instead of only its first half.
-        // UserManager.AddToRoleAsync calls through to UpdateUserAsync on this
-        // same scoped context, so this delete flushes in that save and the
-        // marker disappears exactly when the operation completes.
-        //
-        // It used to be staged before the HostId update, which made it atomic
-        // with the link - correct for the first half, and precisely wrong for
-        // the second: the durable marker vanished at the moment the next
-        // cross-module inconsistency became possible. A crash between the link
-        // committing and the role being added left a user linked to a real
-        // Host with no Host role, no marker, and AlreadyAHostException firing
-        // on every retry. There was no path back - not in this handler, the
-        // outbox, or the job.
+        // Staged after the HostId write, so the intent spans the whole
+        // cross-module operation. UserManager.AddToRoleAsync saves through this
+        // scoped context, so the delete flushes in that save and the marker
+        // disappears when the operation completes. Staged with the link instead,
+        // a crash between the link and the role would leave a user linked to a
+        // Host with no role, no marker, and AlreadyAHostException on every retry.
         //
         // Nothing flushes this on a failure path: AddToRoleAsync throwing (a
         // missing role) never reaches its save, and a failed IdentityResult
@@ -208,16 +185,11 @@ public class BecomeHostHandler(
 
             if (!unlinkResult.Succeeded)
             {
-                // This result used to be discarded, and that was a permanent
-                // lockout. If unlinking fails the user still points at this
-                // Host, so deleting it anyway leaves them referencing a row
-                // that does not exist, with no Host role and
-                // AlreadyAHostException firing forever - strictly worse than
-                // leaving both in place.
-                //
-                // So: no host deletion, and the intent stays. The reconcile
-                // job owns it from here, unlinking and deleting together, and
-                // retrying every run until both land.
+                // If unlinking fails the user still points at this Host, so
+                // deleting it would leave them referencing a missing row with no
+                // Host role and AlreadyAHostException forever. No host deletion,
+                // and the intent stays: the reconcile job unlinks and deletes
+                // together, retrying every run until both land.
                 if (intentReclaimed)
                 {
                     throw new ConflictException(
@@ -272,11 +244,10 @@ public class BecomeHostHandler(
     ///     Returns this user's in-flight intent, reusing an existing one
     ///     rather than allocating a second host id.
     ///     <para>
-    ///         Reuse is the point. RegisterHostAsync used to generate the id,
-    ///         so a client retrying after a timeout looked exactly like a
-    ///         first attempt - the "already a host" guard still saw a null
-    ///         HostId, and each retry left another orphaned Host. Reusing the
-    ///         recorded id makes every retry re-register the same one.
+    ///         Reuse makes a client retry after a timeout re-register the same
+    ///         Host. The "already a host" guard still sees a null HostId on such a
+    ///         retry, so a fresh id per attempt would leave an orphaned Host each
+    ///         time.
     ///     </para>
     ///     <para>
     ///         The unique index on UserId is the backstop for two attempts
@@ -344,18 +315,11 @@ public class BecomeHostHandler(
                 return winners;
             }
 
-            // SingleOrDefault, not Single. The first version of this assumed
-            // the row had to be there - a unique violation means the other
-            // transaction committed - and that reasoning missed that the
-            // intent is deliberately short-lived: the winning attempt can
-            // register, link, add the role and delete its own intent inside
-            // the window between our insert failing and this read. It does,
-            // routinely, and Single threw "Sequence contains no elements"
-            // straight back out as the 500 this was meant to remove.
-            //
-            // So ask what actually happened rather than assuming. If the
-            // winner completed, this user is a host now and that is the
-            // honest answer.
+            // SingleOrDefault, not Single: a unique violation means the other
+            // transaction committed, but its intent is short-lived - the winner
+            // can register, link, add the role and delete its intent between our
+            // failed insert and the read above. So check what happened: if the
+            // winner completed, this user is a host now.
             bool alreadyLinked = await dbContext.Users.AsNoTracking()
                 .AnyAsync(u => u.Id == userId && u.HostId != null, cancellationToken);
 

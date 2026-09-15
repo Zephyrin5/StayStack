@@ -102,45 +102,31 @@ public partial class ReconcileOrphanedHostLinkIntentsJob(
     ///     One transaction per row, mirroring
     ///     ReconcileOrphanedBookingIntentsJob and OutboxDispatcherBase - the
     ///     claim must not commit ahead of the work it authorises, or a death
-    ///     in between would strand the orphan again, which is the exact
-    ///     failure this job exists to remove.
+    ///     in between would strand the orphan.
     ///     <para>
-    ///         Precisely: <b>the claim, the unlink and the intent delete commit
-    ///         together; DeleteAsync does not.</b> The first three are all
-    ///         writes on this same AppIdentityDbContext inside one transaction,
-    ///         which is what makes half-recovery impossible - a user cannot end
-    ///         up unlinked with the intent still present, or the reverse.
-    ///         The host deletion is no longer one of them, and no longer
-    ///         races them. <c>IHostRegistrar.DeleteAsync</c> writes
-    ///         AppHostsDbContext on its own connection, so calling it inline
-    ///         committed the deletion before this transaction authorised it -
-    ///         and the defence that "the next run repeats an idempotent
-    ///         delete" only holds while nothing else can succeed in between.
-    ///         The original become-host request can: the rollback restores its
-    ///         intent and its user link, it resumes, and it completes against
-    ///         a Host that has already been deleted.
+    ///         <b>The claim, the unlink, the intent delete and the
+    ///         DeleteHostOutboxMessage commit together.</b> All are writes on this
+    ///         AppIdentityDbContext in one transaction, so a user cannot end up
+    ///         unlinked with the intent still present, or the reverse.
     ///     </para>
     ///     <para>
-    ///         It is a <c>DeleteHostOutboxMessage</c> now, committed with the
-    ///         unlink and the intent delete and dispatched afterwards, with
-    ///         the relay as the backstop the "next run" was standing in for.
-    ///         See docs/adr/0025.
+    ///         The host deletion is an outbox message, not an inline
+    ///         <c>IHostRegistrar.DeleteAsync</c>: that writes AppHostsDbContext on
+    ///         its own connection and would commit before this transaction
+    ///         authorises it. If this transaction then rolled back, the original
+    ///         become-host request could resume with its intent and user link
+    ///         restored and complete against a deleted Host. The relay is the
+    ///         backstop (docs/adr/0025).
     ///     </para>
     ///     <para>
-    ///         <c>DeleteAsync</c> can also run more than once for a single
-    ///         logical reconciliation without any rollback at all: the
-    ///         execution strategy re-runs this whole delegate on a transient
-    ///         failure, and a failure at commit re-runs it after the delete has
-    ///         already landed. Same requirement as the outbox dispatcher's
-    ///         handlers - the cross-module call has to be idempotent, and this
-    ///         one is by no-opping on a Host that no longer exists.
+    ///         The dispatched delete can still run more than once, so it no-ops on
+    ///         a Host that no longer exists - the same idempotency every outbox
+    ///         handler needs.
     ///     </para>
     ///     <para>
-    ///         Like the outbox dispatcher and its Bookings twin, this holds a
-    ///         row lock across a cross-module round trip. Deliberate rather
-    ///         than accidental: acceptable because it is one row at a time
-    ///         under a per-run cap, and SKIP LOCKED means a concurrent run
-    ///         steps over a locked row instead of blocking behind it.
+    ///         Holds a row lock for one row at a time under a per-run cap, and
+    ///         SKIP LOCKED means a concurrent run steps over a locked row instead
+    ///         of blocking behind it.
     ///     </para>
     /// </summary>
     private async Task ClaimAndReconcileAsync(Guid intentId, CancellationToken cancellationToken)
@@ -172,13 +158,11 @@ public partial class ReconcileOrphanedHostLinkIntentsJob(
                 return null;
             }
 
-            // Unlink first, in this same transaction as the intent delete.
-            // The intent now spans the whole BecomeHost operation rather than
-            // just its first half, so a surviving one can mean the user was
-            // already linked - a crash after the HostId write but before the
-            // role was added. Deleting only the Host there would leave them
-            // pointing at a row that no longer exists, which is the lockout
-            // this job exists to prevent rather than cause.
+            // Unlink first, in this same transaction as the intent delete. The
+            // intent spans the whole BecomeHost operation, so a surviving one can
+            // mean the user was already linked - a crash after the HostId write
+            // but before the role was added. Deleting only the Host would leave
+            // them pointing at a row that no longer exists.
             //
             // Guarded on the id: if the user became a host some other way
             // since, this intent is not about that link and must not clear it.
@@ -190,24 +174,8 @@ public partial class ReconcileOrphanedHostLinkIntentsJob(
                 user.HostId = null;
             }
 
-            // Intent.Id IS the host id - that is why this needs no
-            // cross-module lookup to find what to clean up.
-            //
-            // Enqueued rather than called. DeleteAsync writes
-            // AppHostsDbContext on its own connection, so calling it here
-            // committed the deletion before the transaction that authorises
-            // it. The old note defended that ordering as the lesser evil -
-            // "if this succeeds and the commit then fails, the next run
-            // repeats an idempotent delete" - and the repeat does converge,
-            // but only if nothing else succeeds in between. The original
-            // become-host request can: it resumes after the rollback restores
-            // its intent and its user link, and completes against a Host row
-            // that has already been deleted, leaving an account linked to
-            // nothing.
-            //
-            // A durable row committed with the unlink and the intent delete
-            // removes the window entirely, and the relay is the backstop the
-            // "next run" was standing in for.
+            // Intent.Id is the host id, so no cross-module lookup is needed.
+            // Enqueued rather than called - see ClaimAndReconcileAsync.
             OutboxMessage deleteHostRow = dispatcher.Enqueue(
                 new DeleteHostOutboxMessage(intent.Id),
                 IdentityJsonSerializerContext.Default.DeleteHostOutboxMessage);

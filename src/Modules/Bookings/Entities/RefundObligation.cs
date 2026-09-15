@@ -13,21 +13,10 @@ namespace Bookings.Entities;
 ///         optimisation over the job that sweeps for unresolved ones.
 ///     </para>
 ///     <para>
-///         <b>Why this exists rather than a fourth conditional.</b> Deciding
-///         the amount used to be split across two paths, each inferring that
-///         the other would handle the cases it declined. Neither could verify
-///         that inference at the moment it was made, and it failed three ways:
-///         both paths declining and nobody refunding; the cancellation moment
-///         read before it was committed, so a full refund landed where the
-///         policy said otherwise; and the expiry job, which cancelled bookings
-///         while enqueueing no reversal at all. One conditional per round.
-///     </para>
-///     <para>
-///         The cancellation no longer decides anything about payments. It
-///         records that a refund is owed and what the policy figure is; a
-///         single resolver decides the amount later, at a point where both the
-///         payment and the cancellation are committed facts rather than
-///         predictions about each other.
+///         The cancellation decides nothing about payments. It records that a
+///         refund is owed and the policy figure; a single resolver decides the
+///         amount later, when both the payment and the cancellation are
+///         committed facts (docs/adr/0027).
 ///     </para>
 /// </summary>
 public sealed class RefundObligation

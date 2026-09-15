@@ -2,22 +2,12 @@ using SeedWork.ValueObjects;
 namespace Bookings.Contracts;
 
 /// <summary>
-///     The hold's write side. This used to live in Availability.Contracts
-///     and exist so Bookings could move a hold without seeing the table;
-///     both now live in this module, so it is internal and the seam it
-///     described is gone.
+///     The hold's write side.
 ///     <para>
-///         Kept as an interface rather than folded into the implementation:
-///         the unit tests mock it, which is reason enough on its own.
-///     </para>
-///     <para>
-///         Still public, though it is no longer a cross-module contract.
-///         Making it internal would force ConfirmBookingHandler, three jobs
-///         and BookingsOutboxDispatcher internal with it - types that
-///         Mediator, TickerQ and DI discover - which is a lot of churn and
-///         some discovery risk to express something the file's location
-///         already says. What mattered was deleting the contracts project
-///         that carried it across a module boundary.
+///         An interface because the unit tests mock it. Public although only
+///         this module uses it: internal would force ConfirmBookingHandler, three
+///         jobs and BookingsOutboxDispatcher internal with it, types that
+///         Mediator, TickerQ and DI discover.
 ///     </para>
 /// </summary>
 public interface IHoldConfirmation
@@ -25,44 +15,36 @@ public interface IHoldConfirmation
     /// <summary>
     ///     Claims the hold for a checkout in progress ('held' ->
     ///     'pending_payment'). Throws NotFoundException if the hold doesn't
-    ///     exist, has already been consumed, or has expired - Bookings never
-    ///     sees a stale/expired hold succeed silently.
+    ///     exist, has already been consumed, or has expired.
     ///     <para>
-    ///         Not 'booked': submitting a checkout form is not paying for
-    ///         anything. This used to write 'booked' directly, which made
-    ///         every submitted form permanent inventory - nothing reclaimed
-    ///         such a row, and it blocked its range through the exclusion
-    ///         constraint indefinitely. The caller owns the deadline (see
-    ///         Booking.PaymentDueAt) and releases the hold when it passes.
+    ///         Not 'booked': submitting a checkout form is not paying. The caller
+    ///         owns the deadline (Booking.PaymentDueAt) and releases the hold
+    ///         when it passes.
     ///     </para>
     /// </summary>
     Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken);
 
     /// <summary>
-    ///     Completes the lifecycle on payment ('pending_payment' ->
-    ///     'booked'), the one transition that turns a reservation into sold
-    ///     inventory nothing reclaims on a timer. Returns false when no row
-    ///     moved, which means the hold was already released or expired out
-    ///     from under a late-arriving payment - the caller has taken money
-    ///     for a range it no longer holds and must compensate rather than
-    ///     treat this as success.
-    /// </summary>
-    /// <summary>
     ///     The snapshot <see cref="ConfirmHoldAsync"/> would have returned, for
     ///     a hold already in 'pending_payment' - without transitioning
     ///     anything. Null when the hold is in any other state.
     ///     <para>
-    ///         Exists for exactly one caller: ConfirmBookingHandler's
-    ///         execution-strategy retry path. Now that the hold transition and
-    ///         the PendingBookingIntent insert commit in one transaction,
-    ///         finding our own intent already present proves the hold moved
-    ///         with it, and re-calling ConfirmHoldAsync would fail its
-    ///         status = 'held' guard. This is how that attempt reads back what
-    ///         it already did.
+    ///         For ConfirmBookingHandler's retry path: the hold transition and the
+    ///         PendingBookingIntent commit in one transaction, so finding its own
+    ///         intent proves the hold moved, and re-calling ConfirmHoldAsync
+    ///         would fail its status = 'held' guard.
     ///     </para>
     /// </summary>
     Task<ConfirmedHold?> GetConfirmedHoldAsync(Guid holdId, CancellationToken cancellationToken);
 
+    /// <summary>
+    ///     Completes the lifecycle on payment ('pending_payment' ->
+    ///     'booked'), the one transition that turns a reservation into sold
+    ///     inventory nothing reclaims on a timer. Returns false when no row
+    ///     moved: the hold was released or expired under a late-arriving
+    ///     payment, and the caller has taken money for a range it no longer
+    ///     holds and must compensate.
+    /// </summary>
     Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken);
 
     /// <summary>
@@ -86,17 +68,13 @@ public record ConfirmedHold
     public int GuestCount { get; init; }
     public Money TotalPrice { get; init; }
 
-    // The pre-discount total, snapshotted on the hold itself rather than
-    // left for ConfirmBookingHandler to reconstruct via TotalPrice +
-    // LengthOfStayDiscountAmount - that reconstruction is exactly the
-    // rounding bug docs/adr/0015 exists to close, since each side was
-    // independently rounded. Shares TotalPrice.Currency.
+    // The pre-discount total, snapshotted on the hold rather than reconstructed
+    // from TotalPrice + LengthOfStayDiscountAmount, which were rounded
+    // independently (docs/adr/0015). Shares TotalPrice.Currency.
     public Money Subtotal { get; init; }
 
-    // Same snapshot as TotalPrice/Subtotal, carried through so
-    // ConfirmBookingHandler can undo just the length-of-stay portion when a
-    // redeemed promo code is exclusive of it rather than stacking - see
-    // Catalog.Contracts.IUnitLookup.StayPricingResult for why this needs to
-    // travel separately from the final total.
+    // Carried separately so ConfirmBookingHandler can undo just the
+    // length-of-stay portion when a promo code replaces it - see
+    // Catalog.Contracts.IUnitLookup.StayPricingResult.
     public Money? LengthOfStayDiscountAmount { get; init; }
 }

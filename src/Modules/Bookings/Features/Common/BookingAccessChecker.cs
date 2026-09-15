@@ -18,16 +18,13 @@ internal static class BookingAccessChecker
     /// <summary>
     ///     Resolves the booking if the caller owns it - via a matching
     ///     CustomerId (authenticated) or a booking session naming this same
-    ///     booking (guest checkout) - null otherwise. The long-lived
-    ///     management token is no longer accepted here; it is exchanged for a
-    ///     session first, by the one caller below that still takes it.
-    ///     Doesn't distinguish "doesn't exist" from "isn't yours", same
-    ///     reasoning as IHostAuthorization.RequireOwnership: a missing
-    ///     session, one naming a different booking, and an expired one all get
-    ///     null the same way. Neither path here carries an expiry of its own -
-    ///     the session's was enforced by the authentication handler before
-    ///     this ran, and a CustomerId is account-based proof of ownership
-    ///     rather than a bearer credential that could leak.
+    ///     booking (guest checkout) - null otherwise. The management token is
+    ///     not accepted here; <see cref="ResolveByManagementTokenAsync"/>
+    ///     exchanges it for a session. Doesn't distinguish "doesn't exist" from
+    ///     "isn't yours", same reasoning as IHostAuthorization.RequireOwnership.
+    ///     Neither path carries an expiry of its own: the session's was enforced
+    ///     by the authentication handler, and a CustomerId is account-based
+    ///     proof rather than a bearer credential that could leak.
     /// </summary>
     public static async Task<BookingAccess?> ResolveAsync(
         AppBookingsDbContext dbContext,
@@ -49,20 +46,15 @@ internal static class BookingAccessChecker
             return new BookingAccess(booking, BookingAccessKind.Account);
         }
 
-        // A booking session, exchanged for a management token earlier. The
-        // equality check is the whole authorization decision and it has to be
-        // here rather than at the edge: the token proves "the bearer once held
-        // the management token for booking X", which says nothing about the
-        // booking this request names. A session for A acting on B is the
-        // obvious attack, and it is a one-line mistake to leave open.
+        // A booking session. The equality check is the whole authorization
+        // decision and belongs here rather than at the edge: the session proves
+        // "the bearer once held the management token for booking X", which says
+        // nothing about the booking this request names. A session for A acting
+        // on B is the obvious attack.
         //
-        // No expiry check of its own - the token's own `exp` was enforced by
-        // the authentication handler before this ever ran, which is why the
-        // caller passes a resolved id rather than a raw token.
-        //
-        // Checked before the management-token path, not after: a caller
-        // holding a session should never be made to present the long-lived
-        // credential again, which is the entire point of exchanging it.
+        // No expiry check: the session's `exp` was enforced by the
+        // authentication handler, which is why the caller passes a resolved id
+        // rather than a raw token.
         if (sessionBookingId == bookingId)
         {
             return new BookingAccess(booking, BookingAccessKind.Link);

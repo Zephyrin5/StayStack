@@ -20,11 +20,9 @@ public class CreatePropertyHandler(
         // Chosen first, before anything that could retry - see docs/adr/0025.
         Guid propertyId = Guid.CreateVersion7();
 
-        // Throws NotAHostException if the caller has no host_id claim -
-        // this also means IHostLookup isn't needed here at all anymore:
-        // a HostId that made it into the token was only ever set by
-        // BecomeHost, so it's guaranteed to reference a real Host by
-        // construction, not something that needs re-validating per call.
+        // Throws NotAHostException if the caller has no host_id claim. No
+        // IHostLookup needed: only BecomeHost sets a HostId that reaches the
+        // token, so it references a real Host by construction.
         Guid hostId = hostAuthorization.RequireHostId();
 
         LocalizedText name = LocalizedText.Create(request.Name, localizationSettings.Value.DefaultCulture);

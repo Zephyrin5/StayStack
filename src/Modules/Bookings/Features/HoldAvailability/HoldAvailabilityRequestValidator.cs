@@ -8,13 +8,10 @@ public sealed class HoldAvailabilityRequestValidator : Validator<HoldAvailabilit
 {
     // A pure request-shape rule (doesn't need "today" or the Unit) - unlike
     // the lead-time cap, which does and lives in HoldAvailabilityHandler's
-    // guard clauses instead. Without a bound here, an anonymous caller
-    // could hold a single unit for up to a decade - this alone doesn't
-    // stop that, but it bounds how much damage one hold can do.
-    //
-    // The number itself is no longer this file's to choose: GetProperties
-    // has to apply the same one, or search and hold disagree about what is
-    // bookable. See StaySearchPolicyOptions.
+    // guard clauses instead. It bounds how much of a unit one hold can block.
+    // The number comes from StaySearchPolicyOptions, because GetProperties
+    // must apply the same one or search and hold disagree about what is
+    // bookable.
     public HoldAvailabilityRequestValidator(IOptions<StaySearchPolicyOptions> staySearchPolicy)
     {
         int maxStayNights = staySearchPolicy.Value.MaxStayNights;

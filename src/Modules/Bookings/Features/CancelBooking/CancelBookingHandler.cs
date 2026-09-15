@@ -26,19 +26,13 @@ public class CancelBookingHandler(
     ITransactionReversal transactionReversal,
     ICurrentUserProvider currentUserProvider,
     IBookingSessions bookingSessions,
-    // No BookingLifecyclePolicyOptions any more - the only thing it supplied
-    // here was the management token's lifetime, and cancelling no longer sees
-    // that token.
     TimeProvider timeProvider) : IRequestHandler<CancelBookingRequest, CancelBookingResponse>
 {
     public async ValueTask<CancelBookingResponse> Handle(CancelBookingRequest request, CancellationToken cancellationToken)
     {
-        // Doesn't distinguish "doesn't exist" from "isn't yours" - same
-        // reasoning as IHostAuthorization.RequireOwnership, now covering
-        // two proof-of-ownership paths instead of one: a matching
-        // CustomerId (authenticated) or a matching, not-yet-expired
-        // management token (guest checkout) - see BookingAccessChecker's
-        // own doc comment.
+        // Two proofs of ownership - a matching CustomerId, or a booking session
+        // opened from the management token - and no distinction between "does
+        // not exist" and "is not yours". See BookingAccessChecker.
         BookingAccess access = await BookingAccessChecker.ResolveAsync(
                               dbContext, request.BookingId, currentUserProvider.UserId,
                               await bookingSessions.GetSessionBookingIdAsync(cancellationToken), cancellationToken)
@@ -46,135 +40,77 @@ public class CancelBookingHandler(
 
         Booking booking = access.Booking;
 
-        // Resolved after the booking loads, from its own snapshotted zone -
-        // the refund tier is measured against CheckIn, a property-local date,
-        // so a UTC "today" crosses tier boundaries a day early or late
-        // depending on which side of UTC the property sits. See
-        // docs/adr/0018.
+        // In the property's zone: refund tiers count days to CheckIn, a
+        // property-local date, so a UTC "today" crosses tier boundaries a day
+        // early or late (docs/adr/0018).
         DateOnly today = PropertyTimeZone.Today(timeProvider, booking.TimeZoneId);
 
-        // A booking confirmed before cancellation policies existed has no
-        // snapshot - falls back to the same default new units get, rather
-        // than fabricating a specific claim about what applied
-        // retroactively. See Booking.CancellationPolicy's own doc comment.
+        // A booking without a snapshotted policy gets the default new units get,
+        // rather than a claim about what applied when it was made.
         CancellationPolicy cancellationPolicy = booking.CancellationPolicy ?? CancellationPolicy.CreateDefault();
 
-        // Guest policy, and used in exactly one place: fixing the refund
-        // obligation's amount when the cancellation writes it. Every figure
-        // reported afterwards comes from that obligation through
-        // RefundDecision - recomputing policy at report time is how the
-        // response came to disagree with the refund actually recorded.
+        // Guest policy, used only to fix the refund obligation's amount. Every
+        // figure reported afterwards comes from the obligation through
+        // RefundDecision (docs/adr/0027); computing policy again at report time
+        // would disagree with the refund recorded for expiries and late payments.
         //
-        // Cancelling on or after check-in day itself lands on the same
-        // strictest applicable tier as cancelling the moment check-in starts,
-        // not an undefined negative day count. The division has to happen
-        // first, in plain decimal, before the one Money multiplication - see
-        // Money's own doc comment on why `a * b / c` and `a * (b / c)` aren't
-        // the same value for a type that rounds on every operation.
+        // Cancelling on or after check-in day lands on the strictest tier. The
+        // division happens first, in plain decimal: Money rounds on every
+        // operation, so `a * b / c` and `a * (b / c)` differ.
         Money ComputeRefund(DateOnly asOf)
         {
-            // Reads CheckIn/TotalPrice/CancellationPolicy only, none of which
-            // Cancel() touches, so the pre-lock snapshot is as good as the
-            // locked one here. Deliberately not moved inside the delegate:
-            // recomputing a refund figure per attempt would let two attempts
-            // disagree if the clock crossed a tier boundary between them.
+            // Computed once, outside the retry: attempts on either side of a tier
+            // boundary must not disagree. It reads only fields Cancel() does not
+            // change, so the pre-lock snapshot is sufficient.
             int daysBeforeCheckIn = Math.Max(booking.CheckIn.DayNumber - asOf.DayNumber, 0);
             decimal percent = cancellationPolicy.ResolveRefundPercent(daysBeforeCheckIn);
             return booking.TotalPrice * (percent / 100m);
         }
 
-        // Idempotent re-cancel skips re-enqueueing the outbox messages a
-        // second time - whatever was enqueued on the first Cancel() call is
-        // already durable, and OutboxRelayJob keeps retrying it regardless
-        // of how many times this endpoint is called. See docs/adr/0003.
+        // A re-cancel writes nothing: the first cancellation's obligation and
+        // outbox rows are durable and retried by the relay (docs/adr/0003).
         if (booking.BookingStatus != BookingStatus.Cancelled)
         {
-            // Eligibility, checked after authorization and separately from
-            // it. BookingAccessChecker decided whether this caller may reach
-            // the booking at all - a management link stays usable until
-            // CheckOut + 90 days, and an authenticated customer's own booking
-            // has no time limit whatsoever - and nothing then asked whether
-            // cancelling was still a meaningful thing to do. A guest could
-            // cancel a stay they were currently in, releasing the remaining
-            // nights back to inventory, or cancel one that ended months ago.
-            //
-            // Not folded into the idempotent branch above: a re-cancel of an
-            // already-Cancelled booking stays a no-op success whatever the
-            // date, since it changes nothing and the caller is asking for a
-            // state that already holds.
+            // Eligibility is separate from access. A management link stays usable
+            // long after checkout, and cancelling a stay in progress or already
+            // ended would release nights back to inventory. A re-cancel skips
+            // this, since it changes nothing.
             if (!booking.CanBeCancelledOn(today))
             {
                 throw new BookingNotCancellableException(booking.Id);
             }
 
-            // Read *before* enqueueing and dispatching, deliberately. Both
-            // reads further down are invalidated by this request's own inline
-            // dispatch: a ReverseTransactionAsync that lands moves the
-            // transaction past Succeeded, so GetSucceededTransactionAmountAsync
-            // then reports "nothing to refund" while GetRefundSnapshotAsync
-            // starts reporting one. Deciding after the dispatch made the
-            // response a function of whether that attempt happened to win -
-            // the same request answering RefundPending: false with a figure,
-            // or true, depending on a race the caller can't see or control.
-            // Last, and only on the branch that actually cancels something.
-            //
-            // Ordering is the whole of it. Ahead of the eligibility check it
-            // would demand a confirmation for a stay that cannot be cancelled
-            // at all - the guest types their address and is told 409 anyway.
-            // Ahead of the idempotent branch it would refuse a re-cancel that
-            // changes nothing. Neither of those is destructive, so neither is
-            // what this guards.
-            //
-            // Nothing is leaked by checking eligibility first: CheckIn,
-            // CheckOut and CanCancel are all in the management response the
-            // caller could already read.
+            // After the eligibility check, and only on the branch that cancels:
+            // asking for the guest's email for a stay that cannot be cancelled, or
+            // for a re-cancel that changes nothing, would refuse harmless requests.
+            // Checking eligibility first leaks nothing the management response
+            // does not already show.
             RequireGuestEmailForLinkAccess(access, request.GuestEmail);
 
             Money refundAmount = ComputeRefund(today);
 
-            // Everything that must survive a retry is built INSIDE the
-            // delegate, and that placement is the whole point rather than a
-            // style choice.
-            //
-            // SaveChangesAsync defaults to acceptAllChangesOnSuccess, so the
-            // moment it returns, the mutated Booking and both enqueued
-            // OutboxMessages are Unchanged - accepted, even though the
-            // transaction has not committed. Built outside, a transient
-            // failure on CommitAsync then retried a delegate with nothing left
-            // to save: the hold release ran again (it is a statement, not
-            // tracked state), the save wrote nothing, the commit succeeded,
-            // and the handler returned a cheerful Cancelled response over a
-            // database holding a Confirmed booking, a released hold and zero
-            // compensating rows. Silent, and it loses a refund.
-            //
-            // ConfirmBookingHandler has the same outer shape and is safe
-            // because its Add/Remove calls sit inside its delegate. This is
-            // that shape, applied.
+            // Everything that must survive a retry is built inside the delegate
+            // (docs/adr/0025). SaveChangesAsync accepts its changes before the
+            // commit, so a booking mutated and rows enqueued outside it would be
+            // seen as unchanged on a retry: the save would write nothing while
+            // the hold release, a plain statement, ran again.
             IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
             CancelOutcome outcome = await strategy.ExecuteAsync(async () =>
             {
-                // Nothing inherited from a previous attempt. Without this, a
-                // second attempt starts holding the first attempt's accepted
-                // entities and reproduces the same bug in a new shape.
                 dbContext.ChangeTracker.Clear();
 
                 await using IDbContextTransaction transaction =
                     await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-                // The payment lock, then the row lock, then the hold - and that
-                // order is load-bearing, not incidental (see BookingPaymentLock).
-                //
-                // The payment lock exists alongside the row lock rather than
-                // instead of it. FOR UPDATE already excludes anything that can
-                // reach this row through Bookings; it cannot be taken by
-                // Transactions, which would have to name this table to do so.
-                // So initiation agrees on an advisory key instead.
-                //
-                // First, because ExpireUnpaidBookingsJob now takes both too, and
-                // two paths taking the same two locks must take them in one
-                // order. Inside the same transaction, so it is released with it
-                // whichever way it ends.
+                // BookingPaymentLock first, then the booking row lock, then the
+                // hold (docs/adr/0028). The position is load-bearing:
+                // ExpireUnpaidBookingsJob takes the same two locks, and two paths
+                // taking them in different orders can deadlock; taken first, a
+                // wait on it holds no row lock, so BookingPaymentConfirmation -
+                // which takes only the row lock - never queues behind an
+                // initiation. The advisory lock exists because initiation, in
+                // Transactions, cannot take a row lock on this table.
                 if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
                 {
                     await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
@@ -184,28 +120,17 @@ public class CancelBookingHandler(
                         cancellationToken: cancellationToken));
                 }
 
-                // The booking lock is taken before the hold is touched.
-                // BookingPaymentConfirmation locks the booking and then marks
-                // the hold paid; taking them in the other order here let a
-                // concurrent cancel and payment deadlock. Postgres detects it
-                // and 40P01 is retriable, so it self-heals - but it self-heals
-                // by retrying a whole transaction under contention, which is a
-                // cost with no benefit. One order, everywhere: booking, then
-                // hold.
-                // The id alone, through Dapper, then the entity through EF -
-                // not one FromSqlRaw doing both. Booking carries Money as a
-                // complex property and EF composes its own projection over a
-                // raw query, asking for a "TotalPrice_Amount" column the
-                // snake_case convention never produced; `SELECT *` returns the
-                // real columns and the composed projection then fails on one
-                // that does not exist. ExpireUnpaidBookingsJob and
-                // BookingPaymentConfirmation both claim their row this way for
-                // exactly this reason. The lock belongs to the transaction
-                // either way, so the entity can be read back normally after.
+                // The booking row before the hold, matching
+                // BookingPaymentConfirmation; the reverse order deadlocks against a
+                // concurrent payment.
                 //
-                // FOR UPDATE, not SKIP LOCKED: a cancellation has a caller
-                // waiting and must see the committed outcome, where a sweep
-                // should step over a contended row and revisit it.
+                // The id through Dapper, then the entity through EF. A FromSqlRaw
+                // over `SELECT *` fails: EF composes a projection asking for
+                // "TotalPrice_Amount", a column the snake_case convention never
+                // produces for the complex Money property.
+                //
+                // FOR UPDATE rather than SKIP LOCKED: a caller is waiting and must
+                // see the committed outcome.
                 if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
                 {
                     DbConnection connection = dbContext.Database.GetDbConnection();
@@ -217,34 +142,26 @@ public class CancelBookingHandler(
                         cancellationToken: cancellationToken));
                 }
 
+                // Re-read under the lock: the instance BookingAccessChecker
+                // returned predates the transaction, and on a retry may describe a
+                // state a previous attempt changed.
                 Booking? locked = await dbContext.Bookings
                     .SingleOrDefaultAsync(b => b.Id == request.BookingId, cancellationToken);
 
-                // Re-read under the lock rather than reusing the instance
-                // BookingAccessChecker returned. That one was read before the
-                // transaction existed, so it is stale by the time this runs -
-                // and definitely stale on a retry, where it may describe a
-                // world the previous attempt already changed.
                 if (locked is null)
                 {
                     throw new NotFoundException(nameof(Booking), request.BookingId);
                 }
 
-                // The ambiguous commit, answered from persisted state rather
-                // than inferred. A previous attempt may have committed and
-                // lost its acknowledgement, in which case the cancellation
-                // already happened and its compensations are already durable -
-                // so this is success, not a conflict. Same verify-before-
-                // compensate reasoning as ConfirmBookingHandler and
-                // OnDeadLetteredAsync (docs/adr/0017).
+                // Already cancelled under the lock means an earlier attempt of this
+                // request committed and lost its acknowledgement: its obligation and
+                // outbox rows are durable, so this is success, not a conflict.
                 if (locked.BookingStatus == BookingStatus.Cancelled)
                 {
                     await transaction.RollbackAsync(cancellationToken);
                     return new CancelOutcome(locked, null, null);
                 }
 
-                // Re-checked under the lock for the same reason the re-read
-                // exists: eligibility was decided against a stale snapshot.
                 if (!locked.CanBeCancelledOn(today))
                 {
                     throw new BookingNotCancellableException(locked.Id);
@@ -253,15 +170,10 @@ public class CancelBookingHandler(
                 DateTimeOffset cancelledAt = timeProvider.GetUtcNow();
                 locked.Cancel(cancelledAt);
 
-                // The durable refund obligation, in the same transaction as the
-                // cancellation. Deliberately says nothing about whether a
-                // payment exists - that is what the two paths used to guess at,
-                // each declining cases it assumed the other owned.
-                //
-                // The booking id is the key, so a retried attempt collides
-                // rather than writing a second. Discarded and re-added on each
-                // attempt because the tracker is cleared at the top of this
-                // delegate (docs/adr/0025).
+                // The refund obligation, in the cancellation's own transaction, so
+                // it is visible if and only if the cancellation committed. It says
+                // nothing about whether a payment exists; the resolver decides
+                // that (docs/adr/0027).
                 dbContext.RefundObligations.Add(new RefundObligation
                 {
                     BookingId = locked.Id,
@@ -269,29 +181,22 @@ public class CancelBookingHandler(
                     PolicyRefundAmount = refundAmount.Amount,
                     Currency = refundAmount.Currency,
                     Cause = BookingCancellationCause.GuestCancellation,
-                    // Due immediately. The inline dispatch below almost always
-                    // beats the sweep to it; this only matters when it does not.
+                    // Due immediately; the sweep acts only if the inline dispatch
+                    // below does not.
                     NextAttemptAt = cancelledAt
                 });
 
-                // Enqueued here, per attempt. These are the rows whose absence
-                // made the old failure silent: the response promises a pending
-                // refund on the strength of them existing, and the relay
-                // backstop can only deliver rows that were written.
                 OutboxMessage reverseTransactionRow = dispatcher.Enqueue(
-                    // Just the booking id. Everything the resolver needs is on
-                    // the obligation written above, in this same transaction -
-                    // repeating the amount here would be a second copy that can
-                    // disagree with the row that decides.
+                    // The booking id only. The amount lives on the obligation, and a
+                    // second copy here could disagree with it.
                     new ReverseTransactionOutboxMessage(locked.Id),
                     BookingsJsonSerializerContext.Default.ReverseTransactionOutboxMessage);
                 OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
                     new ReverseRedemptionOutboxMessage(locked.Id),
                     BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
 
-                // Joins the transaction rather than autocommitting - see
-                // HoldConfirmation.AmbientTransaction. After the booking lock,
-                // never before it.
+                // Joins this transaction (HoldConfirmation.AmbientTransaction), so
+                // the release commits or rolls back with the cancellation.
                 await holdConfirmation.ReleaseHoldAsync(locked.HoldId, cancellationToken);
 
                 await dbContext.SaveChangesAsync(cancellationToken);
@@ -300,10 +205,9 @@ public class CancelBookingHandler(
                 return new CancelOutcome(locked, reverseTransactionRow, reverseRedemptionRow);
             });
 
-            // Dispatched after the commit, and only for an attempt that
-            // actually enqueued. A recovered ambiguous commit has rows from
-            // its own earlier attempt, already dispatched or waiting for the
-            // relay.
+            // After the commit, and only for rows this attempt enqueued. A
+            // recovered commit's rows belong to its earlier attempt and are
+            // already dispatched or waiting for the relay.
             if (outcome.ReverseTransactionRow is not null)
             {
                 await dispatcher.TryDispatchAsync(outcome.ReverseTransactionRow, cancellationToken);
@@ -314,38 +218,9 @@ public class CancelBookingHandler(
                 await dispatcher.TryDispatchAsync(outcome.ReverseRedemptionRow, cancellationToken);
             }
 
-            // Always pending on a fresh cancel, whatever the inline dispatch
-            // just did. The durable outbox row is the guarantee; dispatching
-            // inline is a latency optimisation, and letting its outcome reach
-            // the response gave callers two different shapes for one action.
-            // A caller now has exactly one path here: a figure and
-            // RefundPending: true, or no refund at all. What actually landed
-            // is reported by a later re-cancel, off settled state.
-            // Built from the booking the delegate committed, never the one
-            // read before the transaction opened - reporting a cancellation
-            // off an entity nothing verified is how the old failure managed
-            // to look like success.
-            // Read after the dispatch, and it is now the only thing that
-            // decides the shape of this response.
-            //
-            // It used to be gated on a `refundOwed` boolean computed *before*
-            // the booking row lock. A payment succeeding in between - exactly
-            // the window the whole obligation design exists for - meant this
-            // handler wrote an obligation, the inline dispatch recorded a
-            // refund, and the response still said there was none.
-            //
-            // The persisted snapshot cannot disagree with itself that way: if a
-            // refund is recorded, it is reported; if not, this is a cancellation
-            // with nothing settled against it yet.
-            // One read, and that is the point. This used to be two - the refund
-            // snapshot, then "is anything owed" - and a dispatcher or the sweep
-            // can move the payment Succeeded -> RefundPending between them. The
-            // first would see no refund, the second no succeeded payment, and
-            // the response reported neither: no refund at all, describing a
-            // state that never existed.
-            //
-            // Two reads of moving state cannot be made coherent by reordering
-            // them. There has to be one.
+            // One observation of the payment, from committed state. Two reads could
+            // straddle a Succeeded -> RefundPending transition made by a dispatcher
+            // or the sweep and describe a state that never existed.
             PaymentStateSnapshot? payment =
                 await transactionReversal.GetPaymentStateAsync(outcome.Booking.Id, cancellationToken);
 
@@ -361,100 +236,46 @@ public class CancelBookingHandler(
 
             if (payment is not { AwaitingRefund: true })
             {
-                // No payment at all - the ordinary cancellation, and the honest
-                // answer is no refund. Reporting the computed policy figure
-                // here would promise money to every guest who cancels an unpaid
-                // booking.
+                // No payment: no refund. Reporting the policy figure would promise
+                // money to every guest who cancels an unpaid booking.
                 return BuildResponse(
                     outcome.Booking, refundAmount: null, currency: null, refundPercent: null, RefundStatus.None);
             }
 
-            // Owed but not yet settled - reported as the resolver will settle it,
-            // from the obligation this request just committed.
             return await BuildPendingRefundResponseAsync(outcome.Booking, payment, cancellationToken);
         }
 
-        // Everything below serves the idempotent re-cancel only, so these are
-        // reads of state that settled in some earlier request rather than a
-        // read-back of this one's own writes.
-        //
-        // Checked first, preferred over anything computed below - the
-        // authoritative record of what was actually applied when the
-        // reversal ran, whenever that was. Once this exists, the
-        // transaction has moved past Succeeded, so a Succeeded-only check
-        // below would misread it as "nothing to refund" - a genuinely
-        // refunded booking reporting no refund on an idempotent recancel.
-        // RefundPercent is derived from the snapshot's own ratio, not
-        // resolved fresh, so it always matches what actually landed.
-        // The same single observation as the fresh-cancel branch above, and for
-        // the same reason: the pair of reads this replaces could straddle a
-        // Succeeded -> RefundPending transition and report neither state.
+        // A re-cancel reports state settled by an earlier request, from the same
+        // single observation.
         PaymentStateSnapshot? paymentState =
             await transactionReversal.GetPaymentStateAsync(booking.Id, cancellationToken);
 
         if (paymentState?.RefundAmount is { } settledRefund)
         {
-            // Guarded rather than assumed. Transaction.Create's own
-            // Guard.Against.NegativeOrZero means Amount is never zero here,
-            // so this is unreachable today - but that invariant lives in
-            // another module, and decimal division by zero throws
-            // DivideByZeroException rather than yielding infinity, so an
-            // unguarded ratio would turn a future relaxation of that guard
-            // into a 500 on a cancellation. Reporting a null percent
-            // alongside a real amount is the honest answer if the
-            // denominator ever is zero.
+            // Transaction.Create forbids a zero amount, but that rule lives in
+            // another module and decimal division by zero throws; a null percent
+            // beside a real amount is the answer if it ever changes.
             decimal? refundPercent = paymentState.Amount.Amount == 0m
                 ? null
                 : settledRefund.Amount / paymentState.Amount.Amount * 100m;
 
-            // Currency comes off the snapshot itself now. It used to be paired
-            // back on here from booking.TotalPrice - the same currency, but
-            // asserted at the call site rather than carried by the value, in
-            // the one place getting it wrong costs real money.
-            // From the snapshot, not hardcoded false. A snapshot exists as
-            // soon as MarkRefundPending runs, and this used to report every
-            // one of those as settled - so a guest re-checking a cancellation
-            // whose refund was still queued was told the money had gone back
-            // when it had only been asked for.
             return BuildResponse(
                 booking, settledRefund.Amount, settledRefund.Currency,
                 refundPercent, paymentState.RefundStatus);
         }
 
-        // No snapshot yet - either there was never anything to refund, or a
-        // refund is queued but hasn't reached the refund sub-lifecycle at
-        // all (the inline dispatch attempt, this request's own or an
-        // earlier recancel's, failed or hasn't run). The only way to tell
-        // these apart deterministically, independent of whether dispatch
-        // happens to land inline.
         if (paymentState is not { AwaitingRefund: true })
         {
             return BuildResponse(booking, refundAmount: null, currency: null, refundPercent: null, RefundStatus.None);
         }
 
-        // A Succeeded transaction exists but nothing has reversed it yet - a
-        // refund is guaranteed, and reported as it will be settled.
         return await BuildPendingRefundResponseAsync(booking, paymentState, cancellationToken);
     }
 
     /// <summary>
-    ///     A refund owed and not yet recorded, described by the same decision the
-    ///     resolver will make.
-    ///     <para>
-    ///         Both branches used to recompute guest policy here with
-    ///         ComputeRefund - the second party computing the number the
-    ///         obligation exists to compute once. It disagreed with the resolver
-    ///         in both cases that differ from guest policy: an expired booking,
-    ///         whose obligation carries the full price, and a payment that
-    ///         succeeded after its cancellation, which buys nothing and is
-    ///         refunded in full. A guest was shown 50% pending against a durable
-    ///         100%.
-    ///     </para>
-    ///     <para>
-    ///         Guest policy still belongs to ComputeRefund at the one moment it
-    ///         is decided: when the obligation is written. After that, the
-    ///         obligation is the input and RefundDecision is the rule.
-    ///     </para>
+    ///     A refund owed and not yet recorded, reported at the amount the resolver
+    ///     will record: RefundDecision over the committed obligation
+    ///     (docs/adr/0027). Guest policy enters only as the obligation's amount.
     /// </summary>
     private async Task<CancelBookingResponse> BuildPendingRefundResponseAsync(
         Booking booking, PaymentStateSnapshot payment, CancellationToken cancellationToken)
@@ -462,11 +283,9 @@ public class CancelBookingHandler(
         RefundObligation? obligation = await dbContext.RefundObligations.AsNoTracking()
             .SingleOrDefaultAsync(o => o.BookingId == booking.Id, cancellationToken);
 
-        // No obligation means no cancellation explains this payment - unreachable
-        // for a booking either cancelling path cancelled, since both write one in
-        // the cancellation's own transaction. Reported as what would then happen
-        // to it: its confirmation reaches a cancelled booking and the whole
-        // payment is refunded as unusable.
+        // No obligation means no cancellation explains the payment - unreachable
+        // for a booking either cancelling path cancelled. Reported as what then
+        // happens to it: a payment against a cancelled booking is refunded in full.
         Money amount = obligation is null
             ? payment.Amount
             : RefundDecision.For(
@@ -475,19 +294,17 @@ public class CancelBookingHandler(
                 obligation.CancelledAt,
                 Money.Of(obligation.PolicyRefundAmount, obligation.Currency)).Amount;
 
-        // Against what was paid, the same ratio the settled branch reports, so a
-        // pending figure and the refund it becomes cannot disagree on percent
-        // either. Guarded for the reason given there.
+        // The same ratio the settled branch reports, so a pending figure and the
+        // refund it becomes agree on percent too.
         decimal? percent = payment.Amount.Amount == 0m ? null : amount.Amount / payment.Amount.Amount * 100m;
 
         return BuildResponse(booking, amount.Amount, amount.Currency, percent, RefundStatus.Pending);
     }
 
     /// <summary>
-    ///     What the retried delegate produced: the booking as actually
-    ///     committed, and the compensating rows to dispatch - null when this
-    ///     attempt recovered an earlier one's commit rather than making its
-    ///     own, since those rows already exist and are already in flight.
+    ///     What the retried delegate produced: the committed booking, and the rows
+    ///     to dispatch - null when this attempt recovered an earlier attempt's
+    ///     commit, whose rows are already in flight.
     /// </summary>
     private sealed record CancelOutcome(
         Booking Booking, OutboxMessage? ReverseTransactionRow, OutboxMessage? ReverseRedemptionRow);
@@ -504,29 +321,19 @@ public class CancelBookingHandler(
             return;
         }
 
-        // Case-insensitive and trimmed. Domains are case-insensitive by
-        // definition and no mail provider in practice treats the local part
-        // otherwise, so rejecting "Jane@Example.com" would be refusing the
-        // right answer typed in the wrong case - a false negative on a
-        // confirmation step, which teaches people the field is broken rather
-        // than teaching them to check it.
+        // Case-insensitive and trimmed: rejecting the right address in the wrong
+        // case teaches people the field is broken.
         //
-        // An ordinary comparison rather than a fixed-time one, deliberately.
-        // This is a confirmation that the caller already knows the booking,
-        // not a secret being verified: the link they hold is the credential,
-        // and the endpoint's rate limit is what bounds guessing at the
-        // address. A fixed-time compare would imply a threat model this field
-        // does not have, while still leaking length.
+        // An ordinary comparison, not a fixed-time one. This confirms the caller
+        // knows the booking; the link is the credential, and the endpoint's rate
+        // limit bounds guessing.
         if (!string.IsNullOrWhiteSpace(supplied)
             && string.Equals(supplied.Trim(), access.Booking.GuestEmail?.Trim(), StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
-        // Keyed to the field so a client can show it against the input, the
-        // same shape ConfirmBookingHandler uses for a rejected promo code.
-        // Says only that it did not match: a caller who guessed wrong learns
-        // nothing about the real address.
+        // Keyed to the field, and says only that it did not match.
         throw new ValidationException(
             nameof(CancelBookingRequest.GuestEmail),
             "Enter the email address this booking was made with to confirm the cancellation.");

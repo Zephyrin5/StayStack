@@ -20,10 +20,7 @@ public record CancelBookingResponse
     // RefundPending below.
     public decimal? RefundAmount { get; init; }
 
-    // Added alongside RefundAmount - previously this response reported a
-    // money amount with no currency at all, an outright gap rather than a
-    // deliberate omission (see docs/adr/0015). Same null-in-lockstep
-    // reasoning as RefundAmount.
+    // Null in lockstep with RefundAmount (docs/adr/0015).
     public Currency? Currency { get; init; }
     public decimal? RefundPercent { get; init; }
 

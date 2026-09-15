@@ -4,15 +4,9 @@ namespace Identity.Entities.Configurations;
 
 public class UserConfiguration : IEntityTypeConfiguration<ApplicationUser>
 {
-    // No seeded user, deliberately.
-    //
-    // This used to HasData an administrator - admin@staystack.com, password
-    // "1234", its hash pasted in as a literal - which meant every deployment
-    // that ran migrations came up with a known-credential account holding the
-    // Administrator role, in the schema itself. A shipped password is not a
-    // development convenience once the migration is in the release; the
-    // migration that created it has been in every environment this app has
-    // ever been deployed to, and the hash is readable in source control.
+    // No seeded user, deliberately. A seeded administrator would give every
+    // deployment that runs migrations a known-credential account holding the
+    // Administrator role, with its hash readable in source control.
     //
     // RoleConfiguration still seeds the roles themselves, which is different
     // in kind: roles are reference data the app's authorization checks name

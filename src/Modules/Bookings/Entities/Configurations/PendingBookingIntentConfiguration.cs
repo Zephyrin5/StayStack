@@ -11,13 +11,12 @@ public class PendingBookingIntentConfiguration : IEntityTypeConfiguration<Pendin
     {
         builder.HasKey(i => i.Id);
 
-        // At most one live intent per hold, and this is load-bearing rather
-        // than documentary: ReconcileOrphanedBookingIntentsJob no longer joins
-        // against Bookings to decide whether a hold is genuinely orphaned, so
-        // a second intent row for the same hold (left by a retry against a
-        // hold an earlier crashed attempt already consumed) would make the job
-        // release a hold out from under a live request. Unique here means that
-        // second insert fails before ConfirmHoldAsync is ever called.
+        // At most one live intent per hold. ReconcileOrphanedBookingIntentsJob
+        // releases the hold behind any intent past its grace period without
+        // consulting Bookings, so a second intent for one hold could release it
+        // under a live request. The conditional UPDATE in ConfirmHoldAsync
+        // decides races for the hold; this index catches the gap in
+        // ConfirmBookingHandler's compensation (see its hold_id catch).
         //
         // Plain, not partial - resolving an intent deletes the row, so there
         // is no resolved state left behind to filter out. Named explicitly per

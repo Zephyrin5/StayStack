@@ -35,11 +35,9 @@ public class PromotionConfiguration : IEntityTypeConfiguration<Promotion>
         // sees the stored int) - an unfiltered unique index would let an
         // archived promotion permanently reserve its code:
         // CreatePromotionHandler would keep hitting UniqueViolation for a
-        // code nobody can see or redeem any more. Safe to let multiple
-        // archived rows share a code, since the soft-delete query filter
-        // already makes them invisible to every ordinary lookup. Same
-        // partial-index pattern as UnitAvailabilityHold's holder-token
-        // index and PromotionRedemption's own promotion+email index.
+        // code nobody can see or redeem. Safe to let multiple archived rows
+        // share a code, since the soft-delete query filter already makes them
+        // invisible to every ordinary lookup.
         builder.HasIndex(p => p.Code, CodeIndex)
             .IsUnique()
             .HasFilter("status <> 2")

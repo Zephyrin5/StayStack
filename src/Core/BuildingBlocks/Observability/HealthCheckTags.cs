@@ -3,11 +3,9 @@ namespace BuildingBlocks.Observability;
 /// <summary>
 ///     Tags that decide which health checks answer which probe.
 ///     <para>
-///         A constant rather than a literal at three call sites, because the
-///         failure mode of a typo here is silent and severe: a readiness check
-///         tagged "redy" is simply never run, and the endpoint answers
-///         Healthy - which is exactly the shape of the bug this split exists
-///         to fix.
+///         Constants rather than literals at three call sites, because a typo
+///         fails silently: a readiness check tagged "redy" never runs, and the
+///         endpoint answers Healthy.
 ///     </para>
 /// </summary>
 public static class HealthCheckTags

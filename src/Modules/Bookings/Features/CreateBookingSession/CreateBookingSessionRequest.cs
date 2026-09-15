@@ -4,8 +4,7 @@ namespace Bookings.Features.CreateBookingSession;
 
 /// <summary>
 ///     Exchanges a long-lived booking-management token for a short-lived
-///     session. The only request in the system that carries the management
-///     token, and the reason every other one no longer has to.
+///     session. The only request that carries the management token.
 /// </summary>
 public record CreateBookingSessionRequest : IRequest<CreateBookingSessionResponse>
 {

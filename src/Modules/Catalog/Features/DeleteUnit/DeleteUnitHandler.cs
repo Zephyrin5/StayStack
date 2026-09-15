@@ -56,19 +56,14 @@ public class DeleteUnitHandler(
 
         await strategy.ExecuteAsync(async () =>
         {
-            // Cleared and reloaded inside the delegate, which is the whole of
-            // docs/adr/0025 and was missing here while the sibling
-            // DeletePropertyHandler - written in the same change - had it.
-            //
-            // The instances above are loaded before the retry begins. Mutating
-            // one of them inside means SaveChangesAsync accepts the change
-            // (acceptAllChangesOnSuccess defaults to true), so Archived becomes
-            // the entity's *original* value the moment that call returns - even
-            // though CommitAsync has not run. A transient failure on the commit
-            // then retries a delegate where Archive() assigns a value EF no
-            // longer considers a change: the UPDATE carries the audit columns
-            // and not the status, the commit succeeds, and this handler reports
-            // success over a database still holding an Active unit.
+            // Cleared and reloaded inside the delegate (docs/adr/0025).
+            // SaveChangesAsync accepts changes when it returns
+            // (acceptAllChangesOnSuccess defaults to true), so an instance loaded
+            // before the retry has Archived as its original value before
+            // CommitAsync runs. A transient commit failure then retries a delegate
+            // where Archive() assigns a value EF no longer considers a change: the
+            // UPDATE carries the audit columns and not the status, the commit
+            // succeeds, and this handler reports success over an Active unit.
             dbContext.ChangeTracker.Clear();
 
             await using IDbContextTransaction transaction =
@@ -78,14 +73,12 @@ public class DeleteUnitHandler(
             // the row a retry needs to see. An attempt that committed and lost
             // its acknowledgement leaves the unit archived; without this the
             // reload finds nothing and reports 404 for an archival that
-            // succeeded - a failure answer for a completed operation, which is
-            // worse than the retry it was added to survive.
+            // succeeded.
             //
             // Scoped deliberately. IgnoreQueryFilters is query-wide rather than
-            // entity-wide (the trap documented during the Availability merge),
-            // so it belongs only on a query whose single root is the row being
-            // archived - never on one that also reaches Units or Properties for
-            // some other purpose.
+            // entity-wide, so it belongs only on a query whose single root is the
+            // row being archived - never on one that also reaches Units or
+            // Properties for some other purpose.
             Unit locked = await dbContext.Units.IgnoreQueryFilters()
                               .SingleOrDefaultAsync(u => u.Id == request.UnitId, cancellationToken)
                           ?? throw new NotFoundException(nameof(Unit), request.UnitId);

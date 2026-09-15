@@ -32,16 +32,12 @@ public interface ITransactionLookup
     ///         far wider than any payment deadline.
     ///     </para>
     ///     <para>
-    ///         <b>Deliberately unbounded in time.</b> The obvious signature is
-    ///         "succeeded before the deadline", so a payment that lands late
-    ///         does not rescue a claim that already lapsed. It is the wrong
-    ///         shape today, and would be a narrower version of the bug it is
-    ///         meant to fix: there is no gateway event time recorded anywhere,
-    ///         so the only timestamp available is when <em>this system
-    ///         noticed</em>. Comparing that against the deadline cancels and
-    ///         refunds payments the customer made in good time and a slow
-    ///         webhook reported late - punishing gateway latency, which is
-    ///         exactly the failure being closed here.
+    ///         <b>Deliberately unbounded in time.</b> "Succeeded before the
+    ///         deadline" would stop a late payment rescuing a lapsed claim, but no
+    ///         gateway event time is recorded, only when <em>this system
+    ///         noticed</em>. Comparing that against the deadline would cancel and
+    ///         refund payments the customer made in time and a slow webhook
+    ///         reported late.
     ///     </para>
     ///     <para>
     ///         So any succeeded payment blocks expiry, and the cost of that is

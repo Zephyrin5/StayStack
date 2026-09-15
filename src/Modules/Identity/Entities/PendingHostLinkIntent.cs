@@ -7,13 +7,9 @@ namespace Identity.Entities;
 ///     death) leaves something to recover from. The Identity counterpart of
 ///     PendingBookingIntent; see docs/adr/0017.
 ///     <para>
-///         BecomeHost was the last forward-half cross-module write in the
-///         codebase not covered by an intent row or an outbox row in the same
-///         transaction as its state change. RegisterHostAsync commits a Host
-///         in Hosts' database before Identity writes anything; the
-///         failed-update paths compensate through the outbox, but a process
-///         death between the two wrote nothing anywhere, and no job could
-///         find the orphan.
+///         RegisterHostAsync commits a Host in Hosts' database before Identity
+///         writes anything. Without this row, a process death between the two
+///         would leave an orphaned Host no job could find.
 ///     </para>
 ///     <para>
 ///         Persistence-layer construct, not a Domain aggregate - same
@@ -25,8 +21,8 @@ namespace Identity.Entities;
 ///         <b>Id is the pre-generated hostId</b>, not a fresh value. That is
 ///         what lets ReconcileOrphanedHostLinkIntentsJob delete the orphaned
 ///         Host with no cross-module lookup, and - because RegisterHostAsync
-///         now takes the id rather than minting one - what makes a retried
-///         BecomeHost re-register the same Host instead of creating another.
+///         takes the id - what makes a retried BecomeHost re-register the same
+///         Host instead of creating another.
 ///     </para>
 /// </summary>
 public sealed class PendingHostLinkIntent

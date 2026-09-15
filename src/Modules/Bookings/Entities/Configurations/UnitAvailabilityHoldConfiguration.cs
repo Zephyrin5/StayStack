@@ -28,27 +28,14 @@ public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAv
         // the two statuses that query counts, matching its WHERE clause
         // exactly. A filter narrower than the query silently stops covering
         // it, and the cap runs inside a Serializable transaction on the hold
-        // path, so a sequential scan there is not merely slower.
-        // Deliberately excludes 'booked' - see that query's own comment for
-        // why counting a successfully-booked hold would be a permanent
-        // customer-facing bug, not just an index-tuning choice.
-        // hold_expires_at > @Now is a residual filter applied after this
-        // index narrows to the client's rows - a runtime comparison can't be
-        // baked into a static partial-index predicate.
-        //
-        // Keyed on client_key. The cap used to be keyed on a hold-session
-        // cookie, which meant the caller chose their own budget by dropping
-        // it (docs/adr/0016); that cookie and its holder_token column have
-        // since been removed entirely, since nothing ever read them back.
+        // path, so a sequential scan there is not merely slower. 'booked' is
+        // excluded, as in that query. hold_expires_at > @Now is a residual
+        // filter: a runtime comparison cannot be a partial-index predicate.
+        // Keyed on client_key, which the caller cannot choose (docs/adr/0016).
         builder.HasIndex(h => h.ClientKey, "ix_unit_availability_holds_client_key_active")
             .HasFilter($"status IN ('{HoldStatuses.Held}', '{HoldStatuses.PendingPayment}')")
             .HasDatabaseName("ix_unit_availability_holds_client_key_active");
 
-        // No (status, booked_at) index any more. It existed solely for
-        // ReconcileOrphanedBookedHoldsJob's candidate query, which
-        // docs/adr/0017 replaced with a scan of Bookings' own
-        // pending_booking_intents - nothing queries booked_at now, so the
-        // index was pure write-side cost.
 
         // Covers both cleanup queries' predicate shape - the global sweep
         // (ExpiredHoldsSweepJob: status = 'held' AND hold_expires_at <=

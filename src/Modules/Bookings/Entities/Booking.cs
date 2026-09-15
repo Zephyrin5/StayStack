@@ -85,23 +85,12 @@ public sealed class Booking : Entity, IAggregateRoot
     public Money TotalPrice { get; private set; }
 
     // Persisted as one decimal column (the backing field, mapped in
-    // BookingConfiguration) but exposed as Money, paired with the currency
-    // this booking already has.
+    // BookingConfiguration) but exposed as Money, paired with this booking's
+    // currency, so no consumer pairs a currency by hand. A second currency
+    // column could only ever agree with TotalPrice's.
     //
-    // docs/adr/0015 originally made this a bare decimal, reasoning that a
-    // second currency column could only ever agree with TotalPrice's. That
-    // storage argument still holds and nothing about it changed - which is
-    // why there is no new column here. What did not hold is the leap from
-    // "don't store it twice" to "don't type it": every consumer then had to
-    // re-pair the currency by hand, and ConfirmBookingHandler literally did,
-    // with Money.Of(hold.Subtotal, hold.TotalPrice.Currency). That is a
-    // silent wrong-currency bug waiting for someone to pass a different
-    // second argument, in the one place a type exists specifically to stop
-    // it.
-    //
-    // Snapshotted directly from the hold's own Subtotal at confirm time
-    // (ConfirmBookingHandler), not reconstructed - see ConfirmedHold.Subtotal
-    // for why reconstruction was the actual rounding bug docs/adr/0015 closes.
+    // Snapshotted from the hold's own Subtotal at confirm time, never
+    // reconstructed from total plus discount (docs/adr/0015).
     private decimal _subtotal;
 
     public Money Subtotal => Money.Of(_subtotal, TotalPrice.Currency);
@@ -114,25 +103,14 @@ public sealed class Booking : Entity, IAggregateRoot
     /// <summary>
     ///     When this booking's claim on its unit lapses if nobody pays.
     ///     <para>
-    ///         Exists because confirming a checkout takes real inventory:
-    ///         the hold moves to 'pending_payment' and keeps blocking its
-    ///         range through the exclusion constraint. Without a deadline
-    ///         that claim was permanent - an anonymous caller could submit
-    ///         checkout forms and block a unit's calendar indefinitely
-    ///         without ever paying, and nothing in the system could tell
-    ///         those rows apart from sold ones or reclaim them.
-    ///     </para>
-    ///     <para>
-    ///         The deadline lives here rather than on the hold because it is
-    ///         a Bookings rule about a payment, and Availability has no way
-    ///         to interpret it. It is also why the expiry job lives in this
-    ///         module: releasing the hold without cancelling the booking
-    ///         would leave a guest holding a confirmation with no inventory
-    ///         behind it, and Availability cannot cancel a booking.
+    ///         Confirming a checkout takes real inventory: the hold moves to
+    ///         'pending_payment' and keeps blocking its range. The deadline makes
+    ///         that claim finite; ExpireUnpaidBookingsJob cancels the booking and
+    ///         releases the hold together once it passes (docs/adr/0020).
     ///     </para>
     ///     <para>
     ///         Null once a booking is no longer awaiting payment, and null
-    ///         for bookings that predate this field - the sweep only ever
+    ///         for bookings that predate this field - the sweep only
     ///         looks at Pending rows, so neither is a candidate.
     ///     </para>
     /// </summary>
@@ -141,41 +119,30 @@ public sealed class Booking : Entity, IAggregateRoot
     /// <summary>
     ///     When this booking was cancelled. Null while it is not.
     ///     <para>
-    ///         Read across the module boundary, by the refund paths, to order a
-    ///         cancellation against a payment - see
-    ///         Transaction.RefundOwedIsThisPathsToWrite. Entity.ModifiedAt
-    ///         cannot serve: it is overwritten by every later write, so it says
-    ///         when the row last changed rather than when this happened.
-    ///     </para>
-    ///     <para>
+    ///         Entity.ModifiedAt cannot serve: every later write overwrites it.
     ///         Set by Cancel() and never cleared, since nothing un-cancels a
-    ///         booking. Null on rows cancelled before this column existed,
-    ///         which the refund rule treats as "the payment came first".
+    ///         booking. Null on rows cancelled before this column existed. The
+    ///         refund decision orders against the obligation's cancellation
+    ///         instant, not this (docs/adr/0027).
     ///     </para>
     /// </summary>
     public DateTimeOffset? CancelledAt { get; private set; }
 
-    // Snapshotted from the unit's *current* policy at confirm time, same
-    // "the terms they saw are the terms they get" reasoning as
-    // TotalPrice/Currency - a host tightening their policy afterward can't
-    // retroactively worsen an already-confirmed guest's terms. Nullable
-    // only because a Booking confirmed before this feature existed has no
-    // snapshot - never null for anything created through Create() below.
-    // CancelBookingHandler falls back to CancellationPolicy.CreateDefault()
-    // for that case rather than fabricating a retroactive claim.
+    // Snapshotted from the unit's policy at confirm time: a host tightening
+    // their policy afterward cannot worsen a confirmed guest's terms. Nullable
+    // only for bookings confirmed before policies existed; never null through
+    // Create(). CancelBookingHandler falls back to
+    // CancellationPolicy.CreateDefault() for those.
     public CancellationPolicy? CancellationPolicy { get; private set; }
 
     // The property's IANA zone at confirm time, snapshotted for the same
     // reason CancellationPolicy is: a host correcting a mis-entered zone must
-    // not retroactively move an existing guest's refund boundary or review
-    // window. See docs/adr/0018.
+    // not move an existing guest's refund boundary or review window
+    // (docs/adr/0018).
     //
-    // Non-nullable, unlike CancellationPolicy - deliberately. A null policy
-    // falls back to CreateDefault(), a defensible business default; a null
-    // zone would fall back to UTC, which is precisely the defect ADR-0018
-    // exists to remove. Same snapshot pattern, different stakes, so different
-    // nullability. Pre-ADR rows were backfilled by migration rather than left
-    // to a runtime guess.
+    // Non-nullable, unlike CancellationPolicy: a null policy has a defensible
+    // default, while a null zone would fall back to UTC, the error ADR-0018
+    // removes. Older rows were backfilled by migration.
     public string TimeZoneId { get; private set; }
 
     // Takes its id rather than generating one internally - a redeemed promo

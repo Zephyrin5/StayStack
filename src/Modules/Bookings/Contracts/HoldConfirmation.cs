@@ -28,12 +28,9 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
     ///     The caller's transaction, when there is one.
     ///     <para>
     ///         These statements are Dapper, and Dapper does not discover an
-    ///         ambient EF transaction: without being handed it explicitly,
-    ///         a command on an enlisted connection either fails or - worse -
-    ///         commits on its own while the caller believes it is inside
-    ///         their transaction. That autocommit was the whole shape of
-    ///         defect 3, and now that holds live in this module it is
-    ///         avoidable rather than inherent.
+    ///         ambient EF transaction: not handed it explicitly, a command on an
+    ///         enlisted connection either fails or commits on its own while the
+    ///         caller believes it is inside their transaction.
     ///     </para>
     ///     <para>
     ///         Null when the caller has no transaction open. Every read here
@@ -47,27 +44,21 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
     ///     The caller's transaction, required.
     ///     <para>
     ///         The three statements that change a hold's status are each half
-    ///         of a decision whose other half lives in a Bookings row: the
-    ///         transition and the intent, the payment and the confirmation,
-    ///         the release and the cancellation. Every one of them has already
-    ///         been the subject of a defect where the two halves committed
-    ///         independently, and the whole point of holds living in this
-    ///         module is that they no longer have to.
+    ///         of a decision whose other half is a Bookings row: the transition
+    ///         and the intent, the payment and the confirmation, the release and
+    ///         the cancellation. The two halves must commit together.
     ///     </para>
     ///     <para>
-    ///         Without this, the difference between "participates in your
-    ///         transaction" and "commits immediately, whatever you do next" is
-    ///         invisible at the call site and decided by whoever opened a
-    ///         transaction several frames up. Every caller today is correct;
-    ///         the next one has nothing to tell it what it owes, and the way it
-    ///         would find out is a hold released beneath a cancellation that
+    ///         Required so that "participates in your transaction" versus "commits
+    ///         immediately" is not decided silently by whoever opened a
+    ///         transaction several frames up; a caller without one finds out here
+    ///         rather than through a hold released beneath a cancellation that
     ///         rolled back.
     ///     </para>
     ///     <para>
-    ///         A throw rather than opening one here. Opening a transaction on
-    ///         the caller's behalf would make each of these atomic with
-    ///         nothing but itself, which is exactly the shape that reads as
-    ///         safe and is not.
+    ///         A throw rather than opening one: a transaction opened on the
+    ///         caller's behalf would make each statement atomic with nothing but
+    ///         itself.
     ///     </para>
     /// </summary>
     private DbTransaction RequiredTransaction([System.Runtime.CompilerServices.CallerMemberName] string? caller = null) =>
@@ -77,13 +68,9 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
             "is how a hold ends up released beneath a cancellation that never landed.");
 
     // Raw shape of the RETURNING row, materialized first and assembled into
-    // Money afterward - the same materialize-first-map-after shape as
-    // docs/adr/0006, applied to Dapper rather than EF. The three amounts
-    // share one currency column, which is why they cannot be mapped straight
-    // onto Money here.
-    //
-    // Currency is the enum rather than its column text: CurrencyTypeHandler
-    // converts it, so the parse that used to sit at the use site is gone.
+    // Money afterward (docs/adr/0006, applied to Dapper). The three amounts
+    // share one currency column, so they cannot be mapped straight onto Money.
+    // CurrencyTypeHandler converts the column to the enum.
     private sealed record ConfirmedHoldRow
     {
         public Guid UnitId { get; init; }
@@ -129,34 +116,18 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
     private async Task<ConfirmedHold> ExecuteConfirmAsync(
         DbConnection connection, Guid holdId, CancellationToken cancellationToken)
     {
-        // A single atomic UPDATE...RETURNING, not a transaction spanning
-        // this and the Booking insert that follows in Bookings - see
-        // docs/adr/0003 for why this is a cross-module compensating write,
-        // not a distributed transaction. The status/expiry check in the
-        // WHERE clause makes this safe to call exactly once per hold: a
-        // second call (already-booked or expired) returns no row. @Now
-        // (the app's TimeProvider), not Postgres' own now() - otherwise
-        // the app server and DB server are two different clocks comparing
-        // the same expiry.
+        // The status/expiry check in the WHERE clause makes this succeed at most
+        // once per hold: a second call finds no 'held' row. @Now (the app's
+        // TimeProvider), not Postgres' now(), so one clock compares the expiry.
+        //
         // 'pending_payment', not 'booked': submitting a checkout form is not
-        // paying, and this used to mint permanent inventory on that basis -
-        // a row nothing reclaimed, holding its range through the exclusion
-        // constraint forever, reachable anonymously. 'booked' is now written
-        // only by MarkHoldPaidAsync, from the payment-confirmation path.
+        // paying, and 'booked' is inventory nothing reclaims. booked_at stays
+        // null for the same reason. MarkHoldPaidAsync is the only writer of
+        // 'booked'.
         //
-        // booked_at stays null for the same reason - it records when the
-        // range was actually sold.
-        //
-        // client_key is NOT cleared here, unlike the booked transition,
-        // which does clear it. It is a caller's network address and the
-        // retention argument for nulling it still stands; what changed is
-        // when. Holding it through the payment window keeps it available to
-        // any per-client reasoning during exactly the window it describes,
-        // and the row loses it on payment or is released outright by
-        // Bookings' expiry job. The concurrent-hold cap does read it here -
-        // it counts 'held' and 'pending_payment' together, because a
-        // transition that moved a row out of the cap's sight was the way to
-        // escape the cap entirely. See HoldAvailabilityHandler's count query.
+        // client_key is kept: the concurrent-hold cap counts 'held' and
+        // 'pending_payment' together, since a transition out of the cap's sight
+        // would escape it. MarkHoldPaidAsync clears it (docs/adr/0016).
         const string sql = $"""
                             UPDATE unit_availability_holds
                             SET status = '{HoldStatuses.PendingPayment}'
@@ -188,8 +159,7 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
             GuestCount = row.GuestCount,
             TotalPrice = Money.Of(row.TotalPrice, currency),
             // The one place the hold's single currency column is paired back
-            // onto its three amounts. Callers receive Money and never repeat
-            // this - ConfirmBookingHandler used to redo it by hand.
+            // onto its three amounts; callers receive Money.
             Subtotal = Money.Of(row.Subtotal, currency),
             LengthOfStayDiscountAmount = row.LengthOfStayDiscountAmount is { } discount
                 ? Money.Of(discount, currency)
@@ -243,39 +213,23 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
             await dbContext.Database.OpenConnectionAsync(cancellationToken);
         }
 
-        // The only writer of 'booked', and the reason that state is reachable
-        // at all rather than dead: it is driven from the payment-confirmation
-        // path (Transactions' ConfirmBookingPaymentOutboxMessage ->
-        // IBookingPaymentConfirmation), which is admin-reachable today via
-        // MarkTransactionSucceeded, so the transition is exercised now
-        // instead of waiting on a payment provider.
+        // The only writer of 'booked', driven from the payment-confirmation path
+        // (ConfirmBookingPaymentOutboxMessage -> IBookingPaymentConfirmation).
+        // booked_at records when the range was sold, which is now.
         //
-        // booked_at is set here rather than at checkout - it records when the
-        // range was sold, which is this moment and not the earlier one.
+        // client_key is cleared: nothing reads a network address once the row
+        // is past the payment window, and a booked row outlives the hold by
+        // years. Nothing restores it - ReleaseHoldAsync resets hold_expires_at
+        // to now, putting the row outside the cap's WHERE clause regardless.
         //
-        // client_key is cleared here, the retention argument that used to
-        // apply at checkout: it is a caller's network address, nothing reads
-        // it once the row is past the payment window, and this row now
-        // outlives the hold by years. Nothing restores it - ReleaseHoldAsync
-        // resets hold_expires_at to now, putting the row outside the cap's
-        // WHERE clause regardless.
+        // Idempotent: 'booked' is accepted as well as 'pending_payment' and
+        // reports success, because the outbox can redeliver after a committed
+        // confirmation. COALESCE keeps the original booked_at across those
+        // redeliveries.
         //
-        // Idempotent: 'booked' is accepted as well as 'pending_payment', and
-        // reports success. Cross-module commit ambiguity is unavoidable here
-        // - the caller marks the hold paid and then confirms the booking on
-        // a different DbContext, so a crash or a retried outbox message
-        // replays this call against a hold that is already sold. Rejecting
-        // that would make the retry that is supposed to finish the job the
-        // thing that permanently fails it.
-        //
-        // COALESCE keeps the original booked_at across those replays: it
-        // records when the range was sold, and a retry an hour later is not
-        // a second sale.
-        //
-        // 'held' is still refused, and that distinction is the whole value
-        // of the return: a hold released or expired out from under a
-        // late-landing payment is inventory this platform no longer owns,
-        // and the caller has to compensate rather than report success.
+        // 'held' is refused, and that is the value of the return: a hold
+        // released or expired under a late-landing payment is inventory this
+        // platform no longer owns, and the caller must compensate.
         const string sql = $"""
                             UPDATE unit_availability_holds
                             SET status = '{HoldStatuses.Booked}',
@@ -316,24 +270,17 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
             await dbContext.Database.OpenConnectionAsync(cancellationToken);
         }
 
-        // hold_expires_at reset to now(), not left at its original value -
-        // otherwise an immediate release (a cancellation, or a
-        // ConfirmBookingHandler rollback moments after the hold was made)
-        // would leave the range blocking new holds for whatever was left
-        // on the original timer, even though the caller just gave it
-        // back. Resetting it makes the row immediately eligible for
-        // cleanup instead of waiting it out.
+        // hold_expires_at reset to now, so a released range stops blocking new
+        // holds at once instead of for whatever was left on the original timer,
+        // and the row is immediately eligible for cleanup.
         //
-        // Matches both post-checkout states, not just 'booked'. Every caller
-        // of this is a compensation - ConfirmBookingHandler's two catch
-        // blocks and its promo-rejection branch, ReconcileOrphanedBooking-
-        // IntentsJob, CancelBookingHandler's outbox message, and the unpaid-
-        // booking expiry job - and almost all of them now act on a hold that
-        // is 'pending_payment', because that is what confirming produces.
-        // Left matching 'booked' alone, every one of those would have become
-        // a silent zero-row no-op and stranded the hold: the exact bug the
-        // reconcile job exists to prevent, reintroduced in a WHERE clause
-        // with no test failing to say so.
+        // Matches both post-checkout states. Every caller is a compensation or
+        // cancellation (ConfirmBookingHandler's failure paths,
+        // ReconcileOrphanedBookingIntentsJob, CancelBookingHandler, the expiry
+        // job), and most act on a 'pending_payment' hold; matching 'booked'
+        // alone would make each a silent zero-row no-op that strands the hold.
+        // 'held' is deliberately excluded: ConfirmBookingHandler's second release
+        // is safe only because of it.
         const string sql = $"""
                             UPDATE unit_availability_holds
                             SET status = '{HoldStatuses.Held}', hold_expires_at = @Now, booked_at = NULL

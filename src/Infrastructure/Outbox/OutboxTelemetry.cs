@@ -19,13 +19,10 @@ public static class OutboxTelemetry
         description: "Number of outbox messages that exhausted retries, tagged by module and message type.");
 
     /// <summary>
-    ///     Distinct from DeadLettered, which only counts a row's *first*
-    ///     crossing into dead-letter state. SweepDeadLetteredAsync retries a
-    ///     dead-lettered row hourly forever, and docs/adr/0017 makes that
-    ///     forever-retry load-bearing (it's why the reconcile job no longer
-    ///     covers a hold behind a Cancelled booking). Without this counter, a
-    ///     message whose failure is permanent loops indefinitely emitting
-    ///     nothing at all - the retry is invisible precisely because Attempts
+    ///     Distinct from DeadLettered, which only counts a row's first crossing
+    ///     into dead-letter state. SweepDeadLetteredAsync retries a dead-lettered
+    ///     row hourly forever, and docs/adr/0017 relies on that. Without this
+    ///     counter a permanently failing message loops silently, since Attempts
     ///     is already past MaxAttempts.
     /// </summary>
     public static readonly Counter<long> DeadLetterRetried = Meter.CreateCounter<long>(

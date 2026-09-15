@@ -48,17 +48,9 @@ public sealed class UnitAvailabilityHold
     public DateTimeOffset? HoldExpiresAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 
-    // Set only when Status transitions to "booked" (HoldConfirmation.
-    // ConfirmHoldAsync), cleared on release. Never set at creation, unlike
-    // CreatedAt.
-    //
-    // Nothing queries it any more: it used to be the grace-period anchor
-    // ReconcileOrphanedBookedHoldsJob scanned to find a 'booked' hold with
-    // no matching booking, and docs/adr/0017 moved that question to
-    // Bookings' own pending_booking_intents. Kept because "when was this
-    // hold consumed" is real diagnostic state that costs one timestamp to
-    // maintain - but it is write-only now, so don't assume an index or a
-    // reader exists for it.
+    // Set when the hold becomes 'booked' (HoldConfirmation.MarkHoldPaidAsync),
+    // cleared on release. Diagnostic only: nothing queries it, so do not assume
+    // an index or a reader exists.
     public DateTimeOffset? BookedAt { get; set; }
 
 

@@ -32,23 +32,11 @@ public class ConfirmBookingHandler(
 {
     public async ValueTask<ConfirmBookingResponse> Handle(ConfirmBookingRequest request, CancellationToken cancellationToken)
     {
-        // Chosen up front: a redeemed promo code needs this id to write its
-        // PromotionRedemption row before the Booking itself is ever saved, the
-        // intent row below is keyed by it, and - because it's pre-generated -
-        // any failed save can ask the database whether the Booking actually
-        // committed rather than inferring it from an exception type.
-        // Before anything else, and deliberately outside every transaction
-        // below: a replay must not begin a confirmation at all.
-        // Checked here rather than in the validator, because the endpoint
-        // assigns this after validation has run - see the property's comment.
-        //
-        // The floor is the point. Replaying a key returns a live management
-        // token, so a caller sending a counter has misunderstood what they are
-        // holding, and two guests colliding on "1" would mean handing one of
-        // them the other's booking. The fingerprint check below is what makes
-        // a guessed key useless in practice; this makes the misunderstanding
-        // loud instead of latent. 16 admits a UUID and any sensible random
-        // token, and excludes a counter.
+        // Checked here, not in the validator: the endpoint assigns the key after
+        // validation runs. Replay returns a live management token, so a counter
+        // as a key would let two guests colliding on "1" reach each other's
+        // booking; 16 characters admits a UUID and excludes a counter. The
+        // fingerprint check in ReplayAsync is what makes a guessed key useless.
         if (request.IdempotencyKey is { Length: < 16 or > 128 })
         {
             throw new ValidationException(
@@ -72,50 +60,36 @@ public class ConfirmBookingHandler(
 
         Guid bookingId = Guid.CreateVersion7();
 
-        // Transaction A. The hold transition and the marker saying "a
-        // confirmation for this hold began" now commit together, which is what
-        // makes an ambiguous commit answerable: the intent is present if and
-        // only if the hold moved. Before, they were two independent commits,
-        // so a connection lost between them left a hold in 'pending_payment'
-        // with nothing recording that it had been claimed - the reconcile job
-        // had no row to find, and the range stayed blocked until someone
-        // noticed. They were only ever separable because they lived in
-        // different modules.
+        // Transaction A: the hold transition and the intent commit together, so
+        // the intent is present if and only if the hold moved (docs/adr/0017).
         ConfirmationStart start = await BeginConfirmationAsync(
             request.HoldId, bookingId, keyHash, requestFingerprint, cancellationToken);
 
-        // The race the top-of-handler read cannot close: a concurrent request
-        // carrying the same key finished between that read and our insert.
-        //
-        // Replayed here rather than inside BeginConfirmationAsync, and that is
-        // the point: the transaction is resolved and the execution strategy is
-        // behind us, so the management token this mints is written by a save
-        // that commits on its own. Done in there, it was minted inside a
-        // transaction nobody was going to commit.
+        // A concurrent request with the same key finished between the read above
+        // and this request's reservation. Replayed here, after the transaction is
+        // resolved, because ReplayAsync mints a management token and its hash
+        // must commit before the guest receives it (docs/adr/0025).
         if (start.ReplayRecord is not null)
         {
             // Nothing from the abandoned attempt may ride along with the token
-            // insert. Safe only on this branch - the success path below needs
-            // its intent and record still tracked.
+            // insert. Only this branch clears; the success path needs its intent
+            // and record tracked.
             dbContext.ChangeTracker.Clear();
 
             return await ReplayAsync(start.ReplayRecord, requestFingerprint, cancellationToken);
         }
 
-        // Non-null whenever Replay is null - the two are the result's two
-        // arms, and BeginConfirmationAsync returns one or the other.
+        // Set whenever ReplayRecord is null.
         PendingBookingIntent intent = start.Intent!;
         ConfirmedHold hold = start.Hold!;
         CheckoutIdempotencyRecord? idempotencyRecord = start.Record;
 
-        // ExecuteDelete, not a tracked Remove: on a failure path a zero-row
-        // delete just means the reconcile job got here first, which has to be
-        // a clean no-op. A tracked delete asserts affected rows, so batched
-        // with the compensating enqueues below it would throw, roll those rows
-        // back so they're never written, and replace the real exception with
-        // an EF concurrency error. Detaches afterward - ExecuteDelete bypasses
-        // the change tracker, leaving the instance Unchanged against a row
-        // that no longer exists.
+        // ExecuteDelete, not a tracked Remove: on a failure path a zero-row delete
+        // means the reconcile job got there first, and must be a no-op. A tracked
+        // delete asserts one affected row, so it would throw inside the
+        // compensating save and roll back the outbox rows saved with it. The
+        // instance is detached afterwards, since ExecuteDelete bypasses the
+        // tracker.
         async Task DiscardIntentAsync()
         {
             await dbContext.PendingBookingIntents
@@ -123,15 +97,9 @@ public class ConfirmBookingHandler(
                 .ExecuteDeleteAsync(cancellationToken);
             dbContext.Entry(intent).State = EntityState.Detached;
 
-            // Frees the key so the client's retry can start a fresh
-            // confirmation, since this one left nothing to replay.
-            //
-            // Filtered on CompletedAt == null, which is not belt and braces.
-            // This same helper runs on the verify-before-compensate path where
-            // the booking *did* commit - and there the record is completed, in
-            // that very transaction. Deleting it there would destroy the reply
-            // for precisely the case the feature exists for: the guest whose
-            // connection dropped after the commit.
+            // Frees the key for the client's retry. Filtered on CompletedAt ==
+            // null because this also runs on the path where the booking did
+            // commit, and there the completed record is the guest's replay.
             await dbContext.CheckoutIdempotencyRecords
                 .Where(r => r.BookingId == bookingId && r.CompletedAt == null)
                 .ExecuteDeleteAsync(cancellationToken);
@@ -142,31 +110,17 @@ public class ConfirmBookingHandler(
             }
         }
 
-        // The compensating procedure, written once. All three failure paths
-        // below run exactly this - enqueue, save, dispatch, discard - and the
-        // ordering within it took several passes to get right, which is
-        // precisely why having it spelled out three times was a liability: a
-        // future edit to one copy diverges from the other two silently, and
-        // every copy reads as deliberate because each is internally
-        // consistent.
-        //
-        // The order is the whole content of this function:
+        // The compensation every failure path below runs. The order is the
+        // content:
         //
         //  - Enqueue then save, so the compensations are durable rows before
-        //    anything acts on them (docs/adr/0003). Dispatching is a best
-        //    effort on top; OutboxRelayJob delivers whatever this misses.
-        //  - Save before DiscardIntentAsync, never after. The intent is the
-        //    marker that says "a confirmation started and did not finish", so
-        //    discarding it first would remove the safety net before the
-        //    replacement was durable. A crash between the two instead leaves
-        //    the intent alive and lets the reconcile job repeat these
-        //    compensations, which are idempotent by construction.
-        //  - DiscardIntentAsync last, which also means its ExecuteDelete is
-        //    registered after the caller's ChangeTracker.Clear() where there
-        //    is one, and its detach runs after the delete rather than before.
-        //
-        // reverseRedemption is the only thing that varies between the three
-        // callers, so it is the only parameter.
+        //    anything acts on them (docs/adr/0003); dispatch is best effort and
+        //    the relay delivers the rest.
+        //  - Save before discarding the intent. The intent is the marker the
+        //    reconcile job recovers from; discarded first, a crash would leave
+        //    neither it nor the outbox rows. A crash after the save leaves the
+        //    intent, and the job repeats compensations whose handlers verify
+        //    state.
         async Task CompensateAsync(bool reverseRedemption)
         {
             OutboxMessage releaseHoldRow = dispatcher.Enqueue(
@@ -192,15 +146,10 @@ public class ConfirmBookingHandler(
 
         if (!string.IsNullOrWhiteSpace(request.PromoCode))
         {
-            // A redeemed code is exclusive of the length-of-stay discount
-            // rather than stacking with it - the coupon applies against the
-            // rate-adjusted subtotal (LOS discount undone), not the
-            // LOS-discounted total. See PricingCalculator for why this is
-            // the one PricingRule type a coupon competes with rather than
-            // compounds. hold.Subtotal is read directly, not reconstructed
-            // via TotalPrice + LengthOfStayDiscountAmount - that
-            // reconstruction is exactly the rounding bug docs/adr/0015
-            // exists to close.
+            // A coupon replaces the length-of-stay discount rather than stacking
+            // with it, so it applies to the subtotal - read from the hold's
+            // snapshot, never reconstructed from total plus discount, which does
+            // not survive rounding (docs/adr/0015).
             Money couponBase = hold.Subtotal;
             PromotionRedemptionResult? redemption = null;
 
@@ -212,28 +161,16 @@ public class ConfirmBookingHandler(
             }
             catch (Exception redemptionException)
             {
-                // A genuinely broken code - RedeemAsync itself failed, so it
-                // never created a redemption to reverse. The hold is
-                // already 'booked' and nothing else will ever confirm it
-                // into a real Booking - releasing it means the guest has to
-                // re-hold, the correct cost for a code that was never
-                // valid. Enqueued via the outbox (docs/adr/0003), not a
-                // direct call that could be silently lost.
-                // Reversed even though RedeemAsync threw and may never have
-                // created a redemption to reverse: ReverseRedemptionAsync is
-                // a no-op when there is nothing outstanding, and guessing
-                // wrong the other way would leave a single-use code burned.
+                // Reversed even though RedeemAsync threw: the reversal is a no-op
+                // when nothing was redeemed, and guessing wrong the other way would
+                // burn a single-use code. The hold is released too - it is
+                // 'pending_payment', and a retried confirmation cannot claim it.
                 await CompensateAsync(reverseRedemption: true);
 
                 if (redemptionException is PromotionInvalidException promotionInvalidException)
                 {
-                    // Bare nameof(), like every other ValidationException.
-                    // This used to camelCase the key itself, because
-                    // ValidationProblemDetails.Errors is a dictionary and
-                    // PropertyNamingPolicy doesn't reach dictionary keys -
-                    // true, but a rule only two throw sites in the codebase
-                    // remembered. GlobalExceptionHandler.BuildValidationProblem
-                    // now converts every key on the way out.
+                    // A bare nameof() key; GlobalExceptionHandler camel-cases
+                    // every validation key on the way out.
                     throw new ValidationException(
                         nameof(request.PromoCode),
                         promotionInvalidException.Message);
@@ -244,57 +181,21 @@ public class ConfirmBookingHandler(
 
             Money discountedPrice = couponBase - redemption.DiscountAmount;
 
-            // The redeemed discount applies against couponBase (pre-LOS
-            // subtotal) - if it's smaller than the LOS discount it just
-            // replaced, that alone can land at or above hold.TotalPrice,
-            // the LOS-discounted total the guest was already quoted.
-            // Rejected outright rather than falling back to the LOS price:
-            // RedeemAsync already consumed the code, and applying it
-            // anyway for zero benefit would overcharge the guest and burn
-            // their code for nothing.
+            // Refused when the coupon does not beat the length-of-stay discount
+            // it replaces (at or above the total already quoted), or when it
+            // brings the total to zero or below - a zero-total booking cannot be
+            // paid, since Transaction.Create refuses it. Booking.Create enforces
+            // the same invariant; this gives the guest a real message.
             //
-            // Compensates exactly like the redemption-failure branch above:
-            // release the hold AND reverse the redemption. Both are
-            // post-ConfirmHoldAsync failures of the same operation, so they
-            // owe the same cleanup.
-            //
-            // This branch used to reverse the redemption only, on the
-            // reasoning that the code was valid and the guest did nothing
-            // wrong, so "the hold stays 'booked' so a retried Confirm can
-            // still use it". That premise is false: ConfirmHoldAsync updates
-            // WHERE status = 'held', so a 'booked' hold yields no row and a
-            // retry gets NotFoundException. The hold was not being preserved
-            // for the guest, it was being stranded - and nothing else would
-            // ever collect it. ExpiredHoldsSweepJob only deletes
-            // status = 'held'; ReconcileOrphanedBookingIntentsJob works from
-            // intents, which DiscardIntentAsync below then removes; and the
-            // job that used to scan for booked holds with no booking is gone
-            // (docs/adr/0017). The unit's dates would be blocked forever,
-            // with no row anywhere pointing at them - reached by nothing more
-            // exotic than a guest typing a coupon that doesn't beat their
-            // length-of-stay discount.
-            //
-            // Releasing does cost the guest their 15-minute window, since
-            // ReleaseHoldAsync resets hold_expires_at to now. That is the
-            // right trade against blocking the dates permanently, and it is
-            // recoverable: the expired row no longer blocks a re-hold, because
-            // HoldAvailabilityHandler's own per-unit cleanup DELETE removes
-            // stale 'held' rows before its INSERT.
-            //
-            // <= 0 as well as the no-savings case above. ComputeDiscountAmount
-            // caps a discount at the subtotal, so a 100% code - or any
-            // FixedAmount code at least as large - lands exactly on zero,
-            // which `>= hold.TotalPrice` does not catch (0 >= 300 is false).
-            // A zero-total booking is unpayable: Transaction.Create refuses
-            // it, so the guest would be left holding a Pending booking that
-            // fails every payment attempt. Booking.Create enforces the same
-            // invariant; this branch exists so the guest gets a real message
-            // rather than a domain guard's.
+            // Both the redemption and the hold are compensated. Leaving the hold
+            // 'pending_payment' for a retry would strand it: ConfirmHoldAsync
+            // accepts only 'held', and once the intent is discarded nothing
+            // points at the hold. Releasing costs the guest their hold window
+            // (hold_expires_at is reset to now), and the expired row does not
+            // block a re-hold, which deletes expired 'held' rows first.
             if (discountedPrice.Amount <= 0m || discountedPrice.Amount >= hold.TotalPrice.Amount)
             {
-                // The redemption succeeded here, so it definitely needs
-                // reversing - the code was consumed by a booking that is
-                // about to be refused.
+                // The redemption succeeded, so it needs reversing.
                 await CompensateAsync(reverseRedemption: true);
 
                 throw new ValidationException(
@@ -308,29 +209,18 @@ public class ConfirmBookingHandler(
             totalPrice = discountedPrice;
         }
 
-        // Only a guest-checkout booking gets one - an authenticated
-        // caller's account is already proof of ownership, and issuing a
-        // token nobody will ever use would just be a second, redundant way
-        // to access the same booking. Raw value returned exactly once, in
-        // the response below - only its hash is ever persisted.
+        // Guest checkouts only: an account already proves ownership. The plaintext
+        // is returned once, in the response; only its hash is stored.
         string? managementToken = currentUserProvider.UserId is null ? SecureToken.Generate() : null;
 
         Booking booking;
 
         try
         {
-            // The unit's *current* cancellation policy, snapshotted now
-            // rather than re-resolved at cancel time - see
-            // Booking.CancellationPolicy's own doc comment. Not sourced
-            // from the hold's snapshot (unlike price/currency): the hold
-            // only carries what HoldAvailabilityHandler wrote via raw SQL,
-            // and a cancellation policy has no bearing on the
-            // exclusion-constraint machinery that record exists for - one
-            // extra Catalog round trip here. Inside this try, not before
-            // it: a failure here (the unit vanishing between hold and
-            // confirm - narrow, but real) needs the same hold-
-            // release/redemption-reversal compensation as a failed
-            // Bookings.Add below, not a bare unhandled throw.
+            // The unit's current cancellation policy, snapshotted onto the booking
+            // (see Booking.CancellationPolicy); the hold does not carry it. Inside
+            // the try, so a unit vanishing between hold and confirm is compensated
+            // like any other failure here.
             UnitSummary unit = await unitLookup.GetUnitAsync(hold.UnitId, cancellationToken)
                                 ?? throw new NotFoundException("Unit", hold.UnitId);
 
@@ -349,10 +239,8 @@ public class ConfirmBookingHandler(
                 hold.Subtotal,
                 unit.CancellationPolicy,
                 unit.TimeZoneId,
-                // The hold is already 'pending_payment' by this point, which
-                // means this unit is off the market. This is the deadline
-                // that gives it back: ExpireUnpaidBookingsJob cancels the
-                // booking and releases the hold once it passes.
+                // The hold is off the market from here; ExpireUnpaidBookingsJob
+                // cancels the booking and releases it once this passes.
                 timeProvider.GetUtcNow().AddMinutes(bookingLifecycle.Value.PaymentWindowMinutes));
 
             dbContext.Bookings.Add(booking);
@@ -368,32 +256,18 @@ public class ConfirmBookingHandler(
                 });
             }
 
-            // A *tracked* delete, unlike every failure path above, and this
-            // is the whole correctness argument (docs/adr/0017). EF asserts
-            // affected rows on it, so if the reconcile job already resolved
-            // this intent the save throws - and because the delete and the
-            // Booking insert share one transaction, no Booking is written.
-            // Timing can't provide this: nothing here re-validates the hold,
-            // so without it a job firing mid-request would release a live
-            // hold and reverse a live redemption underneath a booking that
-            // then commits anyway.
+            // A tracked delete, unlike the failure paths, and that is what
+            // excludes the reconcile job (docs/adr/0017): EF asserts one affected
+            // row, so if the job already removed the intent the save throws and,
+            // sharing a transaction with the insert, writes no Booking.
             dbContext.PendingBookingIntents.Remove(intent);
 
-            // Completed in the same SaveChangesAsync as the Booking insert, so
-            // the record says "there is a booking to replay" if and only if
-            // there is one. Writing it afterwards would reintroduce, one level
-            // up, exactly the lost-acknowledgement gap this feature exists to
-            // close: a committed booking whose replay record never landed is a
-            // guest stranded by the mechanism meant to rescue them.
+            // Completed in the same save as the Booking, so the record says there is
+            // a booking to replay if and only if there is one.
             if (idempotencyRecord is not null)
             {
-                // CompletedAt only. The plaintext management token used to be
-                // written here too, which undid the whole point of storing
-                // only SecureToken.Hash in booking_management_tokens: one
-                // table read yielded live bearer credentials for every guest
-                // checkout inside the replay window. A leaked URL exposes one
-                // booking; a leaked backup exposed all of them. Replay mints a
-                // fresh token instead - see ReplayAsync.
+                // CompletedAt only. The token is never stored in plaintext; replay
+                // mints a new one (docs/adr/0022).
                 idempotencyRecord.CompletedAt = timeProvider.GetUtcNow();
             }
 
@@ -401,109 +275,60 @@ public class ConfirmBookingHandler(
         }
         catch (Exception ex)
         {
-            // ChangeTracker.Clear() first - the failed Booking/
-            // BookingManagementToken insert above is still tracked Added,
-            // and would otherwise be re-attempted by the SaveChangesAsync
-            // below. Clearing also removes any identity-map ambiguity from
-            // the lookup that follows.
+            // The failed inserts are still tracked Added; cleared so the
+            // compensating save below does not retry them.
             dbContext.ChangeTracker.Clear();
 
-            // Ask the database what actually happened; never infer it from
-            // the exception type. SaveChangesAsync runs under
-            // EnableRetryOnFailure, and an execution strategy cannot tell a
-            // failed transaction from one that committed and lost its
-            // acknowledgement - it just re-runs the batch, which then fails
-            // on its own already-committed rows. Which exception that
-            // surfaces depends on EF's internal command ordering (a
-            // duplicate-key DbUpdateException if the insert replays first, a
-            // zero-row DbUpdateConcurrencyException if the delete does), so
-            // the verdict has to come from the row, not the type. Without
-            // this, a committed booking gets "compensated": its hold
-            // released back to immediately-re-bookable, its redemption
-            // reversed, and a 500 returned for a booking that succeeded.
+            // Ask the database; never infer from the exception type. The save runs
+            // under the execution strategy, which re-runs a batch whose commit
+            // landed and lost its acknowledgement; which exception that surfaces
+            // depends on EF's command ordering. Compensating a booking that did
+            // commit would release its hold and reverse its redemption, then report
+            // a failure for a booking that exists.
             Booking? committed = await dbContext.Bookings.AsNoTracking()
                 .SingleOrDefaultAsync(b => b.Id == bookingId, cancellationToken);
 
             if (committed is not null)
             {
-                // The committed batch necessarily included this intent's own
-                // delete (they share one transaction), so this is belt and
-                // braces - but the cost of being wrong is the worst outcome
-                // in the system: a surviving intent behind a live booking
-                // gets reconciled later, releasing that booking's hold back
-                // to immediately-re-bookable. Cheap to make certain rather
-                // than reason about.
+                // The committed batch deleted the intent, so this is a guard, not a
+                // correction: a surviving intent behind a live booking would be
+                // reconciled later and release that booking's hold.
                 await DiscardIntentAsync();
                 return BuildResponse(committed, managementToken);
             }
 
             if (ex is DbUpdateConcurrencyException)
             {
-                // The intent was gone and no Booking exists: the reconcile job
-                // resolved this while the request was in flight.
+                // No intent and no booking: the reconcile job resolved this while the
+                // request was in flight. Both halves are compensated here; the job's
+                // own redemption reversal is not enough, because it can be dispatched
+                // before RedeemAsync commits, find nothing, and be marked processed
+                // (docs/adr/0017).
                 //
-                // This used to compensate nothing, on the reasoning - recorded
-                // in docs/adr/0017 and repeated in review - that by
-                // construction the reconciler had already released the hold
-                // and reversed the redemption. The hold half is true. The
-                // redemption half is not, and the "by construction" is what
-                // made it hard to see:
-                //
-                //   reconciler:  claims the intent, releases the hold, deletes
-                //                the intent, commits, then dispatches its
-                //                ReverseRedemptionOutboxMessage - which finds
-                //                no redemption yet, no-ops, and is marked
-                //                processed, so nothing ever retries it
-                //   this request: RedeemAsync finally commits -> the promotion
-                //                is consumed
-                //                the tracked intent delete affects 0 rows ->
-                //                DbUpdateConcurrencyException
-                //
-                // End state without this call: no booking, and a single-use
-                // code burned with redemption_count permanently incremented.
-                // Reachable whenever a confirmation stalls inside RedeemAsync
-                // for longer than PendingBookingIntent.ReconcileGrace.
-                //
-                // Re-releasing the hold is safe, and NOT because "compensations
-                // are idempotent" - that is precisely the reasoning that just
-                // failed above. It is safe because this hold id can never be
-                // in a releasable state again:
+                // Releasing the hold again is safe because of this row, not because
+                // compensation is idempotent:
                 //
                 //   - ReleaseHoldAsync matches status IN ('pending_payment',
-                //     'booked'). The reconciler already set it to 'held', so
-                //     the UPDATE matches zero rows on status alone.
-                //   - It cannot get back out of 'held' either. That release
-                //     also set hold_expires_at = now, and ConfirmHoldAsync
-                //     requires hold_expires_at > now, a condition time only
-                //     moves further away from. So no later confirmation can
-                //     re-claim this row.
-                //   - The only thing that can still happen to it is deletion by
-                //     HoldAvailabilityHandler's per-unit cleanup of expired
-                //     'held' rows, and ids are never reused - so the row a
-                //     stranger holds the range with is a different row.
+                //     'booked'); the job already set the row to 'held'.
+                //   - The job set hold_expires_at = now, and ConfirmHoldAsync
+                //     requires hold_expires_at > now, so no confirmation can claim
+                //     the row again.
+                //   - Hold ids are never reused.
                 //
-                // That is a guarantee about this specific row, not a property
-                // of the operation. If ReleaseHoldAsync ever widened its WHERE
-                // to include 'held', or a hold id became reusable, this call
-                // would start releasing somebody else's inventory.
+                // Widening ReleaseHoldAsync to include 'held', or reusing hold ids,
+                // would make this release someone else's inventory.
                 await CompensateAsync(reverseRedemption: redeemedDiscountAmount is not null);
 
                 throw new ConflictException(
                     "This booking confirmation timed out and was rolled back. Please start over.");
             }
 
-            // Best-effort compensation, durable via the outbox
-            // (docs/adr/0003): revert the hold to 'held' and give back the
-            // redeemed code (if any), so neither is left permanently
-            // consumed by a Booking that was never created.
-            // Only if a code was actually redeemed - unlike the two branches
-            // above, this path is reached whether or not one was.
+            // Any other failure: release the hold, and reverse the redemption if a
+            // code was redeemed.
             await CompensateAsync(reverseRedemption: redeemedDiscountAmount is not null);
 
-            // The original failure, preserved - now that compensating is a
-            // durable local write rather than two independent cross-module
-            // calls that could each fail unpredictably, there's no second
-            // failure mode left here worth an AggregateException for.
+            // The original failure, rethrown; the compensation is a durable local
+            // write with no second failure mode worth aggregating.
             throw;
         }
 
@@ -511,44 +336,15 @@ public class ConfirmBookingHandler(
     }
 
     /// <summary>
-    ///     Transaction A: writes the durable marker that this confirmation has
-    ///     begun and transitions the hold ('held' -> 'pending_payment') in one
-    ///     commit. Returns the tracked intent the success path later removes,
-    ///     and the hold's price snapshot.
-    ///     <para>
-    ///         Price/currency come from the hold's own snapshot, not a fresh
-    ///         unit lookup - the price a customer saw when they held is the
-    ///         price they get, even if the unit's base price changed since.
-    ///     </para>
-    ///     <para>
-    ///         A failure anywhere inside rolls back both, so there is no
-    ///         compensation to run and nothing for the reconcile job to find -
-    ///         which is why the caller no longer discards the intent when the
-    ///         hold transition fails. The cross-module work that genuinely
-    ///         cannot join a transaction (the redemption, in Promotions) still
-    ///         happens afterwards on the outbox, exactly as before.
-    ///     </para>
-    /// </summary>
-    /// <summary>
     ///     Either a confirmation that has begun - <see cref="Intent"/> and
-    ///     <see cref="Hold"/> set - or the record a replay should be built
-    ///     from instead of beginning one. Exactly one arm is populated.
+    ///     <see cref="Hold"/> set - or the record a replay should be built from.
+    ///     Exactly one arm is populated.
     ///     <para>
-    ///         <see cref="ReplayRecord"/> is the record, deliberately, and not
-    ///         the response built from it. Building the response mints a
-    ///         management token and saves its hash, and every branch that
-    ///         reached that point was doing it <em>inside</em> a transaction
-    ///         that is about to be abandoned. One of them rolled back first and
-    ///         one did not, so the guest got a 200 carrying a credential whose
-    ///         row was discarded on the way out - a token that fails at the
-    ///         first exchange, for a booking that really exists.
-    ///     </para>
-    ///     <para>
-    ///         Returning the decision moves that write to the caller, after the
-    ///         transaction is resolved and outside the execution strategy. The
-    ///         boundary is then structural rather than something each branch
-    ///         has to remember, which is the part that failed: the shape was
-    ///         fine until a branch was added that forgot.
+    ///         <see cref="ReplayRecord"/> is the record, not a response: building a
+    ///         response mints a management token and saves its hash, which must
+    ///         happen after this transaction is resolved, outside the execution
+    ///         strategy. Returning the decision makes that boundary structural
+    ///         rather than something each branch has to remember.
     ///     </para>
     /// </summary>
     private sealed record ConfirmationStart
@@ -567,39 +363,20 @@ public class ConfirmBookingHandler(
 
         return await strategy.ExecuteAsync(async () =>
         {
-            // Each attempt starts from a clean tracker. A retry following a
-            // committed-but-unacknowledged SaveChanges would otherwise Add a
-            // second instance carrying the same key as the one already tracked
-            // Unchanged, and fail on the identity map rather than on anything
-            // real. Safe here specifically because this is the first database
-            // work the handler does.
+            // A retry after a committed-but-unacknowledged save would otherwise Add
+            // a second instance under a key already tracked, failing on the
+            // identity map rather than on anything real.
             dbContext.ChangeTracker.Clear();
 
             await using IDbContextTransaction transaction =
                 await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-            // The hold transition goes FIRST, and the ordering is the whole
-            // arbitration story.
-            //
-            // ExecuteConfirmAsync is a conditional UPDATE - `WHERE id = @HoldId
-            // AND status = 'held' AND hold_expires_at > @Now` - so it is already
-            // an exactly-one-winner compare-and-set on the contended row. Doing
-            // it before the intent insert lets it decide every race, because a
-            // second transaction's UPDATE blocks on the winner's row lock and
-            // then re-evaluates that WHERE against the committed row: 'held' is
-            // gone, no row comes back, and the loser never reaches the intent
-            // table at all.
-            //
-            // Inserting the intent first, as this used to, made the intent's
-            // unique index on hold_id the arbiter instead - deciding a race
-            // about a hold by contending on a marker that points at it. That
-            // worked, but it answered second-hand ("somebody else has an intent
-            // for this") where the UPDATE answers directly ("this hold is no
-            // longer available"), and it forced a recovery path to tell three
-            // situations apart using the age of the other request's intent row.
-            //
-            // Joins the transaction rather than autocommitting - see
-            // HoldConfirmation.AmbientTransaction.
+            // The hold transition first: it decides every race for the hold.
+            // ConfirmHoldAsync is a conditional UPDATE (status = 'held' and not
+            // expired), an exactly-one-winner compare-and-set; a concurrent
+            // transaction blocks on the winner's row lock, re-evaluates against the
+            // committed row, matches nothing, and never reaches the intent insert.
+            // It joins this transaction (HoldConfirmation.AmbientTransaction).
             ConfirmedHold confirmed;
 
             try
@@ -608,25 +385,11 @@ public class ConfirmBookingHandler(
             }
             catch (NotFoundException)
             {
-                // No row matched. Three ways to get here, and only the last is
-                // this request's own doing:
-                //
-                //  - Another confirmation took this hold. Correct answer: the
-                //    hold is gone, which is what NotFoundException already says.
-                //  - The hold expired, or never existed. Same answer.
-                //  - This delegate already ran, committed, and lost its
-                //    acknowledgement to an execution-strategy retry - so the
-                //    'held' row this attempt is looking for was consumed by its
-                //    own previous attempt.
-                //
-                // The pre-generated bookingId separates the last from the other
-                // two: only our own attempt could have written an intent under
-                // it. Nothing has been staged in this transaction yet, which is
-                // why the UPDATE running first also makes this recovery simple -
-                // there is no half-built state to unpick.
-                // No fingerprint here any more: this method decides *which*
-                // record applies and nothing else. Matching the fingerprint is
-                // part of building the replay, which now happens in Handle.
+                // No row matched: another confirmation took the hold, it expired,
+                // it never existed - or an earlier attempt of this request
+                // committed and lost its acknowledgement. Only this request's own
+                // pre-generated booking id can separate the last case. Nothing is
+                // staged in this transaction yet, so there is nothing to unpick.
                 return await RecoverOwnCommittedAttemptAsync(
                     holdId, bookingId, keyHash, transaction, cancellationToken);
             }
@@ -640,10 +403,9 @@ public class ConfirmBookingHandler(
 
             dbContext.PendingBookingIntents.Add(intent);
 
-            // Reserved in the same transaction as the hold transition rather
-            // than written on the way out, so a rollback frees the key and the
-            // record is present if and only if the confirmation began. See
-            // docs/adr/0022.
+            // Reserved with the hold transition, so a rollback frees the key and
+            // the record exists if and only if the confirmation began
+            // (docs/adr/0022).
             CheckoutIdempotencyRecord? record = keyHash is null
                 ? null
                 : new CheckoutIdempotencyRecord
@@ -666,20 +428,14 @@ public class ConfirmBookingHandler(
             catch (DbUpdateException ex)
                 when (ex.IsViolationOfAny(PendingBookingIntentConfiguration.HoldIndex, CheckoutIdempotencyRecordConfiguration.KeyHashIndex))
             {
-                // Two indexes can fire here, and neither means a race for the
-                // hold - the UPDATE above already settled that.
+                // Neither violation is a race for the hold; the UPDATE settled that.
                 //
-                // The intent's index on hold_id fires in one narrow window: a
-                // failing confirmation's CompensateAsync releases its hold back
-                // to 'held' and only then discards its intent, so between those
-                // two statements the hold is available while its old intent is
-                // still there. A confirmation arriving in that gap legitimately
-                // wins the UPDATE and then collides. Transient, and the remedy
-                // is to try again in a moment.
+                // hold_id: a failing confirmation's compensation releases the hold
+                // before discarding its intent, so a confirmation in that gap wins
+                // the UPDATE and collides with the old intent. Transient.
                 //
-                // The key's index fires when two requests carrying one
-                // idempotency key are confirming *different* holds - both win
-                // their own UPDATE, and the second one's reservation collides.
+                // key_hash: two requests with one key confirming different holds;
+                // both win their UPDATE and the second reservation collides.
                 dbContext.Entry(intent).State = EntityState.Detached;
 
                 if (record is not null)
@@ -687,9 +443,8 @@ public class ConfirmBookingHandler(
                     dbContext.Entry(record).State = EntityState.Detached;
                 }
 
-                // The violation aborted this transaction - Postgres fails every
-                // further statement on it with 25P02 until it ends - so the
-                // recovery's reads cannot run inside it.
+                // The violation aborted this transaction (every further statement
+                // fails with 25P02), so the recovery reads run after it ends.
                 await transaction.RollbackAsync(cancellationToken);
 
                 if (keyHash is not null)
@@ -703,14 +458,8 @@ public class ConfirmBookingHandler(
                     }
                 }
 
-                // The hold_id collision, then. One message, where there used to
-                // be two chosen by dating the other intent against
-                // PendingBookingIntent.ReconcileGrace - that comparison existed
-                // to tell "another confirmation is running right now" from "one
-                // died and is being cleaned up", and the first of those is no
-                // longer something this code can be looking at. The rollback
-                // above put the hold back to 'held', so trying again shortly
-                // genuinely works.
+                // The hold_id collision. The rollback returned the hold to 'held',
+                // so a retry shortly succeeds.
                 throw new ConflictException(
                     "A previous confirmation for this hold is still being cleaned up. Please try again shortly.");
             }
@@ -723,39 +472,25 @@ public class ConfirmBookingHandler(
 
     /// <summary>
     ///     Reached when the hold transition finds no 'held' row. Recovers this
-    ///     request's own committed-but-unacknowledged attempt, and otherwise
-    ///     lets the "hold is gone" answer stand.
-    ///     <para>
-    ///         One branch, where there used to be three. The other two - "a
-    ///         confirmation for this hold is already in progress" and "a
-    ///         previous one was interrupted and is being cleaned up" - were
-    ///         only ever reachable because the intent's unique index arbitrated
-    ///         races, which meant reading another request's intent and dating
-    ///         it against a grace period to guess which situation produced it.
-    ///         The conditional UPDATE decides those races now, so both are
-    ///         states this code can no longer be in.
-    ///     </para>
+    ///     request's own committed-but-unacknowledged attempt, replays a
+    ///     completed checkout under the same idempotency key, and otherwise lets
+    ///     "the hold is gone" stand.
     /// </summary>
     private async Task<ConfirmationStart> RecoverOwnCommittedAttemptAsync(
         Guid holdId, Guid bookingId, string? keyHash,
         IDbContextTransaction transaction, CancellationToken cancellationToken)
     {
-        // Keyed on this request's own pre-generated bookingId, not on holdId.
-        // That is the whole test: only an earlier attempt of *this* invocation
-        // could have written an intent under an id generated in this
-        // invocation, so a hit means "I already did this" and a miss means
-        // somebody else has the hold - or nobody does and it simply expired.
+        // By this request's own booking id, not the hold id: only an earlier
+        // attempt of this invocation could have written an intent under it.
         PendingBookingIntent? own = await dbContext.PendingBookingIntents.AsNoTracking()
             .SingleOrDefaultAsync(i => i.Id == bookingId, cancellationToken);
 
         if (own is null)
         {
-            // Not ours. Before giving up, one case remains worth answering
-            // precisely: a client retrying the same checkout under the same
-            // idempotency key, whose earlier attempt won the hold under a
-            // different bookingId. Replaying that is the entire promise of
-            // ADR-0022, and answering 404 instead would report "gone" for a
-            // checkout that succeeded.
+            // Not ours. A client retrying the same checkout under the same key,
+            // whose earlier request won the hold under a different booking id, is
+            // answered with a replay; a 404 would report "gone" for a checkout
+            // that succeeded.
             if (keyHash is not null)
             {
                 CheckoutIdempotencyRecord? byKey = await dbContext.CheckoutIdempotencyRecords.AsNoTracking()
@@ -763,56 +498,46 @@ public class ConfirmBookingHandler(
 
                 if (byKey is not null)
                 {
-                    // The read above has to happen inside the transaction - it
-                    // is the decision. Ending it here rather than leaving it to
-                    // the caller's `await using`, so the caller is holding a
-                    // resolved transaction by the time it issues anything.
+                    // The read is the decision, so it runs inside the transaction;
+                    // the transaction is ended before the caller issues anything.
                     await transaction.RollbackAsync(cancellationToken);
 
                     return new ConfirmationStart { ReplayRecord = byKey };
                 }
             }
 
-            // The hold is genuinely not available to this caller. NotFound,
-            // the same answer an expired or nonexistent hold gets, because a
-            // caller can do exactly one thing about any of them.
+            // Not available to this caller: 404, the same answer as an expired or
+            // unknown hold.
             await transaction.RollbackAsync(cancellationToken);
             throw new NotFoundException("Hold", holdId);
         }
 
-        // Our own attempt, committed. Its intent proves the hold moved with it
-        // - they share a transaction - so re-confirming would fail the
-        // status = 'held' guard and abandon a confirmation that had in fact
-        // succeeded. Read the snapshot back instead.
+        // Our own committed attempt. The intent proves the hold moved with it, so
+        // re-confirming would fail the 'held' guard; read the snapshot back.
         ConfirmedHold? hold = await holdConfirmation.GetConfirmedHoldAsync(holdId, cancellationToken);
 
         if (hold is null)
         {
-            // The intent is ours but the hold is no longer in
-            // 'pending_payment' - something (the reconcile job, the expiry
-            // sweep) has already begun unwinding this attempt. Nothing here
-            // can safely continue on top of that.
+            // Our intent, but the hold has left 'pending_payment': the reconcile
+            // job or the expiry sweep is already unwinding this attempt.
             throw new ConflictException(
                 "This booking confirmation was interrupted and is being cleaned up. Please start over.");
         }
 
-        // Nothing was staged in this transaction: the UPDATE returned no rows
-        // and the inserts are downstream of it. Ending it explicitly rather
-        // than committing an empty one, since the work it would have done was
-        // already committed by the attempt this is recovering.
+        // Nothing was staged in this transaction; the work was committed by the
+        // attempt being recovered.
         await transaction.RollbackAsync(cancellationToken);
 
-        // Re-attaching is not cosmetic: the success path's row-count assertion
-        // on the delete - the structural guarantee that this confirmation owned
-        // the intent it removed - only runs against a tracked instance.
+        // Tracked, because the success path's row-count assertion on the intent
+        // delete - what excludes the reconcile job - applies only to a tracked
+        // instance.
         dbContext.Attach(own);
 
         CheckoutIdempotencyRecord? ownRecord = null;
 
         if (keyHash is not null)
         {
-            // Tracked for the same reason, so Transaction B can complete the
-            // reservation this attempt's earlier run reserved.
+            // Tracked, so the final save can complete the reservation.
             ownRecord = await dbContext.CheckoutIdempotencyRecords
                 .SingleOrDefaultAsync(r => r.BookingId == bookingId, cancellationToken);
         }
@@ -825,10 +550,9 @@ public class ConfirmBookingHandler(
     ///     with a different payload can be refused rather than answered with
     ///     somebody else's booking.
     ///     <para>
-    ///         Covers exactly the fields that decide what gets booked and for
-    ///         whom. The unit-separated join is not cosmetic: without a
-    ///         separator, ("ab", "c") and ("a", "bc") hash identically, and
-    ///         guest names and emails are adjacent free text.
+    ///         Covers the fields that decide what gets booked and for whom. The
+    ///         unit separator matters: without one, ("ab", "c") and ("a", "bc")
+    ///         hash identically.
     ///     </para>
     /// </summary>
     private static string ComputeRequestFingerprint(ConfirmBookingRequest request) =>
@@ -849,20 +573,14 @@ public class ConfirmBookingHandler(
         if (!CryptographicOperations.FixedTimeEquals(
                 Encoding.UTF8.GetBytes(record.RequestFingerprint), Encoding.UTF8.GetBytes(requestFingerprint)))
         {
-            // Deliberately says nothing about the booking behind the key. A
-            // caller who reached here either has a client bug or is guessing
-            // keys, and the two get the same answer.
+            // Says nothing about the booking behind the key: a client bug and a
+            // guessed key get the same answer.
             throw new ConflictException(
                 "This Idempotency-Key was already used for a different request. Use a new key, or resend the original request unchanged.");
         }
 
-        // The window, enforced on the path that actually hands the credential
-        // back. It used to live only in PurgeReplayedCheckoutsJob's DELETE,
-        // which means a window that existed only as a background job's
-        // behaviour: stop that job, break its cron, or let it fail quietly,
-        // and replay kept working indefinitely, returning a management token
-        // of unbounded age. A window nothing checks is not a window - the
-        // purge is cleanup now, not enforcement.
+        // The replay window, enforced on the path that hands the credential over;
+        // PurgeReplayedCheckoutsJob only cleans up.
         if (timeProvider.GetUtcNow() - record.CreatedAt > TimeSpan.FromHours(bookingLifecycle.Value.CheckoutReplayWindowHours))
         {
             throw new ConflictException(
@@ -871,10 +589,9 @@ public class ConfirmBookingHandler(
 
         if (record.CompletedAt is null)
         {
-            // The first attempt is still running, or died mid-flight. Either
-            // way there is nothing to replay yet: if it lands, a later retry
-            // replays it; if it died, ReconcileOrphanedBookingIntentsJob
-            // removes the reservation and a later retry starts over.
+            // Still running, or died mid-flight. A landed attempt is replayed by a
+            // later retry; a dead one's reservation is removed by
+            // ReconcileOrphanedBookingIntentsJob.
             throw new ConflictException(
                 "A confirmation using this Idempotency-Key is still in progress. Please retry shortly.");
         }
@@ -884,33 +601,19 @@ public class ConfirmBookingHandler(
 
         if (booking is null)
         {
-            // Completed but the booking is gone - only reachable if something
-            // hard-deleted it, which nothing does. Refuses rather than
-            // inventing an answer.
+            // Only reachable if something hard-deleted the booking, which nothing
+            // does.
             throw new ConflictException(
                 "The booking this Idempotency-Key refers to no longer exists. Please start over.");
         }
 
-        // A new token, minted now, rather than one that was stored.
+        // A new token, minted now. Only hashes are stored, so the original
+        // plaintext cannot be returned, and a stored plaintext copy would turn one
+        // read of the table into working credentials for every guest checkout in
+        // the window. BookingAccessChecker matches on hash, so several valid tokens
+        // per booking work, and the original stays valid (docs/adr/0022).
         //
-        // Storing the plaintext was the only way to hand back the *same*
-        // credential, and it cost the property that makes these tokens safe at
-        // rest: booking_management_tokens deliberately holds nothing but
-        // SecureToken.Hash, so the database cannot produce a working
-        // credential. Keeping a plaintext copy for the replay window undid
-        // that for every guest checkout in it.
-        //
-        // Nothing requires the replayed token to be the same one. Nothing
-        // caps tokens per booking, BookingAccessChecker matches on hash so
-        // several valid tokens work unchanged, and replay is rare enough that
-        // the extra row is immaterial. No key management, no rotation story,
-        // no decrypt path - the alternative, encrypting at rest, buys
-        // identical semantics and costs shared key storage plus rotation for a
-        // multi-instance deployment.
-        //
-        // Null for an authenticated caller, decided from the booking rather
-        // than from a stored flag: they were never issued one, because their
-        // account is what proves ownership.
+        // None for an authenticated customer: their account proves ownership.
         string? managementToken = null;
 
         if (booking.CustomerId is null)
@@ -928,12 +631,8 @@ public class ConfirmBookingHandler(
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        // The booking itself is re-read rather than stored. Strict idempotency
-        // would replay the original response verbatim, but everything in it
-        // can go stale: a booking cancelled between the original request and
-        // the replay would otherwise be reported as Pending, and the client
-        // would act on it. Reporting settled state is the same choice
-        // CancelBookingHandler's recancel branch makes.
+        // The booking is re-read rather than replayed verbatim: a booking
+        // cancelled since the original request must not be reported as Pending.
         return BuildResponse(booking, managementToken);
     }
 

@@ -66,16 +66,9 @@ public class ListMyReviewableBookingsHandler(
                 utcToday.AddDays(1),
                 cancellationToken);
 
-        // Materialized once and reused. This used to be evaluated twice over
-        // the whole list - once to build the ids to check for existing
-        // reviews, then again alongside that check - which did the timezone
-        // resolution for every booking twice over an unbounded history.
-        //
-        // It also removed a real, if remote, hazard: the two passes each read
-        // the clock, so they could straddle a local midnight and disagree
-        // about the same booking. A booking crossing INTO the window between
-        // them would appear in the result without its review status ever
-        // having been queried.
+        // Materialized once and reused, with one clock reading: two passes could
+        // straddle a local midnight, and a booking crossing into the window
+        // between them would appear without its review status queried.
         List<BookingAccessResult> candidates = [.. confirmedBookings.Where(IsReviewable)];
         List<Guid> candidateIds = [.. candidates.Select(b => b.BookingId)];
 

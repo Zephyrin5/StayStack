@@ -23,14 +23,11 @@ public class MarkTransactionSucceededHandler(
                                   ?? throw new NotFoundException(nameof(Transaction), request.TransactionId);
 
         // Marks the transaction itself first - the source of truth for
-        // "payment actually succeeded". The booking-side confirmation
-        // below is an outbox message enqueued in this same SaveChangesAsync:
-        // a crash after this commits leaves both the Succeeded status and
-        // the durable intent to confirm the booking together, closing a
-        // real gap - a crash between this and a direct ConfirmPaymentAsync
-        // call used to leave Succeeded + booking Pending forever, with no
-        // retry path (MarkSucceeded's own guard rejects a retry with 409
-        // once Succeeded is set).
+        // "payment actually succeeded". The booking-side confirmation is an
+        // outbox message saved in this same SaveChangesAsync, so a crash after
+        // the commit leaves both the Succeeded status and the durable intent to
+        // confirm the booking. MarkSucceeded rejects a second call with 409, so
+        // nothing else could retry the confirmation.
         transaction.MarkSucceeded(timeProvider.GetUtcNow());
 
         OutboxMessage confirmPaymentRow = dispatcher.Enqueue(
@@ -57,9 +54,8 @@ public class MarkTransactionSucceededHandler(
             throw new TransactionAlreadyFinalizedException(transaction.Id);
         }
 
-        // The confirmed-vs-refund-pending branch that used to live here now
-        // lives in TransactionsOutboxDispatcher.TryHandleAsync, since it
-        // depends on ConfirmPaymentAsync's result - see its own comment.
+        // The confirmed-vs-refund branch depends on ConfirmPaymentAsync's
+        // result, so it lives in TransactionsOutboxDispatcher.
         await dispatcher.TryDispatchAsync(confirmPaymentRow, cancellationToken);
 
         // transaction.TransactionStatus below reflects whatever the dispatch

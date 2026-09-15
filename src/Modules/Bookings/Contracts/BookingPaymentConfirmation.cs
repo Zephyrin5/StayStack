@@ -22,25 +22,12 @@ internal class BookingPaymentConfirmation(
                           .SingleOrDefaultAsync(cancellationToken)
                       ?? throw new NotFoundException(nameof(Booking), bookingId);
 
-        // The hold transition and the confirmation are now one transaction,
-        // which retires the ordering argument that used to live here.
+        // The hold transition and the confirmation are one transaction, so a
+        // payment either sells the range and confirms the stay or does neither.
         //
-        // They were two commits on two DbContexts against two schemas - a
-        // compensating pair (docs/adr/0003) - so one landed first and a crash
-        // could fall between. Confirming the booking first left the worst
-        // possible remainder: a Confirmed booking whose inventory had been
-        // released to someone else, unrepairable because the range might
-        // already be sold. Marking the hold paid first inverted that into a
-        // sold hold against a still-Pending booking, recoverable in both
-        // directions. That inversion was the right call while the halves were
-        // separable; they are not separable any more, so neither remainder is
-        // reachable.
-        //
-        // The idempotent predicate MarkHoldPaidAsync uses - accepting a hold
-        // already in 'booked' as well as 'pending_payment' - deliberately
-        // stays. The outbox can still deliver this message more than once,
-        // and a redelivery arriving after a committed confirmation must
-        // remain a no-op rather than a failure.
+        // MarkHoldPaidAsync still accepts a hold already 'booked': the outbox can
+        // deliver this message more than once, and a redelivery after a
+        // committed confirmation must be a no-op.
         return await ConfirmUnderRowLockAsync(bookingId, holdId, cancellationToken);
     }
 
@@ -49,35 +36,24 @@ internal class BookingPaymentConfirmation(
     ///     lock, so this path arbitrates for the row the same way
     ///     ExpireUnpaidBookingsJob does.
     ///     <para>
-    ///         Without it the two sides were asymmetric: expiry locked the
-    ///         row with FOR UPDATE and re-checked under the lock, while
-    ///         payment did an unlocked read, a status check against that
-    ///         stale read, and an unconditional EF update. Booking carries no
-    ///         concurrency token, so the generated UPDATE keyed on Id alone
-    ///         and could not fail. The interleaving that produced was real:
-    ///         payment reads Pending, expiry locks the row, releases the hold
-    ///         and commits Cancelled, then payment's UPDATE - which had been
-    ///         blocking on that lock - proceeds and overwrites Cancelled back
-    ///         to Confirmed. A lost update, leaving a Confirmed booking whose
-    ///         inventory had just been handed back.
+    ///         Booking carries no concurrency token, so an EF update keyed on Id
+    ///         cannot fail. Without the lock, payment reads Pending, expiry
+    ///         releases the hold and commits Cancelled, and payment's UPDATE then
+    ///         overwrites Cancelled with Confirmed - a Confirmed booking whose
+    ///         inventory was just handed back.
     ///     </para>
     ///     <para>
-    ///         The hold's 'pending_payment' -> 'booked' transition happens
-    ///         inside this same transaction and inside this same lock, so a
-    ///         payment either sells the range and confirms the stay or does
-    ///         neither. It also means the cancelled-booking check below now
-    ///         runs <em>before</em> the hold is touched, where it used to run
-    ///         after: a payment resolving against a booking somebody already
-    ///         cancelled no longer marks that booking's hold sold on its way
-    ///         to reporting the refund.
+    ///         The hold's 'pending_payment' -> 'booked' transition runs inside this
+    ///         transaction and lock, after the cancelled-booking check, so a
+    ///         payment against a booking already cancelled never marks its hold
+    ///         sold.
     ///     </para>
     ///     <para>
-    ///         FOR UPDATE, not FOR UPDATE SKIP LOCKED as the expiry job uses.
-    ///         Their needs are opposite: a sweep should step over a row
-    ///         someone else is working on and revisit it next run, while this
-    ///         has a payment in hand and must wait to see the committed
-    ///         outcome - which is exactly how it learns the booking was
-    ///         cancelled and a refund is owed.
+    ///         FOR UPDATE, not SKIP LOCKED as the expiry job uses. A sweep steps
+    ///         over a row someone else is working on and revisits it next run;
+    ///         this has a payment in hand and must wait for the committed outcome,
+    ///         which is how it learns the booking was cancelled and a refund is
+    ///         owed.
     ///     </para>
     /// </summary>
     private async Task<bool> ConfirmUnderRowLockAsync(Guid bookingId, Guid holdId, CancellationToken cancellationToken)

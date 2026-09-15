@@ -81,24 +81,12 @@ public class GetPropertiesHandler(
 
         if (request.CheckIn is not null && request.CheckOut is not null)
         {
-            // unit_availability_holds moved to the Availability module
-            // (docs/adr/0004), so this can no longer be a local correlated
-            // Any() against that table directly. One round trip: ask
-            // Availability which units, platform-wide, have a blocking
-            // hold/booking for the dates - bounded by how many units are
-            // actually booked in this window, not by total inventory,
-            // since GetBlockedUnitIdsAsync no longer needs a candidate id
-            // list narrowed down first. What keeps this set from growing
-            // without limit is StaySearchPolicyOptions.MaxStayNights alone,
-            // enforced in GetPropertiesRequestValidator: the set is the units
-            // booked across the requested window, so it scales with that
-            // window's width and nothing else. MaxLeadTimeDays is not doing
-            // work here despite sitting beside it - it bounds where the
-            // window starts, and a window's distance from today says nothing
-            // about how many bookings fall inside it. If anything it excludes
-            // the sparsest queries, since the far future is the least booked.
-            // It is a product rule, and a hold-path damage bound
-            // (docs/adr/0016); it is not load-bearing for this.
+            // Holds are Bookings' table (docs/adr/0004), so one round trip asks
+            // which units, platform-wide, have a blocking hold or booking for the
+            // dates. That set grows with the platform, not with the request:
+            // MaxStayNights bounds the window's width, not how many units are
+            // booked inside it. See IUnitAvailabilityLookup.GetBlockedUnitIdsAsync
+            // and docs/adr/0026.
             IReadOnlySet<Guid> blockedUnitIds = await availabilityLookup.GetBlockedUnitIdsAsync(
                 request.CheckIn.Value, request.CheckOut.Value, timeProvider.GetUtcNow(), cancellationToken);
 

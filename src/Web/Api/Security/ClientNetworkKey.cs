@@ -47,17 +47,15 @@ public static class ClientNetworkKey
         }
 
         // A single IPv6 customer is normally allocated a /64 (often a /56 or
-        // /48), so keying on the full 128-bit address would make this cap
-        // free to bypass - trivially more so than the cookie it replaces,
-        // since an attacker there has 2^64 addresses rather than having to
-        // re-request one. Masking to the /64 makes the budget belong to the
+        // /48), so keying on the full 128-bit address would give an attacker
+        // 2^64 budgets. Masking to the /64 makes the budget belong to the
         // allocation rather than to whichever address inside it was used.
         //
         // NOTE: the "holds" and "auth" rate-limit partitions in Program.cs
-        // still key on the full address and carry this gap. They bound
-        // request rate rather than held inventory, so the exposure is much
-        // smaller - but it is the same gap, and worth closing there too if
-        // either is ever leaned on the way this cap now is.
+        // key on the full address and have this gap. They bound request rate
+        // rather than held inventory, so the exposure is much smaller - but it
+        // is worth closing there too if either is ever leaned on the way this
+        // cap is.
         byte[] bytes = address.GetAddressBytes();
         Array.Clear(bytes, 8, 8);
 

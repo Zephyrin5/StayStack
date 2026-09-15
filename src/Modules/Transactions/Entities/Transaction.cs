@@ -53,18 +53,13 @@ public sealed class Transaction : Entity, IAggregateRoot
     /// <summary>
     ///     When this payment succeeded, as this system observed it.
     ///     <para>
-    ///         Exists to order a payment against a cancellation, which is the
-    ///         only thing that can decide which of two refund amounts is owed -
-    ///         see <see cref="RefundOwedIsThisPathsToWrite"/>. It was
-    ///         deliberately left out when ITransactionLookup was added, on the
-    ///         grounds that nothing read it; something reads it now.
+    ///         Orders a payment against a cancellation, which decides which of
+    ///         two refund amounts is owed (RefundDecision, docs/adr/0027).
     ///     </para>
     ///     <para>
-    ///         Local observation time, not provider event time. Nothing
-    ///         supplies the latter yet. The distinction matters less here than
-    ///         it does for the expiry guard: both timestamps this is compared
-    ///         against are this system's own, so they are at least measured the
-    ///         same way.
+    ///         Local observation time, not provider event time; nothing supplies
+    ///         the latter. The cancellation instant it is compared with is also
+    ///         this system's own clock.
     ///     </para>
     ///     <para>
     ///         Null on rows written before this column existed.
@@ -79,20 +74,12 @@ public sealed class Transaction : Entity, IAggregateRoot
 
     // Persisted as one nullable decimal column (the backing field, mapped in
     // TransactionConfiguration) but exposed as Money?, paired with the one
-    // currency this transaction has.
+    // currency this transaction has, so no caller pairs a currency by hand. A
+    // second currency column could only ever agree with Amount's.
     //
-    // docs/adr/0015 originally left this a bare decimal, reasoning that a
-    // second currency column could only ever agree with Amount's. That
-    // storage argument still holds and there is no new column here. What did
-    // not hold is the leap to leaving it untyped: CancelBookingHandler then
-    // had to pair the currency back on by hand, in the one place where
-    // getting it wrong costs real money.
-    //
-    // Set only once MarkRefundPending computes it - a cancellation policy's
-    // tiered percentage, applied by the caller (CancelBookingHandler, via
-    // ITransactionReversal), not necessarily equal to Amount. Transactions
-    // has no notion of a cancellation policy itself - it just records
-    // whatever amount it was told to refund.
+    // Set by MarkRefundPending to the amount TransactionReversal decided
+    // (RefundDecision), not necessarily Amount. Transactions has no notion of
+    // a cancellation policy; it records the amount it is told.
     private decimal? _refundAmount;
 
     /// <summary>
@@ -146,19 +133,15 @@ public sealed class Transaction : Entity, IAggregateRoot
         FailureReason = reason;
     }
 
-    // The refund sub-lifecycle - only reachable from Succeeded, mirroring
-    // MarkSucceeded/MarkFailed's "guard the starting state" shape. Driven
-    // by CancelBookingHandler (via ITransactionReversal), and resolved by
-    // the same admin stand-in endpoints MarkTransactionSucceeded/
-    // MarkTransactionFailed use in place of a real gateway webhook.
+    // The refund sub-lifecycle, only reachable from Succeeded. Resolved by the
+    // admin stand-in endpoints MarkTransactionSucceeded/MarkTransactionFailed
+    // use in place of a gateway webhook.
     public void MarkRefundPending(Money refundAmount, RefundCause cause)
     {
         // First writer wins, and a second attempt is a no-op rather than an
-        // overwrite. The ordering rule above means the two paths should never
-        // both decide they own a case, so reaching here twice is a bug
-        // somewhere - but silently replacing a recorded refund amount is the one
-        // outcome that must not be possible, because nothing downstream would
-        // ever show that it happened.
+        // overwrite. The resolver decides once, so reaching here twice is a bug
+        // somewhere - but silently replacing a recorded refund amount must not
+        // be possible, because nothing downstream would show that it happened.
 
         if (_refundAmount is not null)
         {

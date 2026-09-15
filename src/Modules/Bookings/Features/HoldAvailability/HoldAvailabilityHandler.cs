@@ -37,19 +37,12 @@ public class HoldAvailabilityHandler(
     // only reaches after picking them. See StaySearchPolicyOptions.
     private readonly int _maxLeadTimeDays = staySearchPolicy.Value.MaxLeadTimeDays;
 
-    // Live holds one client network may have at once, counted by
-    // ClientKey. This used to be 5 per hold-session cookie, which was no
-    // cap at all: the cookie is client-supplied, so discarding it minted a
-    // fresh budget per request.
-    //
-    // It's here rather than in the "holds" rate-limit policy because the
-    // two bound different things and only this one bounds the resource
-    // that matters. A fixed-window limiter caps request *rate*; holds
-    // expire on their own 15-minute clock, so at 20/60s a single caller
-    // accumulates ~300 concurrent live holds without ever tripping it -
-    // each blocking up to StaySearchPolicyOptions.MaxStayNights of a unit
-    // via the exclusion constraint. Rate says how fast you reach
-    // saturation, not how much you can hold. See docs/adr/0016.
+    // Live holds one client network may have at once, counted by ClientKey,
+    // which the caller cannot choose. The "holds" rate limit bounds request
+    // rate; holds expire on their own 15-minute clock, so a caller within the
+    // rate can still accumulate hundreds of live holds, each blocking up to
+    // StaySearchPolicyOptions.MaxStayNights of a unit. This cap bounds the
+    // stock (docs/adr/0016).
     private readonly int _maxActiveHoldsPerClient = holdCapOptions.Value.MaxActiveHoldsPerClient;
 
     public async ValueTask<HoldAvailabilityResponse> Handle(
@@ -103,50 +96,21 @@ public class HoldAvailabilityHandler(
                 $"Check-in date cannot be more than {_maxLeadTimeDays} days in the future.");
         }
 
-        // Wrapped in the execution strategy, not called bare - a manually
-        // started transaction bypasses EF's per-operation retry wrapping,
-        // which would otherwise surface a deadlock (40P01) as an unhandled
-        // 500 instead of retrying. See docs/adr/0010 for why this happens
-        // under concurrent contention on the same range, not just in
-        // theory.
+        // In the execution strategy: a manually started transaction bypasses EF's
+        // per-operation retry, and holds on one range deadlock under contention
+        // (docs/adr/0010). Pure Dapper, so a retry has no identity map to go stale.
         //
-        // Serializable, not Read Committed, for the same reason
-        // CreatePricingRuleHandler/UpdatePricingRuleHandler need it
-        // (docs/adr/0012): the hold cap below is a COUNT-then-INSERT
-        // against a shared predicate (client_key = @ClientKey), and under
-        // Read Committed, N concurrent holds from the same client on N
-        // different units can all COUNT before any commits its own
-        // INSERT, oversubscribing the cap - proven empirically via
-        // HoldAvailabilityConcurrencyTests, which measured 9 successful
-        // holds against a cap of 5 before this was added. That matters
-        // more now than it did when the key was the cookie: a caller who
-        // wants to exceed the cap can no longer just discard the key, so
-        // racing it is the remaining way to try. No EF
-        // change-tracking risk here on retry - this transaction is pure
-        // Dapper, so every retry re-issues a real SQL round trip with no
-        // identity map to go stale.
+        // Serializable for the hold cap below, a COUNT-then-INSERT across units
+        // that the per-unit lock does not cover: under Read Committed, N
+        // concurrent holds from one client on N units all count before any
+        // commits (docs/adr/0016; HoldAvailabilityConcurrencyTests).
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
-
-        // Outside the retried delegate, deliberately. Generated inside, a retry
-        // after a committed-but-unacknowledged attempt produced a *different*
-        // id, so the insert collided with its own predecessor on the exclusion
-        // constraint and the caller was told the unit was unavailable - while
-        // attempt one's hold sat live and unreachable, carrying the same
-        // client_key and so burning one of that guest's concurrent-hold slots
-        // for its whole lifetime. On a flaky connection, repeatedly.
-        //
-        // Pre-generating it turns that collision into a question with an
-        // answer: is this row mine? See the catch below, and docs/adr/0025.
-        // Outside the retried delegate, deliberately. Generated inside, a retry
-        // after a committed-but-unacknowledged attempt produced a *different*
-        // id, so the insert collided with its own predecessor on the exclusion
-        // constraint and the caller was told the unit was unavailable - while
-        // attempt one's hold sat live and unreachable, carrying the same
-        // client_key and so burning one of that guest's concurrent-hold slots
-        // for its whole lifetime. On a flaky connection, repeatedly.
-        //
-        // Pre-generating it turns that collision into a question with an
-        // answer: is this row mine? See the catch below, and docs/adr/0025.
+        // Outside the retried delegate (docs/adr/0025). A fresh id per attempt
+        // would make a retry after a committed-but-unacknowledged insert collide
+        // with its own hold on the exclusion constraint: the caller is told the
+        // unit is unavailable while that hold stays live, unreachable, and
+        // counted against their cap. With one id, the catch below can ask
+        // whether the conflicting row is this request's own.
         Guid holdId = Guid.CreateVersion7();
 
         (Guid HoldId, DateTimeOffset HoldExpiresAt) result = await strategy.ExecuteAsync(async () =>
@@ -157,32 +121,27 @@ public class HoldAvailabilityHandler(
 
             DateTimeOffset now = timeProvider.GetUtcNow();
 
-            // Exclusive, so concurrent holds on one unit queue for the length of
-            // one short transaction. They used to take it shared and arbitrate
-            // through the exclusion constraint below, and under contention that
-            // arbitration was a deadlock storm: concurrent inserters wait on each
-            // other's uncommitted index entries until deadlock_timeout breaks the
-            // cycle, and the execution strategy retries with backoff - ten
-            // requests for one unit took over a minute. Serialised, the
-            // constraint sees committed rows and answers at once.
+            // Exclusive, so concurrent holds on one unit queue for one short
+            // transaction. Arbitrated by the exclusion constraint alone,
+            // concurrent inserters wait on each other's uncommitted index entries
+            // until deadlock_timeout breaks the cycle, and the retries back off -
+            // ten requests for one unit take over a minute. Serialised, the
+            // constraint sees committed rows and answers at once (docs/adr/0010).
             //
-            // It also blocks archival, which takes the same lock: without it,
+            // It also excludes archival, which takes the same lock: otherwise
             // DeleteUnitHandler can check "no active holds", this handler can
             // insert one, and the unit is archived with live inventory against
-            // it. See BuildingBlocks.UnitAvailabilityLock.
+            // it (docs/adr/0028).
             await connection.ExecuteAsync(new CommandDefinition(
                 UnitAvailabilityLock.AcquireForHoldSql,
                 new { LockKey = UnitAvailabilityLock.KeyFor(request.UnitId) },
                 transaction.GetDbTransaction(),
                 cancellationToken: cancellationToken));
 
-            // Re-read under the lock, and this is what makes the lock worth
-            // anything. The pricing lookup above runs before this transaction
-            // opens, so it saw the unit while it still existed; without this,
-            // archival can win the lock, archive, and commit, and this handler
-            // then inserts a hold against a unit that is gone. Taking the lock
-            // only orders the two - it does not tell either of them what the
-            // other did.
+            // Re-read under the lock. The pricing lookup above ran before this
+            // transaction, so archival can take the lock, archive and commit in
+            // between; the lock only orders the two, and this read is what tells
+            // this handler that archival won.
             if (await unitLookup.GetUnitAsync(request.UnitId, cancellationToken) is null)
             {
                 throw new NotFoundException("Unit", request.UnitId);
@@ -206,39 +165,22 @@ public class HoldAvailabilityHandler(
 
             // Counts this client network's live holds across every unit -
             // both the ones still being chosen ('held') and the ones already
-            // taken into a checkout ('pending_payment').
+            // taken into a checkout ('pending_payment'). Counting only 'held'
+            // would let a caller escape the cap by submitting checkout without
+            // paying, while the exclusion constraint went on blocking the range.
             //
-            // Counting only 'held' left the cap trivially escapable, and not
-            // by a clever attack: hold a unit, POST the checkout form without
-            // paying, and the row moves to 'pending_payment' where the cap
-            // stopped seeing it - while the exclusion constraint went on
-            // blocking its range just the same. Repeat, and one anonymous
-            // caller accumulates as many blocked ranges as they have patience
-            // for, each one costing them nothing. The per-client cap was the
-            // only concurrency bound on that, and confirming was the way out
-            // of it.
+            // Counting 'pending_payment' does not deny checkout to others behind
+            // one NAT: the cap gates taking a new hold, never paying for one. And
+            // those rows are finite - Booking.PaymentDueAt bounds them and
+            // ExpireUnpaidBookingsJob enforces it.
             //
-            // The objection to counting 'pending_payment' was that it denies
-            // checkout to everyone behind one NAT. It doesn't - the cap gates
-            // *taking a new hold*, never paying for one already taken - and
-            // what makes the residual sharing acceptable is that these rows
-            // are now finite: Booking.PaymentDueAt bounds them and
-            // ExpireUnpaidBookingsJob enforces it, so a slot occupied by
-            // somebody's abandoned checkout returns within the payment window
-            // instead of never. That was not true when the objection was
-            // raised, and it is what changed the answer.
-            //
-            // 'booked' stays excluded. ConfirmHoldAsync's payment transition
-            // sets it and nothing ever clears it, so counting it would mean a
-            // customer permanently loses hold capacity after their Nth
-            // successful stay - a customer-facing bug, not an index-tuning
-            // choice.
+            // 'booked' is excluded: nothing clears it, so counting it would cost a
+            // customer hold capacity permanently after their Nth stay.
             //
             // hold_expires_at > @Now applies to 'held' rows only.
-            // 'pending_payment' rows are past that clock by construction: the
-            // transition stops hold_expires_at governing them and
-            // PaymentDueAt takes over, so testing it here would exclude every
-            // one of them and restore the escape this closes.
+            // 'pending_payment' rows are past that clock by construction -
+            // PaymentDueAt governs them - so testing it here would exclude every
+            // one of them and reopen the escape.
             const string activeHoldCountSql = $"""
                                                SELECT count(*) FROM unit_availability_holds
                                                WHERE client_key = @ClientKey
@@ -323,42 +265,29 @@ public class HoldAvailabilityHandler(
             catch (PostgresException ex) when (ex.IsViolationOf(UnitAvailabilityHoldConfiguration.OverlapExclusionConstraint)
                                                    || ex.IsPrimaryKeyViolationOf<UnitAvailabilityHold>(dbContext))
             {
-                // Two very different things arrive here, and telling them apart
-                // is the whole of it.
+                // The exclusion constraint means the range is already held or
+                // booked for this unit - the double-booking guarantee, a real
+                // conflict (HoldAvailabilityConcurrencyTests).
                 //
-                // The exclusion constraint means some or all of the requested
-                // range is already held or booked for this unit. That IS the
-                // double-booking guarantee - no rows-affected check, no manual
-                // locking, the constraint does the work - and it is a real
-                // conflict rather than a transient one, so it propagates
-                // straight out of ExecuteAsync. See
-                // HoldAvailabilityConcurrencyTests.
-                //
-                // But this insert now carries a pre-generated id, so a retry
-                // after a committed-but-unacknowledged attempt re-inserts a row
-                // that is already there - and that violates the primary key
-                // *and* overlaps itself on the exclusion constraint. Postgres
-                // does not promise which of the two it reports, so branching on
-                // the SqlState would be a coin flip. The id answers directly:
-                // if a hold under our own pre-generated id exists, this attempt
-                // is looking at its own committed work.
+                // But a retry after a committed-but-unacknowledged attempt
+                // re-inserts its own row, violating the primary key and
+                // overlapping itself on the exclusion constraint; Postgres does
+                // not promise which it reports. So the id decides: a hold under
+                // this request's own id is its own committed work.
                 await transaction.RollbackAsync(cancellationToken);
 
-                // The same lookup as before the cap check, now that the
-                // transaction is gone. Still needed here as well as there: a
-                // concurrent attempt of this same request can commit in
-                // between, so the row can appear after that earlier check found
-                // nothing.
+                // The same lookup as before the cap check, now outside the
+                // transaction. A concurrent attempt of this same request can
+                // commit in between, so the row can appear after that earlier
+                // check found nothing.
                 (DateTimeOffset HoldExpiresAt, string Status)? committed =
                     await FindOwnHoldAsync(connection, holdId, transaction: null, cancellationToken);
 
                 if (committed is not null)
                 {
-                    // Our own, committed. Returning it is what stops a flaky
-                    // connection stranding inventory: the alternative left a
-                    // live hold nobody could reach, still counting against this
-                    // client's cap for its whole lifetime, while the caller was
-                    // told the unit was unavailable.
+                    // Our own, committed. Reporting "unavailable" here would
+                    // leave a live hold nobody can reach, counted against this
+                    // client's cap for its whole lifetime.
                     return (holdId, committed.Value.HoldExpiresAt);
                 }
 

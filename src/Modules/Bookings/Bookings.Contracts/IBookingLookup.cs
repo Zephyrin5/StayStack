@@ -30,20 +30,9 @@ public interface IBookingLookup
     ///     to not-yet-reviewed, since Reviews has no notion of
     ///     Booking/CustomerId itself.
     ///     <para>
-    ///         The range is a parameter rather than a policy this module
-    ///         applies: Bookings has no notion of a review window, and should
-    ///         not acquire one to serve its only caller. The caller passes the
-    ///         span it cares about.
-    ///     </para>
-    ///     <para>
-    ///         It used to be unbounded, on the reasoning that "the caller
-    ///         decides what past means for its own purposes". True, but the
-    ///         caller decided that in memory - so a customer with years of
-    ///         history had every confirmed booking loaded to produce a list
-    ///         that can only ever span the review window, on an endpoint with
-    ///         no pagination. Bounding the query bounds the response too,
-    ///         since no customer can have more reviewable stays than fit in
-    ///         the window.
+    ///         The range is a parameter because Bookings has no notion of a review
+    ///         window. It is required because the endpoint has no pagination:
+    ///         bounding the query to the window bounds the response.
     ///     </para>
     ///     <para>
     ///         Callers filtering on a property-local date should widen by a
@@ -143,12 +132,8 @@ public record BookingAccessResult
     /// </summary>
     public DateTimeOffset? CancelledAt { get; init; }
 
-    // Both added for InitiateTransactionHandler, which used to read them off
-    // BookingSummary via the unauthenticated GetBookingAsync. It now goes
-    // through VerifyBookingAccessAsync like every other anonymous
-    // booking-scoped endpoint, so the two facts a payment needs have to
-    // travel on the result that proves access rather than on one that
-    // doesn't.
+    // The two facts a payment needs, on the result that proves access, so
+    // InitiateTransactionHandler reads them only after ownership is verified.
     public Money TotalPrice { get; init; }
 
     // True only while Pending - the one state a transaction can be initiated

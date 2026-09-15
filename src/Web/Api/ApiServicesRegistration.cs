@@ -90,24 +90,16 @@ public static class ApiServicesRegistration
         // in Program.cs like the other two cross-field invariants.
         services.AddSingleton<IValidateOptions<LocalizationSettings>, LocalizationSettingsValidator>();
 
-        // The same bound shape feeds the request pipeline, rather than reading
-        // the same keys again as raw strings. That duplication is what let the
-        // two drift apart in the first place, and it was the only caller of
-        // AppConfiguration.AppValue - a string-path helper with no
-        // compile-time safety, where a typo silently returned null and fell
-        // through to the ?? default. It is gone with its last caller.
+        // The same bound options feed the request pipeline, rather than the
+        // same keys read again as raw strings.
         LocalizationSettings localization =
             configuration.AppSection(LocalizationSettings.SectionName).Get<LocalizationSettings>()
             ?? new LocalizationSettings();
 
         services.Configure<RequestLocalizationOptions>(options =>
         {
-            // No fallback for an empty SupportedCultures any more - the
-            // ValidateOnStart registration above rejects that at boot, so
-            // the branch that used to substitute a hardcoded ["en", "ar"]
-            // could only ever run in a host that never finished starting.
-            // It also meant a cleared or misspelled section quietly got the
-            // right answer from C# instead of a startup failure.
+            // Never empty: the ValidateOnStart registration above rejects that
+            // at boot.
             string[] supportedCultures = localization.SupportedCultures;
             options.SetDefaultCulture(localization.DefaultCulture)
                 .AddSupportedCultures(supportedCultures)

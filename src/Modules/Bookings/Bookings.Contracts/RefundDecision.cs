@@ -35,8 +35,8 @@ public sealed record RefundDecision(Money Amount, bool PaidAfterTheCancellation)
         // bought nothing, so all of it goes back.
         //
         // A null SucceededAt takes the obligation's amount - unknown history,
-        // the conservative answer - and never "somebody else owns this", which
-        // is the inference that once produced refunds nobody wrote.
+        // the conservative answer. It never means "somebody else refunds this":
+        // this is the only decision, so declining would mean nobody does.
         bool paidAfter = succeededAt is { } succeeded && succeeded > cancelledAt;
 
         return new RefundDecision(paidAfter ? paymentAmount : policyRefundAmount, paidAfter);

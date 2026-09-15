@@ -34,28 +34,18 @@ public sealed partial class GlobalExceptionHandler(
         {
             ValidationException validationEx => BuildValidationProblem(validationEx),
             AppException appEx => BuildProblem(appEx.StatusCode, appEx.Message),
-            // NOTE: there is deliberately no ArgumentException arm here, and
-            // adding one back would reintroduce a real defect. It read as
-            // "Guard.Against.* is how handlers reject bad input, so map its
-            // exception family to 400" - but the switch cannot tell a guard
-            // clause apart from an ArgumentException thrown inside Npgsql,
-            // System.Text.Json, or any other library. Every one of those
-            // became a 400 (a bug reported to the caller as their mistake)
-            // carrying ex.Message verbatim to the client, in production,
-            // where BuildUnhandledProblem is careful never to. The BCL also
-            // appends "(Parameter 'GuestCount')" and, for
-            // ArgumentOutOfRangeException, the rejected value - so an
-            // internal argument name was part of the public contract.
+            // NOTE: there is deliberately no ArgumentException arm. The switch
+            // cannot tell a guard clause from an ArgumentException thrown inside
+            // Npgsql, System.Text.Json or any other library, so one would turn
+            // those bugs into 400s blaming the caller, carrying ex.Message -
+            // including "(Parameter 'GuestCount')" and, for
+            // ArgumentOutOfRangeException, the rejected value - to the client in
+            // production, where BuildUnhandledProblem never does.
             //
-            // A carve-out for ArgumentNullException used to sit above that
-            // arm, on the reasoning that a null reaching a domain factory
-            // means a validator gap - a bug, not bad input. That reasoning
-            // was right and was never specific to null: it applies just as
-            // well to every other guard in an entity or value object. The
-            // three handler sites that genuinely validated caller input
-            // (HoldAvailabilityHandler) now throw ValidationException
-            // directly, so bad input is declared where it is known rather
-            // than inferred from an exception type here.
+            // A guard firing in an entity or value object means a validator gap:
+            // a bug, not bad input. Handlers that validate caller input throw
+            // ValidationException directly, so bad input is declared where it is
+            // known rather than inferred from an exception type here.
             _ => BuildUnhandledProblem(exception)
         };
 
@@ -165,21 +155,14 @@ public sealed partial class GlobalExceptionHandler(
     /// <summary>
     ///     The title and RFC reference for one status code.
     ///     <para>
-    ///         One switch rather than the two this used to be. They were keyed
-    ///         on the same value and had to agree, and they stopped agreeing
-    ///         the moment a code was added to neither:
-    ///         TooManyActiveHoldsException correctly carries 429 and got the
-    ///         title "An error occurred" from one fallback and the RFC section
-    ///         for 500 from the other - so the body said server error while the
-    ///         status line said the client should back off. Returning both
-    ///         together makes half-adding a code impossible.
+    ///         One switch returning both, so a code cannot be added to one and not
+    ///         the other - a 429 with a 500's title and RFC section says server
+    ///         error while the status line says back off.
     ///     </para>
     ///     <para>
     ///         429's reference is RFC 6585, not RFC 9110 - 9110 §15.5
     ///         enumerates 400-417, 421, 422 and 426 and does not define 429 at
-    ///         all. The old code built every URI from one rfc9110 template, so
-    ///         adding 429 to it would have produced a confidently wrong link
-    ///         rather than a vague one. Hence whole URIs here, not fragments.
+    ///         all. Hence whole URIs here, not fragments of one rfc9110 template.
     ///     </para>
     /// </summary>
     private (string Title, string Type) DescribeStatus(int statusCode)

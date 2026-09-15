@@ -32,10 +32,7 @@ public partial class TransactionsOutboxDispatcher(
                 if (!confirmed)
                 {
                     // The booking was already cancelled by the time this
-                    // payment resolved - same reasoning as
-                    // MarkTransactionSucceededHandler's original inline
-                    // branch, moved here since it now runs after the outbox
-                    // dispatch rather than inline in the handler.
+                    // payment resolved.
                     await ResolveRefundAsync(payload.TransactionId, cancellationToken);
                 }
 
@@ -78,20 +75,11 @@ public partial class TransactionsOutboxDispatcher(
 
         ConfirmBookingPaymentOutboxMessage payload = DeserializeConfirmBookingPayment(message);
 
-        // Ask the booking what actually happened before refunding anything.
-        //
-        // This used to look only at the transaction: still Succeeded meant
-        // refund. But every failed attempt on the way here ran
-        // ConfirmPaymentAsync, and the reason a message exhausts its retries
-        // is not necessarily that the work failed - a confirmation that
-        // commits and then loses its acknowledgement fails identically from
-        // out here, and re-running it just confirms an already-Confirmed
-        // booking again. Refunding on that evidence takes a stay away from a
-        // guest who paid for it and keeps it, since the booking stays
-        // Confirmed while the money goes back.
-        //
-        // Same principle as ConfirmBookingHandler's own catch: ask the
-        // database what committed, never infer it from how the call ended.
+        // Ask the booking what committed before refunding anything. A message
+        // exhausts its retries when the work fails, but also when a confirmation
+        // commits and loses its acknowledgement every time. Refunding on the
+        // transaction's status alone would take back the money for a stay the
+        // booking still holds as Confirmed.
         BookingAccessResult? booking = await bookingLookup.GetBookingDetailsAsync(payload.BookingId, cancellationToken);
 
         if (booking is { IsConfirmed: true })
@@ -123,40 +111,22 @@ public partial class TransactionsOutboxDispatcher(
         JsonSerializer.Deserialize(message.Payload, TransactionsJsonSerializerContext.Default.ConfirmBookingPaymentOutboxMessage)
         ?? throw new InvalidOperationException($"Outbox message {message.Id} had a null {nameof(ConfirmBookingPaymentOutboxMessage)} payload.");
 
-    // MarkRefundPending guards TransactionStatus == Succeeded and throws
-    // TransactionAlreadyFinalizedException otherwise (it's a one-shot ledger
-    // transition, not an idempotent no-op like ReleaseHoldAsync). Checked
-    // explicitly here so calling this twice for the same transaction - a
-    // retried dispatch, or the !confirmed branch above followed later by
-    // OnDeadLetteredAsync racing it - is always a safe no-op past the first
-    // time, rather than being mistaken for a real failure.
     /// <summary>
     ///     Asks the one resolver to settle whatever this booking is owed.
     ///     <para>
-    ///         This path used to decide the amount itself - always the full
-    ///         amount - and decline whenever it judged the cancellation path
-    ///         owned the case. It could not verify that judgement: the
-    ///         cancellation it was reasoning about might have committed no
-    ///         obligation at all, or might not have committed yet, and either
-    ///         way declining meant nobody refunded.
-    ///     </para>
-    ///     <para>
-    ///         It now knows only that this payment resolved against a booking
-    ///         that could not use it. Whether that is worth a policy refund or
-    ///         the whole amount is a question about two committed facts, which
-    ///         is somebody else's job to answer.
+    ///         This path knows only that the payment resolved against a booking
+    ///         that could not use it. Whether that is worth a policy refund or the
+    ///         whole amount depends on two committed facts, which the resolver
+    ///         reads (docs/adr/0027).
     ///     </para>
     /// </summary>
     private Task ResolveRefundAsync(Guid transactionId, CancellationToken cancellationToken) =>
-        // RefundUnusablePaymentAsync, not ResolveRefundAsync. Both reach the
-        // same decision when an obligation exists; they differ when none does,
-        // and that difference is money. This path has already established the
-        // payment could not become a stay, so a booking with no cancellation
-        // behind it - gone entirely, or a hold lost underneath it - is owed the
-        // whole amount rather than nothing.
-        // By transaction id. This path knows exactly which payment attempt it
-        // is about - the message has carried the id all along - and scanning by
-        // booking is what turned a legal RefundPending + Succeeded pair into an
-        // exception on every retry.
+        // RefundUnusablePaymentAsync, not ResolveRefundAsync: they differ when no
+        // obligation exists. This path has established the payment could not
+        // become a stay, so a booking with no cancellation behind it - gone, or
+        // with its hold lost - is owed the whole amount rather than nothing.
+        //
+        // By transaction id: the message carries it, and a booking-wide lookup
+        // would have to choose between a RefundPending and a Succeeded attempt.
         transactionReversal.RefundUnusablePaymentByTransactionAsync(transactionId, cancellationToken);
 }

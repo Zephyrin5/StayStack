@@ -7,32 +7,17 @@ namespace Catalog.Contracts;
 ///     that returns a property the guest then cannot hold is a dead end they
 ///     only discover after picking dates and clicking through.
 ///     <para>
-///         These were four constants - <c>MaxLeadTimeDays</c> and
-///         <c>MaxStayNights</c> defined once in Availability for holds and
-///         again in Catalog for search - with nothing tying them together.
-///         The failure was asymmetric and one direction silent: search looser
-///         than hold means a 400 at the moment of booking, search tighter
-///         means bookable inventory is invisible with nothing to say why.
-///         Neither is representable now, since there is one number rather
-///         than an agreement between two.
+///         With separate values the failure is asymmetric and one direction is
+///         silent: search looser than hold means a 400 at the moment of booking,
+///         search tighter means bookable inventory is invisible.
 ///     </para>
 ///     <para>
-///         Lives in <c>Catalog.Contracts</c> rather than
-///         <c>Availability.Contracts</c>, despite Availability being the
-///         module that ultimately enforces this at hold time, because the
-///         module order in docs/adr/0004 is
-///         <c>Hosts → Catalog → Availability → …</c>: Availability already
-///         references <c>Catalog.Contracts</c> (for
-///         <c>IUnitLookup.ResolveStayPricingAsync</c>), so this home costs
-///         nothing, while the reverse reference would make the two modules
-///         mutually dependent - the exact cycle that ADR's direction rule
-///         exists to prevent, and which it records happening for real once
-///         already. Same reasoning that put
-///         <c>BookingLifecyclePolicyOptions</c> in <c>Bookings.Contracts</c>
-///         rather than in <c>BuildingBlocks</c>: the upstream side of a pair
-///         that already depends on it, not a neutral project, and not
-///         <c>BuildingBlocks</c>, which is deliberately limited to things
-///         with no business meaning.
+///         Lives in <c>Catalog.Contracts</c>, the upstream side of the pair
+///         (docs/adr/0004): Bookings already references it for
+///         <c>IUnitLookup.ResolveStayPricingAsync</c>, while the reverse reference
+///         would make the modules mutually dependent. Not
+///         <c>BuildingBlocks</c>, which is limited to things with no business
+///         meaning.
 ///     </para>
 ///     <para>
 ///         No startup guard on the relationship between the two numbers,
@@ -43,25 +28,21 @@ namespace Catalog.Contracts;
 ///         something a check could catch drifting.
 ///     </para>
 ///     <para>
-///         One residual asymmetry worth knowing, which a shared value does
-///         not remove: the two paths anchor "today" differently, and must.
-///         The hold path uses the property's own time zone (docs/adr/0018);
-///         search uses UTC, because it spans every property's zone at once
-///         and has no single one to resolve against. So near the boundary the
-///         two disagree by a day, in a direction that depends on the
-///         property's offset.
+///         One residual asymmetry a shared value does not remove: the two
+///         paths anchor "today" differently, and must. The hold path uses the
+///         property's own time zone (docs/adr/0018); search uses UTC, because
+///         it spans every property's zone at once. Near the boundary the two
+///         disagree by a day, in a direction that depends on the property's
+///         offset.
 ///     </para>
 ///     <para>
-///         Search cannot remove that disagreement, so it picks its direction:
-///         <c>GetPropertiesRequestValidator</c> allows one day past
-///         <see cref="MaxLeadTimeDays"/>, which makes search never stricter
-///         than the hold path. The two failure modes are not equally bad -
-///         search stricter means a bookable property silently absent from
-///         results, search looser means a clear 400 from the hold - and only
-///         one of them is observable. The extra day cannot escape the bound
-///         either: a local date is within one day of the UTC date in every
-///         zone, so anything search now admits, some property's own clock
-///         still rejects at most a day later.
+///         Search picks its direction: <c>GetPropertiesRequestValidator</c>
+///         allows one day past <see cref="MaxLeadTimeDays"/>, so search is never
+///         stricter than the hold path. Search stricter would silently hide a
+///         bookable property; search looser gives a clear 400 from the hold. The
+///         extra day cannot escape the bound: a local date is within one day of
+///         the UTC date in every zone, so anything search admits, the
+///         property's own clock rejects at most a day later.
 ///     </para>
 /// </summary>
 public class StaySearchPolicyOptions

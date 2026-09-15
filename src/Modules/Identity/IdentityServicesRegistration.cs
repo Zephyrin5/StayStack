@@ -44,12 +44,8 @@ public static class IdentityServicesRegistration
 
         // Registered unconditionally, including under "Testing" - the test
         // host (IntegrationTestWebApplicationFactory) overrides this via
-        // RemoveAll<DbContextOptions<...>>() + a fresh AddDbContext, not by
-        // this method knowing it's under test. Every module used to guard
-        // this with its own environment check, which is exactly what made
-        // Hosts' guard wrong in a way nothing caught for a while -
-        // production code having no "am I under test" awareness is the
-        // point.
+        // RemoveAll<DbContextOptions<...>>() + a fresh AddDbContext. Production
+        // code has no "am I under test" awareness.
         services.AddDbContext<AppIdentityDbContext>(options =>
         {
             string connectionString = configuration.GetConnectionString("AppConnection")

@@ -54,21 +54,16 @@ internal class UnitAvailabilityLookup(AppBookingsDbContext dbContext) : IUnitAva
 
     public Task<bool> HasActiveHoldForUnitAsync(Guid unitId, DateTimeOffset now, CancellationToken cancellationToken)
     {
-        // Only claims that are still going somewhere. This used to match
-        // 'held' or 'booked' with no date condition at all, which was a
-        // permanent block rather than a check: nothing deletes a booked row,
-        // so one completed stay made its unit - and its property - impossible
-        // to archive forever. See this method's contract for why the booked
-        // case belongs to IUnitArchivalGuard instead.
+        // Only claims that are still going somewhere. 'booked' rows are never
+        // deleted, so matching them would make a unit with one completed stay
+        // impossible to archive; booked stays belong to IUnitArchivalGuard (see
+        // this method's contract).
         //
-        // PendingPayment is kept, unlike Booked, because it is not the same
-        // kind of fact. It is a checkout in flight, bounded by the payment
-        // window, and for a moment during confirmation it is the *only*
-        // record of one: the hold commits before the Booking row exists (the
-        // window docs/adr/0017's intents cover), so Bookings' guard cannot
-        // see it yet. Dropping it would let an archival land in that gap and
-        // produce exactly the mid-checkout failure this pair of guards exists
-        // to prevent.
+        // 'pending_payment' is kept: it is a checkout in flight, bounded by the
+        // payment window, and during confirmation it is the only record of one -
+        // the hold commits before the Booking row exists (the window
+        // docs/adr/0017's intents cover), so Bookings' guard cannot see it yet.
+        // Dropping it would let archival land mid-checkout.
         //
         // Null HoldExpiresAt reads as active, matching the two range queries
         // above - an absent expiry is not an elapsed one.

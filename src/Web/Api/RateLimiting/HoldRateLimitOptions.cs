@@ -9,8 +9,7 @@ namespace Api.RateLimiting;
 /// </summary>
 public class HoldRateLimitOptions
 {
-    // Its own section - see AuthRateLimitOptions.SectionName for why the
-    // three policies no longer share one.
+    // Its own section - see AuthRateLimitOptions.SectionName.
     public const string SectionName = "RateLimiting:Holds";
 
     [Range(1, int.MaxValue)]
