@@ -220,8 +220,7 @@ public class ConfirmBookingHandler(
                 BookingId = bookingId,
                 KeyHash = keyHash,
                 RequestFingerprint = requestFingerprint,
-                CreatedAt = now,
-                CompletedAt = now
+                CreatedAt = now
             });
         }
 

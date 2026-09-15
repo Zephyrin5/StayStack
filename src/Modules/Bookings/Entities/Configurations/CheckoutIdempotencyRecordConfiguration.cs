@@ -27,8 +27,8 @@ public class CheckoutIdempotencyRecordConfiguration : IEntityTypeConfiguration<C
             .HasDatabaseName(KeyHashIndex);
 
         // What the purge job scans by.
-        builder.HasIndex(r => r.CompletedAt, "ix_checkout_idempotency_completed_at")
-            .HasDatabaseName("ix_checkout_idempotency_completed_at");
+        builder.HasIndex(r => r.CreatedAt, "ix_checkout_idempotency_created_at")
+            .HasDatabaseName("ix_checkout_idempotency_created_at");
 
         // Both are Base64 SHA-256: 44 characters including the padding byte.
         // Bounded rather than unbounded `text` because nothing else can ever

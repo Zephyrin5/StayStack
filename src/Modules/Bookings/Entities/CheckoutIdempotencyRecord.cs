@@ -70,12 +70,10 @@ public sealed class CheckoutIdempotencyRecord
     /// </summary>
     public string RequestFingerprint { get; set; } = string.Empty;
 
-    public DateTimeOffset CreatedAt { get; set; }
-
     /// <summary>
-    ///     When the confirmation committed. Written with the <c>Booking</c>, so
-    ///     never null on a committed row; the purge job scans by it.
+    ///     When the confirmation wrote the record, in the same commit as its
+    ///     <c>Booking</c>. The replay window runs from here, and the purge job
+    ///     scans by it.
     /// </summary>
-    public DateTimeOffset? CompletedAt { get; set; }
-
+    public DateTimeOffset CreatedAt { get; set; }
 }

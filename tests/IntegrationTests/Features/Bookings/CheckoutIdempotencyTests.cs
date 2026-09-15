@@ -3,6 +3,7 @@ using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
 using Bookings.Features.CreateBookingSession;
 using Bookings.Features.HoldAvailability;
+using Bookings.Jobs;
 using Catalog;
 using Catalog.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -256,10 +257,8 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
     [Fact]
     public async Task ACompletedRecord_CarriesTheTokenAndTheBookingItReplays()
     {
-        // The storage-shape assertion behind the replay: the record must be
-        // completed in the same transaction as the booking, or a committed
-        // booking whose record never landed leaves the guest's retry with
-        // nothing to replay.
+        // The storage-shape assertion behind the replay: the record commits with
+        // the booking it replays, and holds nothing a database reader could use.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
         Guid holdId = await HoldUnitAsync(unit.Id);
@@ -272,8 +271,6 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
 
         CheckoutIdempotencyRecord record = await context.CheckoutIdempotencyRecords.AsNoTracking()
             .SingleAsync(r => r.BookingId == created.BookingId, TestContext.Current.CancellationToken);
-
-        Assert.NotNull(record.CompletedAt);
 
         // The record carries no credential at all now. A database read must
         // not be able to produce a working management token, which is the
@@ -323,6 +320,39 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
         // And it says nothing about the booking it declined to replay.
         string body = await replayed.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.DoesNotContain("managementToken", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ThePurge_DeletesRecordsPastTheReplayWindow_AndKeepsTheRest()
+    {
+        // Measured from created_at, the same instant ReplayAsync measures the
+        // window from, so a record the request path still replays is never
+        // purged.
+        Unit unit = CreateTestUnit();
+        await SeedCatalogAsync(unit);
+
+        ConfirmBookingResponse expired = await ReadAsync(await ConfirmAsync(await HoldUnitAsync(unit.Id, daysUntilCheckIn: 40), Guid.NewGuid().ToString()));
+        ConfirmBookingResponse current = await ReadAsync(await ConfirmAsync(await HoldUnitAsync(unit.Id, daysUntilCheckIn: 50), Guid.NewGuid().ToString()));
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+
+            await context.CheckoutIdempotencyRecords
+                .Where(r => r.BookingId == expired.BookingId)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(r => r.CreatedAt, DateTimeOffset.UtcNow.AddDays(-8)),
+                    TestContext.Current.CancellationToken);
+
+            await ActivatorUtilities.CreateInstance<PurgeReplayedCheckoutsJob>(scope.ServiceProvider)
+                .PurgeAsync(null!, TestContext.Current.CancellationToken);
+        }
+
+        using IServiceScope assertScope = factory.Services.CreateScope();
+        AppBookingsDbContext db = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+
+        Assert.False(await db.CheckoutIdempotencyRecords.AnyAsync(r => r.BookingId == expired.BookingId, TestContext.Current.CancellationToken));
+        Assert.True(await db.CheckoutIdempotencyRecords.AnyAsync(r => r.BookingId == current.BookingId, TestContext.Current.CancellationToken));
     }
 
     [Fact]

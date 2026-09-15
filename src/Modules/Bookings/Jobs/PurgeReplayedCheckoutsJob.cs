@@ -25,7 +25,7 @@ public class PurgeReplayedCheckoutsJob(
 {
     private const string PurgeSql = """
                                     DELETE FROM checkout_idempotency_records
-                                    WHERE completed_at IS NOT NULL AND completed_at <= @Cutoff;
+                                    WHERE created_at <= @Cutoff;
                                     """;
 
     // Hourly. ReplayAsync enforces the window, so the cadence only bounds how

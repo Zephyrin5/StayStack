@@ -70,7 +70,7 @@ Independently committed steps per workflow: confirm with a code 3 (up to 6 on fa
 
 - **D1. Re-point the existing scoped contexts; no second registration.** With a loud diagnostic naming a participant that is not idle, no pooled registrations, and release on the failure path, each tested.
 - **D2. Flags at the call site, resolved in Infrastructure; an explicit single-flag owner.** Participation is not enlisted for every module.
-- **D3. The unreachable "still in progress" replay branch is deleted**; the `completed_at` column stays nullable, noted in the extraction inventory.
+- **D3. The unreachable "still in progress" replay branch is deleted.** `completed_at` was then always equal to `created_at`, and was dropped; the purge job scans `created_at`, the instant the replay window runs from.
 - **D4. Initiation and both archival handlers participate read-only, in one commit.** None needed a logic change. `HoldAvailabilityHandler` stays outside: joining would widen the Serializable envelope over a cross-module read and change retry characteristics on the most contended path. It still shows the amplification, as expected.
 - **D5. `ResolveOutstandingRefundsJob` runs each resolution in a scope.** No provider call may run inside it (stated at the call site); `ResolvedAt` means the decision is recorded locally.
 - **D6. Booking row before transaction row on every path.** Payment success saves its transaction only after `ConfirmPaymentAsync` has locked the booking; `RefundDeterminismTests` pins a cancellation and a payment racing in each order. ADR-0028 carries the derivation.

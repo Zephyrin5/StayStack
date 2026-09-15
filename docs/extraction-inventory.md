@@ -20,7 +20,3 @@ Every place one module's write commits in another module's transaction. Each row
 
 - **`HoldAvailabilityHandler`** runs its own Serializable transaction and reads Catalog (`IUnitLookup.GetUnitAsync`) on Catalog's own connection while holding it. A hold therefore uses two pooled connections. It could join a scope with an isolation-level parameter, but that would widen the Serializable envelope over a cross-module read and change the retry characteristics of the most contended path; it is left as a deliberate residual (ADR-0029).
 - **Reads outside a transaction** (lookups through `*.Contracts` before a scope opens, response building after it commits) use their module's own connection and are not listed.
-
-## Schema follow-ups
-
-- `checkout_idempotency_records.completed_at` is written non-null on every row since the record commits with its booking. The column is still nullable; making it `NOT NULL` is a later migration.
