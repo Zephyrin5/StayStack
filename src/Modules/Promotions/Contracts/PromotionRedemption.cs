@@ -167,51 +167,47 @@ internal class PromotionRedemption(
 
     public async Task ReverseRedemptionAsync(Guid bookingId, CancellationToken cancellationToken)
     {
-        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
+        // The caller's atomic scope owns the transaction, so the code goes back
+        // only if the cancellation that frees it commits.
+        DbTransaction transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction()
+                                    ?? throw new InvalidOperationException(
+                                        $"{nameof(PromotionRedemption)}.{nameof(ReverseRedemptionAsync)} must run inside the caller's " +
+                                        "atomic scope: a reversal committed on its own frees a code for a booking whose cancellation may roll back.");
+        IDbConnection connection = dbContext.Database.GetDbConnection();
 
-        await strategy.ExecuteAsync(async () =>
+        // UPDATE, not DELETE - the row survives as history (see
+        // PromotionRedemption.ReversedAt's own doc comment), and the
+        // "already reversed" guard (reversed_at IS NULL) makes this
+        // idempotent: calling it twice for the same booking only ever affects
+        // the row once.
+        const string reverseSql = """
+                                  UPDATE promotion_redemptions
+                                  SET reversed_at = @Now
+                                  WHERE booking_id = @BookingId AND reversed_at IS NULL
+                                  RETURNING promotion_id AS "PromotionId";
+                                  """;
+
+        Guid? promotionId = await connection.QuerySingleOrDefaultAsync<Guid?>(new CommandDefinition(
+            reverseSql, new { BookingId = bookingId, Now = timeProvider.GetUtcNow() }, transaction,
+            cancellationToken: cancellationToken));
+
+        if (promotionId is null)
         {
-            await using IDbContextTransaction transaction =
-                await dbContext.Database.BeginTransactionAsync(cancellationToken);
-            IDbConnection connection = dbContext.Database.GetDbConnection();
+            // No-op - this booking never redeemed a code, or its
+            // redemption was already reversed - same idempotent shape
+            // as Catalog.Contracts.IHoldConfirmation.ReleaseHoldAsync.
+            return;
+        }
 
-            // UPDATE, not DELETE - the row survives as history (see
-            // PromotionRedemption.ReversedAt's own doc comment), and the
-            // "already reversed" guard (reversed_at IS NULL) makes this
-            // idempotent the same way a plain DELETE naturally was: calling
-            // it twice for the same booking only ever affects the row once.
-            const string reverseSql = """
-                                      UPDATE promotion_redemptions
-                                      SET reversed_at = @Now
-                                      WHERE booking_id = @BookingId AND reversed_at IS NULL
-                                      RETURNING promotion_id AS "PromotionId";
-                                      """;
+        const string decrementSql = """
+                                    UPDATE promotions
+                                    SET redemption_count = redemption_count - 1
+                                    WHERE id = @PromotionId;
+                                    """;
 
-            Guid? promotionId = await connection.QuerySingleOrDefaultAsync<Guid?>(new CommandDefinition(
-                reverseSql, new { BookingId = bookingId, Now = timeProvider.GetUtcNow() }, transaction.GetDbTransaction(),
-                cancellationToken: cancellationToken));
-
-            if (promotionId is null)
-            {
-                // No-op - this booking never redeemed a code, or its
-                // redemption was already reversed - same idempotent shape
-                // as Catalog.Contracts.IHoldConfirmation.ReleaseHoldAsync.
-                await transaction.CommitAsync(cancellationToken);
-                return;
-            }
-
-            const string decrementSql = """
-                                        UPDATE promotions
-                                        SET redemption_count = redemption_count - 1
-                                        WHERE id = @PromotionId;
-                                        """;
-
-            await connection.ExecuteAsync(new CommandDefinition(
-                decrementSql, new { PromotionId = promotionId }, transaction.GetDbTransaction(),
-                cancellationToken: cancellationToken));
-
-            await transaction.CommitAsync(cancellationToken);
-        });
+        await connection.ExecuteAsync(new CommandDefinition(
+            decrementSql, new { PromotionId = promotionId }, transaction,
+            cancellationToken: cancellationToken));
     }
 
     // Shape of the failure-path diagnostic read above. Nullable Status so a

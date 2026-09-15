@@ -45,7 +45,7 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
     ///     <para>
     ///         The three statements that change a hold's status are each half
     ///         of a decision whose other half is a Bookings row: the transition
-    ///         and the intent, the payment and the confirmation, the release and
+    ///         and the booking, the payment and the confirmation, the release and
     ///         the cancellation. The two halves must commit together.
     ///     </para>
     ///     <para>
@@ -177,7 +177,7 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
         }
 
         // The only writer of 'booked', driven from the payment-confirmation path
-        // (ConfirmBookingPaymentOutboxMessage -> IBookingPaymentConfirmation).
+        // (MarkTransactionSucceededHandler -> IBookingPaymentConfirmation).
         // booked_at records when the range was sold, which is now.
         //
         // client_key is cleared: nothing reads a network address once the row
@@ -186,9 +186,9 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
         // to now, putting the row outside the cap's WHERE clause regardless.
         //
         // Idempotent: 'booked' is accepted as well as 'pending_payment' and
-        // reports success, because the outbox can redeliver after a committed
-        // confirmation. COALESCE keeps the original booked_at across those
-        // redeliveries.
+        // reports success, so a repeated call against a hold already sold does
+        // not fail the payment. COALESCE keeps the original booked_at across
+        // repeats.
         //
         // 'held' is refused, and that is the value of the return: a hold
         // released or expired under a late-landing payment is inventory this

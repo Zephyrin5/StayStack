@@ -1,72 +1,81 @@
+// Proves the refund amount follows the order of payment and cancellation through the real
+// handlers, that the sweep refunds an obligation with a payment behind it, that a backlog of unpaid
+// obligations does not starve it, and that a recorded refund is not overwritten. The two
+// concurrency tests pin each interleaving with a barrier on the booking's row lock and assert the
+// waiting side holds no lock on transactions; see their comments for what breaking the lock order
+// does.
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;
+using Bookings.Features.CancelBooking;
 using Bookings.Jobs;
-using Bookings.Outbox;
-using Bookings.Serialization;
+using BuildingBlocks.Identity;
+using BuildingBlocks.Persistence;
 using Catalog;
 using Catalog.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Npgsql;
 using NpgsqlTypes;
-using Outbox;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using Transactions;
 using Transactions.Contracts;
 using Transactions.Entities;
-using Transactions.Outbox;
-using Transactions.Serialization;
+using Transactions.Features.MarkTransactionSucceeded;
 namespace IntegrationTests.Features.Transactions;
 
-// Two paths transition Succeeded -> RefundPending and they disagree about the
-// amount: the cancellation path knows the policy figure, the delayed
-// payment-confirmation path only ever refunds in full. Both were guarded on
-// status alone, so whichever outbox dispatch ran first wrote the money and the
-// other returned silently.
+// Two facts decide a refund: when the payment succeeded and when the booking was
+// cancelled. Paid first, the guest bought a stay and cancelled it, so the
+// cancellation policy decides. Cancelled first, the payment bought nothing and
+// comes back in full. The amount must follow that order, however the two
+// requests interleave.
 //
-// Identical business history therefore produced 50% or 100% depending on
-// scheduling. These pin the amount to the *ordering* of the two events, which
-// is what the non-overlapping cases already do: a transaction still Pending at
-// cancel time is left alone by the cancellation path, and the later
-// confirmation refunds in full.
+// Check-in is three days out, inside the default policy's 50% tier, so the
+// policy figure (100) and the full amount (200) differ.
 [Collection("Integration Tests")]
 public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory)
 {
-    private readonly List<Property> _pendingProperties = [];
+    private const int DaysUntilCheckIn = 3;
 
-    private Unit CreateTestUnit()
+    private sealed class Customer(Guid id) : ICurrentUserProvider
+    {
+        public Guid? UserId => id;
+        public Guid? HostId => null;
+        public IReadOnlyCollection<string> Roles => [];
+    }
+
+    private sealed class NoSession : IBookingSessions
+    {
+        public BookingSession Issue(Guid bookingId) => throw new NotSupportedException();
+        public Task<Guid?> GetSessionBookingIdAsync(CancellationToken cancellationToken) => Task.FromResult<Guid?>(null);
+    }
+
+    private sealed record Seeded(Guid BookingId, Guid CustomerId, Guid TransactionId);
+
+    // A checkout awaiting payment - a Pending booking, its hold in
+    // 'pending_payment', and a Pending transaction - owned by a customer.
+    private async Task<Seeded> SeedAwaitingPaymentAsync()
     {
         Property property = CatalogSeeding.CreateProperty();
-        _pendingProperties.Add(property);
-
-        return Unit.Create(
+        Unit unit = Unit.Create(
             Guid.CreateVersion7(),
             property.Id,
             LocalizedText.Create(new Dictionary<string, string> { { "en", "Standard Room" } }, "en"),
             2,
             100m);
-    }
 
-    // A paid, confirmed booking whose confirmation message has NOT been
-    // delivered - the state the whole defect lives in. Built by hand rather
-    // than through the API so the delivery order is the test's to choose.
-    private async Task<(Guid BookingId, Guid TransactionId)> SeedPaidButUnconfirmedAsync(
-        int daysUntilCheckIn, DateTimeOffset? succeededAt)
-    {
-        Unit unit = CreateTestUnit();
         Guid bookingId = Guid.CreateVersion7();
         Guid holdId = Guid.CreateVersion7();
-        DateOnly checkIn = CatalogSeeding.Today().AddDays(daysUntilCheckIn);
+        Guid customerId = Guid.NewGuid();
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(DaysUntilCheckIn);
 
         using IServiceScope scope = factory.Services.CreateScope();
 
         AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
-        catalog.AddRange(_pendingProperties);
-        _pendingProperties.Clear();
-        catalog.Add(unit);
+        catalog.AddRange(property, unit);
         await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
@@ -75,295 +84,346 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
             Id = holdId,
             UnitId = unit.Id,
             StayRange = new NpgsqlRange<DateOnly>(checkIn, true, checkIn.AddDays(2), false),
-            Status = "booked",
+            Status = "pending_payment",
             GuestCount = 2,
             CreatedAt = DateTimeOffset.UtcNow,
-            BookedAt = succeededAt,
             TotalPrice = Money.Of(200m, Currency.KWD),
             Subtotal = 200m
         });
 
-        Booking booking = Booking.Create(
-            bookingId, unit.Id, holdId, null,
+        bookings.Bookings.Add(Booking.Create(
+            bookingId, unit.Id, holdId, customerId,
             "Jane Guest", "jane@example.com", null,
             checkIn, checkIn.AddDays(2), 2,
             Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD),
             CancellationPolicy.CreateDefault(), "Asia/Kuwait",
-            DateTimeOffset.UtcNow.AddMinutes(15));
+            DateTimeOffset.UtcNow.AddMinutes(15)));
 
-        bookings.Bookings.Add(booking);
         await bookings.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        AppTransactionsDbContext transactions =
-            scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
-
+        AppTransactionsDbContext transactions = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
         Transaction payment = Transaction.Create(Guid.CreateVersion7(), bookingId, Money.Of(200m, Currency.KWD));
-
-        if (succeededAt is { } paidAt)
-        {
-            payment.MarkSucceeded(paidAt);
-        }
-
         transactions.Transactions.Add(payment);
-
-        // The confirmation row, committed and deliberately not dispatched -
-        // the delay that makes both refund paths reachable at once.
-        transactions.Set<OutboxMessage>().Add(new OutboxMessage
-        {
-            Id = Guid.CreateVersion7(),
-            Type = ConfirmBookingPaymentOutboxMessage.TypeName,
-            Payload = System.Text.Json.JsonSerializer.Serialize(
-                new ConfirmBookingPaymentOutboxMessage(payment.Id, bookingId),
-                TransactionsJsonSerializerContext.Default.ConfirmBookingPaymentOutboxMessage),
-            CreatedAt = DateTimeOffset.UtcNow,
-            NextAttemptAt = DateTimeOffset.UtcNow
-        });
-
         await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        return (bookingId, payment.Id);
+        return new Seeded(bookingId, customerId, payment.Id);
     }
 
-    // The cancellation, enqueued and dispatched by hand so the test decides
-    // when it lands relative to the confirmation.
-    private async Task CancelAsync(
-        Guid bookingId, DateTimeOffset cancelledAt, Money policyRefund, bool dispatchNow = true)
+    // The real handlers, resolved from a fresh scope. An override builds a
+    // replacement for one dependency from that same scope - which is how the
+    // concurrency tests pause one side without taking its collaborator off the
+    // handler's DbContext.
+    private async Task<CancelBookingResponse> CancelAsync(Seeded seeded, Func<IServiceProvider, object>? @override = null)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        object[] arguments = @override is null
+            ? [new Customer(seeded.CustomerId), new NoSession()]
+            : [new Customer(seeded.CustomerId), new NoSession(), @override(scope.ServiceProvider)];
+        CancelBookingHandler handler = ActivatorUtilities.CreateInstance<CancelBookingHandler>(scope.ServiceProvider, arguments);
 
-        Booking booking = await bookings.Bookings
-            .SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
-        booking.Cancel(cancelledAt);
-
-        // The obligation, exactly as CancelBookingHandler writes it. It is what
-        // the resolver reads; without it there is nothing to settle and every
-        // assertion below would be about a refund that never had a reason to
-        // happen.
-        bookings.RefundObligations.Add(new RefundObligation
-        {
-            BookingId = bookingId,
-            CancelledAt = cancelledAt,
-            PolicyRefundAmount = policyRefund.Amount,
-            Currency = policyRefund.Currency,
-            Cause = BookingCancellationCause.GuestCancellation
-        });
-
-        BookingsOutboxDispatcher dispatcher =
-            scope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>();
-
-        OutboxMessage row = dispatcher.Enqueue(
-            new ReverseTransactionOutboxMessage(bookingId),
-            BookingsJsonSerializerContext.Default.ReverseTransactionOutboxMessage);
-
-        await bookings.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        if (dispatchNow)
-        {
-            await dispatcher.TryDispatchAsync(row, TestContext.Current.CancellationToken);
-        }
+        return await handler.Handle(
+            new CancelBookingRequest { BookingId = seeded.BookingId }, TestContext.Current.CancellationToken);
     }
 
-    // The reversal that CancelAsync deliberately left undelivered - what the
-    // relay would eventually do.
-    private async Task DeliverReversalAsync()
+    private async Task<MarkTransactionSucceededResponse> SucceedAsync(Seeded seeded, Func<IServiceProvider, object>? @override = null)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>()
-            .DispatchPendingAsync(50, TestContext.Current.CancellationToken);
+        MarkTransactionSucceededHandler handler = ActivatorUtilities.CreateInstance<MarkTransactionSucceededHandler>(
+            scope.ServiceProvider, @override is null ? [] : [@override(scope.ServiceProvider)]);
+
+        return await handler.Handle(
+            new MarkTransactionSucceededRequest { TransactionId = seeded.TransactionId }, TestContext.Current.CancellationToken);
     }
 
-    private async Task MarkPaymentSucceededAsync(Guid transactionId, DateTimeOffset succeededAt)
+    private async Task<(Transaction Payment, Booking Booking, RefundObligation Obligation)> ReadAsync(Seeded seeded)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppTransactionsDbContext transactions =
-            scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
 
-        Transaction payment = await transactions.Transactions
-            .SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
-        payment.MarkSucceeded(succeededAt);
-        await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
-    }
-
-    private async Task DeliverConfirmationAsync()
-    {
-        using IServiceScope scope = factory.Services.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<TransactionsOutboxDispatcher>()
-            .DispatchPendingAsync(50, TestContext.Current.CancellationToken);
-    }
-
-    private async Task<Transaction> ReadTransactionAsync(Guid transactionId)
-    {
-        using IServiceScope scope = factory.Services.CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>()
+        Transaction payment = await scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>()
             .Transactions.AsNoTracking()
-            .SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
-    }
+            .SingleAsync(t => t.Id == seeded.TransactionId, TestContext.Current.CancellationToken);
 
-    public enum Ordering
-    {
-        /// <summary>The cancellation's reversal lands, then the confirmation.</summary>
-        ReversalThenConfirmation,
+        AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        Booking booking = await bookings.Bookings.AsNoTracking()
+            .SingleAsync(b => b.Id == seeded.BookingId, TestContext.Current.CancellationToken);
+        RefundObligation obligation = await bookings.RefundObligations.AsNoTracking()
+            .SingleAsync(o => o.BookingId == seeded.BookingId, TestContext.Current.CancellationToken);
 
-        /// <summary>
-        ///     The confirmation lands first, against a booking not yet
-        ///     cancelled - so it simply confirms, and the cancellation follows
-        ///     normally. Included because it is the ordinary flow and must stay
-        ///     unaffected.
-        /// </summary>
-        ConfirmationBeforeTheCancellation,
-
-        /// <summary>
-        ///     The real overlap, and the one the original defect lived in: the
-        ///     booking is cancelled and its reversal is enqueued but not yet
-        ///     delivered when the confirmation arrives. Both paths then see a
-        ///     Succeeded transaction and a Cancelled booking, and before the
-        ///     ordering rule the confirmation wrote the full amount first and
-        ///     the reversal returned silently.
-        /// </summary>
-        ConfirmationWhileTheReversalIsStillQueued
-    }
-
-    [Theory]
-    [InlineData(Ordering.ReversalThenConfirmation)]
-    [InlineData(Ordering.ConfirmationBeforeTheCancellation)]
-    [InlineData(Ordering.ConfirmationWhileTheReversalIsStillQueued)]
-    public async Task APaymentThatPrecededTheCancellation_RefundsThePolicyAmount_WhicheverDispatchRunsFirst(
-        Ordering ordering)
-    {
-        // Paid at 12:00, cancelled at 14:00. The guest bought a stay and then
-        // cancelled it, so the cancellation policy decides - and must decide
-        // the same way whichever of the two dispatches happens to win.
-        DateTimeOffset succeededAt = DateTimeOffset.UtcNow.AddHours(-2);
-        DateTimeOffset cancelledAt = DateTimeOffset.UtcNow;
-
-        (Guid bookingId, Guid transactionId) =
-            await SeedPaidButUnconfirmedAsync(daysUntilCheckIn: 120, succeededAt);
-
-        Money policyRefund = Money.Of(100m, Currency.KWD);
-
-        switch (ordering)
-        {
-            case Ordering.ReversalThenConfirmation:
-                await CancelAsync(bookingId, cancelledAt, policyRefund);
-                await DeliverConfirmationAsync();
-                break;
-
-            case Ordering.ConfirmationBeforeTheCancellation:
-                await DeliverConfirmationAsync();
-                await CancelAsync(bookingId, cancelledAt, policyRefund);
-                break;
-
-            case Ordering.ConfirmationWhileTheReversalIsStillQueued:
-                await CancelAsync(bookingId, cancelledAt, policyRefund, dispatchNow: false);
-                await DeliverConfirmationAsync();
-                await DeliverReversalAsync();
-                break;
-        }
-
-        Transaction settled = await ReadTransactionAsync(transactionId);
-
-        // 100, never 200. Before the ordering rule this was 200 in one branch
-        // of this theory and 100 in the other.
-        Assert.Equal(100m, settled.RefundAmount!.Value.Amount);
-        Assert.Equal(RefundCause.GuestCancellation, settled.RefundCause);
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task APaymentThatFollowedTheCancellation_RefundsInFull_WhicheverDispatchRunsFirst(
-        bool reverseBeforeThePaymentSucceeds)
-    {
-        // Cancelled at 12:00, paid at 14:00. That payment bought nothing, so
-        // the whole amount goes back - no cancellation fee applies to a stay
-        // the guest no longer had.
-        //
-        // Built as a genuine ordering rather than by backdating a timestamp.
-        // Setting CancelledAt in the past but cancelling afterwards would let
-        // the confirmation arrive at a still-live booking and confirm it, and no
-        // refund path would run - a scenario that cannot happen.
-        //
-        // What actually varies here is whether the cancellation's reversal
-        // dispatch runs before or after the payment succeeds. Both must reach
-        // the same figure.
-        DateTimeOffset cancelledAt = DateTimeOffset.UtcNow.AddHours(-2);
-        DateTimeOffset succeededAt = DateTimeOffset.UtcNow;
-
-        (Guid bookingId, Guid transactionId) =
-            await SeedPaidButUnconfirmedAsync(daysUntilCheckIn: 121, succeededAt: null);
-
-        Money policyRefund = Money.Of(100m, Currency.KWD);
-
-        if (reverseBeforeThePaymentSucceeds)
-        {
-            // The reversal finds the transaction still Pending and leaves it
-            // alone - the pre-existing behaviour, unchanged.
-            await CancelAsync(bookingId, cancelledAt, policyRefund);
-            await MarkPaymentSucceededAsync(transactionId, succeededAt);
-        }
-        else
-        {
-            // The reversal finds it Succeeded and must decline anyway, because
-            // the payment landed after the cancellation. This is the branch the
-            // ordering rule adds; before it, the policy figure was written here
-            // whenever this dispatch happened to come second.
-            await MarkPaymentSucceededAsync(transactionId, succeededAt);
-            await CancelAsync(bookingId, cancelledAt, policyRefund);
-        }
-
-        await DeliverConfirmationAsync();
-
-        Transaction settled = await ReadTransactionAsync(transactionId);
-
-        Assert.Equal(200m, settled.RefundAmount!.Value.Amount);
-        Assert.Equal(RefundCause.PaymentUnusable, settled.RefundCause);
+        return (payment, booking, obligation);
     }
 
     [Fact]
-    public async Task WithEveryOutboxMessageDroppedOnTheFloor_TheBackstopStillRefunds()
+    public async Task APaymentThatPrecededTheCancellation_RefundsThePolicyAmount()
     {
-        // Correctness does not depend on delivery.
+        Seeded seeded = await SeedAwaitingPaymentAsync();
+
+        MarkTransactionSucceededResponse paid = await SucceedAsync(seeded);
+        Assert.Equal(TransactionStatus.Succeeded, paid.TransactionStatus);
+
+        await CancelAsync(seeded);
+
+        (Transaction payment, Booking booking, RefundObligation obligation) = await ReadAsync(seeded);
+
+        Assert.Equal(BookingStatus.Cancelled, booking.BookingStatus);
+        Assert.Equal(TransactionStatus.RefundPending, payment.TransactionStatus);
+        Assert.Equal(100m, payment.RefundAmount!.Value.Amount);
+        Assert.Equal(RefundCause.GuestCancellation, payment.RefundCause);
+        Assert.NotNull(obligation.ResolvedAt);
+    }
+
+    [Fact]
+    public async Task APaymentThatFollowedTheCancellation_RefundsInFull()
+    {
+        // No cancellation fee applies to a stay the guest no longer had.
+        Seeded seeded = await SeedAwaitingPaymentAsync();
+
+        await CancelAsync(seeded);
+
+        MarkTransactionSucceededResponse paid = await SucceedAsync(seeded);
+        Assert.Equal(TransactionStatus.RefundPending, paid.TransactionStatus);
+
+        (Transaction payment, Booking booking, RefundObligation obligation) = await ReadAsync(seeded);
+
+        Assert.Equal(BookingStatus.Cancelled, booking.BookingStatus);
+        Assert.Equal(200m, payment.RefundAmount!.Value.Amount);
+        Assert.Equal(RefundCause.PaymentUnusable, payment.RefundCause);
+        Assert.NotNull(obligation.ResolvedAt);
+    }
+
+    // ---- concurrent cancellation and payment ------------------------------
+
+    // Pauses the cancellation after it holds the booking's row lock, before it
+    // releases the hold and resolves the refund.
+    private sealed class PauseBeforeRelease(IHoldConfirmation inner, TaskCompletionSource reached, TaskCompletionSource gate)
+        : IHoldConfirmation
+    {
+        public Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
+            inner.ConfirmHoldAsync(holdId, cancellationToken);
+
+        public Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken) =>
+            inner.MarkHoldPaidAsync(holdId, cancellationToken);
+
+        public async Task ReleaseHoldAsync(Guid holdId, CancellationToken cancellationToken)
+        {
+            reached.TrySetResult();
+            await gate.Task;
+            await inner.ReleaseHoldAsync(holdId, cancellationToken);
+        }
+    }
+
+    // Pauses the payment after it has confirmed the booking under its row lock,
+    // before it writes the transaction.
+    private sealed class PauseAfterConfirming(
+        IBookingPaymentConfirmation inner, TaskCompletionSource reached, TaskCompletionSource gate)
+        : IBookingPaymentConfirmation
+    {
+        public async Task<bool> ConfirmPaymentAsync(Guid bookingId, CancellationToken cancellationToken)
+        {
+            bool confirmed = await inner.ConfirmPaymentAsync(bookingId, cancellationToken);
+            reached.TrySetResult();
+            await gate.Task;
+            return confirmed;
+        }
+    }
+
+    private static (TaskCompletionSource Reached, TaskCompletionSource Gate) NewGate() =>
+        (new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+            new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+
+    // The barrier for the blocked side: the backend waiting on the booking's row
+    // lock, found through Postgres rather than a guessed delay.
+    private async Task<int> WaitForABookingRowLockWaiterAsync()
+    {
+        await using NpgsqlConnection connection = new NpgsqlConnection(factory.ConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+
+        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+
+        while (true)
+        {
+            await using NpgsqlCommand command = new NpgsqlCommand(
+                """
+                SELECT pid FROM pg_stat_activity
+                WHERE wait_event_type = 'Lock' AND query LIKE '%FROM "bookings" WHERE id = % FOR UPDATE%'
+                LIMIT 1
+                """, connection);
+
+            if (await command.ExecuteScalarAsync(timeout.Token) is int pid)
+            {
+                return pid;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(20), timeout.Token);
+        }
+    }
+
+    // Whether a backend has written to the transactions table in its open
+    // transaction. A writer waiting on the booking lock while holding a
+    // transaction row is half of a deadlock with a cancellation that holds the
+    // booking lock and goes on to resolve the refund.
+    private async Task<bool> HoldsATransactionsWriteLockAsync(int pid)
+    {
+        await using NpgsqlConnection connection = new NpgsqlConnection(factory.ConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+
+        await using NpgsqlCommand command = new NpgsqlCommand(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM pg_locks l JOIN pg_class c ON c.oid = l.relation
+                WHERE l.pid = @Pid AND c.relname = 'transactions' AND l.mode = 'RowExclusiveLock')
+            """, connection);
+        command.Parameters.AddWithValue("Pid", pid);
+
+        return (bool)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
+    }
+
+    [Fact]
+    public async Task APaymentArrivingWhileTheCancellationHoldsTheBooking_WaitsWithoutATransactionLock_AndIsRefundedInFull()
+    {
+        // The cancellation holds the booking's row lock. The payment must queue
+        // on that lock before it writes its transaction row (docs/adr/0028):
+        // holding the transaction row while waiting would put it one step from a
+        // deadlock with a cancellation resolving the refund.
         //
-        // Nothing is dispatched here at all - not the reversal, not the
-        // confirmation. The obligation is a durable work item, so the sweep
-        // finds it and the refund is still recorded.
+        // Breaking the order - saving the transaction before ConfirmPaymentAsync
+        // - fails the lock assertion below. It does not produce an actual
+        // deadlock here: the cancellation's resolver reads the committed
+        // Pending row under Read Committed and writes nothing.
+        Seeded seeded = await SeedAwaitingPaymentAsync();
+        (TaskCompletionSource reached, TaskCompletionSource gate) = NewGate();
+
+        Task<CancelBookingResponse> cancellation = CancelAsync(seeded, services => new PauseBeforeRelease(
+            services.GetRequiredService<IHoldConfirmation>(), reached, gate));
+
+        await reached.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        Task<MarkTransactionSucceededResponse> payment = SucceedAsync(seeded);
+        int waiter = await WaitForABookingRowLockWaiterAsync();
+
+        Assert.False(await HoldsATransactionsWriteLockAsync(waiter),
+            "The payment wrote its transaction row before taking the booking lock.");
+
+        gate.SetResult();
+
+        await cancellation.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        MarkTransactionSucceededResponse paid =
+            await payment.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        Assert.Equal(TransactionStatus.RefundPending, paid.TransactionStatus);
+
+        (Transaction settled, Booking booking, RefundObligation obligation) = await ReadAsync(seeded);
+
+        Assert.Equal(BookingStatus.Cancelled, booking.BookingStatus);
+        Assert.Equal(200m, settled.RefundAmount!.Value.Amount);
+        Assert.Equal(RefundCause.PaymentUnusable, settled.RefundCause);
+        Assert.NotNull(obligation.ResolvedAt);
+    }
+
+    [Fact]
+    public async Task ACancellationArrivingWhileThePaymentHoldsTheBooking_WaitsForIt_AndRefundsThePolicyAmount()
+    {
+        // The mirror: the payment holds the booking's row lock, the cancellation
+        // queues behind it, and then finds a Confirmed booking with a Succeeded
+        // payment to refund at the policy figure.
+        Seeded seeded = await SeedAwaitingPaymentAsync();
+        (TaskCompletionSource reached, TaskCompletionSource gate) = NewGate();
+
+        Task<MarkTransactionSucceededResponse> payment = SucceedAsync(seeded, services => new PauseAfterConfirming(
+            services.GetRequiredService<IBookingPaymentConfirmation>(), reached, gate));
+
+        await reached.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        Task<CancelBookingResponse> cancellation = CancelAsync(seeded);
+        int waiter = await WaitForABookingRowLockWaiterAsync();
+
+        Assert.False(await HoldsATransactionsWriteLockAsync(waiter),
+            "The cancellation wrote to transactions before taking the booking lock.");
+
+        gate.SetResult();
+
+        MarkTransactionSucceededResponse paid =
+            await payment.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await cancellation.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        Assert.Equal(TransactionStatus.Succeeded, paid.TransactionStatus);
+
+        (Transaction settled, Booking booking, RefundObligation obligation) = await ReadAsync(seeded);
+
+        Assert.Equal(BookingStatus.Cancelled, booking.BookingStatus);
+        Assert.Equal(100m, settled.RefundAmount!.Value.Amount);
+        Assert.Equal(RefundCause.GuestCancellation, settled.RefundCause);
+        Assert.NotNull(obligation.ResolvedAt);
+    }
+
+    // ---- the sweep ---------------------------------------------------------
+
+    // A cancelled booking with an unresolved obligation and a Succeeded payment
+    // behind it. Both handlers resolve inline, so this is written directly: it is
+    // what the sweep exists to catch if an inline resolution ever does not record
+    // the refund.
+    private async Task<Seeded> SeedUnresolvedWithAPaymentAsync()
+    {
+        Seeded seeded = await SeedAwaitingPaymentAsync();
         DateTimeOffset succeededAt = DateTimeOffset.UtcNow.AddHours(-2);
         DateTimeOffset cancelledAt = DateTimeOffset.UtcNow.AddHours(-1);
 
-        (Guid bookingId, Guid transactionId) =
-            await SeedPaidButUnconfirmedAsync(daysUntilCheckIn: 123, succeededAt);
+        using IServiceScope scope = factory.Services.CreateScope();
 
-        await CancelAsync(bookingId, cancelledAt, Money.Of(100m, Currency.KWD), dispatchNow: false);
+        AppTransactionsDbContext transactions = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        Transaction payment = await transactions.Transactions
+            .SingleAsync(t => t.Id == seeded.TransactionId, TestContext.Current.CancellationToken);
+        payment.MarkSucceeded(succeededAt);
+        await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        using (IServiceScope scope = factory.Services.CreateScope())
+        AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        Booking booking = await bookings.Bookings
+            .SingleAsync(b => b.Id == seeded.BookingId, TestContext.Current.CancellationToken);
+        booking.Cancel(cancelledAt);
+        bookings.RefundObligations.Add(new RefundObligation
         {
-            // The clock is moved past the job's grace period rather than the
-            // grace being shortened: the job exists to catch obligations the
-            // messages did not, and waiting is how it tells those apart.
-            FakeTimeProvider clock = new FakeTimeProvider();
-            clock.SetUtcNow(DateTimeOffset.UtcNow.AddMinutes(10));
+            BookingId = seeded.BookingId,
+            CancelledAt = cancelledAt,
+            PolicyRefundAmount = 100m,
+            Currency = Currency.KWD,
+            Cause = BookingCancellationCause.GuestCancellation,
+            NextAttemptAt = cancelledAt
+        });
+        await bookings.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-            ResolveOutstandingRefundsJob job = new ResolveOutstandingRefundsJob(
-                scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
-                scope.ServiceProvider.GetRequiredService<ITransactionReversal>(),
-                clock,
-                NullLogger<ResolveOutstandingRefundsJob>.Instance);
+        return seeded;
+    }
 
+    // The clock is moved past the job's grace period rather than the grace being
+    // shortened.
+    private async Task RunTheSweepAsync(int runs = 1)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        FakeTimeProvider clock = new FakeTimeProvider();
+        clock.SetUtcNow(DateTimeOffset.UtcNow.AddMinutes(10));
+
+        ResolveOutstandingRefundsJob job = ActivatorUtilities.CreateInstance<ResolveOutstandingRefundsJob>(
+            scope.ServiceProvider, clock, NullLogger<ResolveOutstandingRefundsJob>.Instance);
+
+        for (int run = 0; run < runs; run++)
+        {
             await job.ResolveAsync(null!, TestContext.Current.CancellationToken);
         }
+    }
 
-        Transaction settled = await ReadTransactionAsync(transactionId);
+    [Fact]
+    public async Task AnUnresolvedObligationWithAPaymentBehindIt_IsRefundedByTheSweep()
+    {
+        Seeded seeded = await SeedUnresolvedWithAPaymentAsync();
+
+        await RunTheSweepAsync();
+
+        (Transaction settled, _, RefundObligation obligation) = await ReadAsync(seeded);
 
         Assert.Equal(100m, settled.RefundAmount!.Value.Amount);
         Assert.Equal(RefundCause.GuestCancellation, settled.RefundCause);
 
         // And the obligation is marked, so the sweep stops revisiting it.
-        using IServiceScope assertScope = factory.Services.CreateScope();
-        RefundObligation obligation = await assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
-            .RefundObligations.AsNoTracking()
-            .SingleAsync(o => o.BookingId == bookingId, TestContext.Current.CancellationToken);
-
         Assert.NotNull(obligation.ResolvedAt);
     }
 
@@ -379,13 +439,8 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
         //
         // Most cancellations are of unpaid bookings, so this is the steady
         // state rather than a spike.
-        DateTimeOffset succeededAt = DateTimeOffset.UtcNow.AddHours(-2);
-        DateTimeOffset cancelledAt = DateTimeOffset.UtcNow.AddHours(-1);
-
-        (Guid bookingId, Guid transactionId) =
-            await SeedPaidButUnconfirmedAsync(daysUntilCheckIn: 124, succeededAt);
-
-        await CancelAsync(bookingId, cancelledAt, Money.Of(100m, Currency.KWD), dispatchNow: false);
+        Seeded seeded = await SeedUnresolvedWithAPaymentAsync();
+        DateTimeOffset older = DateTimeOffset.UtcNow.AddHours(-3);
 
         // A thousand older obligations with no payment behind any of them -
         // exactly the per-run cap, so a sweep ordered by age alone would fill
@@ -399,8 +454,8 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
                 bookings.RefundObligations.Add(new RefundObligation
                 {
                     BookingId = Guid.CreateVersion7(),
-                    CancelledAt = cancelledAt.AddHours(-2).AddSeconds(i),
-                    NextAttemptAt = cancelledAt.AddHours(-2).AddSeconds(i),
+                    CancelledAt = older.AddSeconds(i),
+                    NextAttemptAt = older.AddSeconds(i),
                     PolicyRefundAmount = 50m,
                     Currency = Currency.KWD,
                     Cause = BookingCancellationCause.GuestCancellation
@@ -410,25 +465,12 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
             await bookings.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            FakeTimeProvider clock = new FakeTimeProvider();
-            clock.SetUtcNow(DateTimeOffset.UtcNow.AddMinutes(10));
+        // Twice. The first run is allowed to spend its whole window on the
+        // backlog - what must not happen is that every future run does too,
+        // which is what backing the unpayable rows off prevents.
+        await RunTheSweepAsync(runs: 2);
 
-            ResolveOutstandingRefundsJob job = new ResolveOutstandingRefundsJob(
-                scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
-                scope.ServiceProvider.GetRequiredService<ITransactionReversal>(),
-                clock,
-                NullLogger<ResolveOutstandingRefundsJob>.Instance);
-
-            // Twice. The first run is allowed to spend its whole window on the
-            // backlog - what must not happen is that every future run does too,
-            // which is what backing the unpayable rows off prevents.
-            await job.ResolveAsync(null!, TestContext.Current.CancellationToken);
-            await job.ResolveAsync(null!, TestContext.Current.CancellationToken);
-        }
-
-        Transaction settled = await ReadTransactionAsync(transactionId);
+        (Transaction settled, _, _) = await ReadAsync(seeded);
 
         Assert.Equal(100m, settled.RefundAmount!.Value.Amount);
     }
@@ -436,16 +478,13 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
     [Fact]
     public async Task ARefundAlreadyRecorded_IsNeverOverwritten()
     {
-        // The backstop under the ordering rule. If both paths ever decided they
-        // owned the same case, the second must be a no-op rather than a silent
-        // replacement - nothing downstream would show that the amount had
-        // changed.
-        DateTimeOffset succeededAt = DateTimeOffset.UtcNow.AddHours(-2);
+        // If two paths ever decided they owned the same case, the second must be
+        // a no-op rather than a silent replacement - nothing downstream would
+        // show that the amount had changed.
+        Seeded seeded = await SeedAwaitingPaymentAsync();
 
-        (Guid bookingId, Guid transactionId) =
-            await SeedPaidButUnconfirmedAsync(daysUntilCheckIn: 122, succeededAt);
-
-        await CancelAsync(bookingId, DateTimeOffset.UtcNow, Money.Of(100m, Currency.KWD));
+        await SucceedAsync(seeded);
+        await CancelAsync(seeded);
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
@@ -453,16 +492,16 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
                 scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
 
             Transaction recorded = await transactions.Transactions
-                .SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
+                .SingleAsync(t => t.Id == seeded.TransactionId, TestContext.Current.CancellationToken);
 
-            // Forced past the ordering rule, straight at the entity, because
-            // the rule is what makes this unreachable through the two callers -
-            // and the guard has to hold even when it is.
+            // Forced past the resolver, straight at the entity, because the
+            // resolver is what makes this unreachable - and the guard has to hold
+            // even when it is.
             recorded.MarkRefundPending(Money.Of(200m, Currency.KWD), RefundCause.PaymentUnusable);
             await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        Transaction settled = await ReadTransactionAsync(transactionId);
+        (Transaction settled, _, _) = await ReadAsync(seeded);
 
         Assert.Equal(100m, settled.RefundAmount!.Value.Amount);
         Assert.Equal(RefundCause.GuestCancellation, settled.RefundCause);

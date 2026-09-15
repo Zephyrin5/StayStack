@@ -1,8 +1,9 @@
-// Proves refund resolution finishes from half-finished seeded states and from a status flip
-// between the resolver's read and write; TwoResolversRacing fails 6/6 with the concurrency catch
-// disabled. APaymentStateRead_DescribesOneMomentRatherThanTwo reads a static row and cannot tell
-// one read from two.
+// Proves refund resolution finishes from seeded states it does not produce itself, and from a
+// status flip between the resolver's read and write inside its atomic scope; TwoResolversRacing
+// fails 6/6 with the concurrency catch disabled. APaymentStateRead_DescribesOneMomentRatherThanTwo
+// reads a static row and cannot tell one read from two.
 using Bookings;
+using BuildingBlocks.Persistence;
 using Bookings.Contracts;
 using Bookings.Entities;
 using Catalog;
@@ -14,24 +15,16 @@ using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using Transactions;
 using Transactions.Contracts;
-using Outbox;
 using Transactions.Entities;
-using Transactions.Outbox;
-using Transactions.Serialization;
 namespace IntegrationTests.Features.Transactions;
 
-// The refund decision spans two databases and therefore two commits: the amount
-// lands on the Transaction, and the obligation's ResolvedAt marker lands in
-// Bookings. RefundDeterminismTests covers delivery *order* once both have been
-// saved. None of it crosses a commit boundary, which is exactly why a marker
-// that committed without its refund went unnoticed.
-//
-// Which write is inside a transaction depends on which dispatcher called the
-// resolver, and the two are mirror images: OutboxDispatcherBase runs
-// TryHandleAsync inside its claim transaction, so from Transactions' dispatcher
-// the refund joins an uncommitted transaction while the Bookings marker
-// autocommits, and from Bookings' dispatcher it is the reverse. Both directions
-// are pinned here.
+// The refund decision writes two modules' rows: the amount lands on the
+// Transaction, and the obligation's ResolvedAt marker lands in Bookings. They
+// commit in one atomic scope. The transaction status stays the authority on
+// whether a refund exists, so these pin the resolver against a marker and a
+// refund that disagree - states seeded directly, since the resolver does not
+// produce them - and against a concurrent resolver. RefundDeterminismTests
+// covers the order of cancellation and payment.
 [Collection("Integration Tests")]
 public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory factory)
 {
@@ -52,7 +45,7 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
 
     /// <summary>
     ///     A paid booking that has been cancelled, with its obligation written -
-    ///     the state every test here starts from. Nothing is dispatched.
+    ///     the state every test here starts from. Nothing is resolved.
     /// </summary>
     private async Task<(Guid BookingId, Guid TransactionId)> SeedCancelledAndPaidAsync(int daysUntilCheckIn)
     {
@@ -121,9 +114,17 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
     private async Task ResolveAsync(Guid bookingId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<ITransactionReversal>()
-            .ResolveRefundAsync(bookingId, TestContext.Current.CancellationToken);
+        await ResolveInScopeAsync(scope, reversal => reversal.ResolveRefundAsync(bookingId, TestContext.Current.CancellationToken));
     }
+
+    // The resolver runs only inside an atomic scope, as ResolveOutstandingRefundsJob
+    // calls it.
+    private static Task<decimal?> ResolveInScopeAsync(IServiceScope scope, Func<ITransactionReversal, Task<decimal?>> resolve) =>
+        scope.ServiceProvider.GetRequiredService<IAtomicScope>().ExecuteAsync(
+            AtomicParticipants.Bookings,
+            AtomicParticipants.Bookings | AtomicParticipants.Transactions,
+            _ => resolve(scope.ServiceProvider.GetRequiredService<ITransactionReversal>()),
+            TestContext.Current.CancellationToken);
 
     private async Task<(Transaction Payment, RefundObligation Obligation)> ReadAsync(
         Guid bookingId, Guid transactionId)
@@ -144,14 +145,9 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
     [Fact]
     public async Task AResolvedMarkerWithNoRefundBehindIt_DoesNotSuppressTheRefund()
     {
-        // The reported defect. The marker commits on its own connection while
-        // the refund is still inside the dispatcher's transaction; that
-        // transaction then fails, so the refund rolls back and the marker
-        // survives.
-        //
-        // Simulated by writing the marker directly, which is precisely the
-        // state that rollback leaves behind - and cheaper than driving a
-        // dispatcher failure to produce it.
+        // A marker with no refund behind it. The resolver commits the two
+        // together, so the state is written directly; what this pins is that the
+        // transaction status, not the marker, decides whether a refund is owed.
         (Guid bookingId, Guid transactionId) = await SeedCancelledAndPaidAsync(daysUntilCheckIn: 160);
 
         using (IServiceScope scope = factory.Services.CreateScope())
@@ -161,13 +157,13 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
                     bookingId, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
         }
 
-        // Act - the retry the dispatcher would perform.
+        // Act
         await ResolveAsync(bookingId);
 
-        // Assert - the refund happened. Treating ResolvedAt as authority made
-        // this return null, the message get marked processed, and the sweep skip
-        // the row on ResolvedAt != null: lost permanently, with every mechanism
-        // reporting success.
+        // Assert - the refund happened. Treating ResolvedAt as authority would
+        // return null here, and the sweep would skip the row on
+        // ResolvedAt != null: lost permanently, with every mechanism reporting
+        // success.
         (Transaction payment, RefundObligation obligation) = await ReadAsync(bookingId, transactionId);
 
         Assert.Equal(TransactionStatus.RefundPending, payment.TransactionStatus);
@@ -178,12 +174,13 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
     [Fact]
     public async Task ARefundWithNoMarkerBehindIt_FinishesTheBookkeeping()
     {
-        // The mirror, from the other dispatcher. The refund commits and the
-        // process dies before the marker.
+        // The mirror: a refund already recorded and an obligation not yet
+        // marked, as a refund recorded before the booking was cancelled leaves
+        // it.
         //
-        // Querying for Succeeded alone meant every later run found nothing and
-        // returned at the first step, so the obligation stayed unresolved
-        // forever and the sweep re-processed it every cycle.
+        // Querying for Succeeded alone would find nothing and return at the
+        // first step, so the obligation would stay unresolved forever and the
+        // sweep re-process it every cycle.
         (Guid bookingId, Guid transactionId) = await SeedCancelledAndPaidAsync(daysUntilCheckIn: 161);
 
         using (IServiceScope scope = factory.Services.CreateScope())
@@ -263,40 +260,15 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
     }
 
     [Fact]
-    public async Task AResolverLosingTheRaceInsideADispatcher_StillMarksItsMessageProcessed()
+    public async Task AResolverLosingTheRaceInsideItsScope_StillSettlesTheObligation()
     {
-        // The previous race test calls the resolver directly, so it cannot see
-        // this at all: the damage would be to an entity only the dispatcher is
-        // tracking.
-        //
-        // TransactionsOutboxDispatcher loads its OutboxMessage tracked on the
-        // scoped AppTransactionsDbContext and assigns ProcessedAt after the
-        // handler returns. If the resolver's concurrency catch cleared that
-        // context's change tracker, the message would be detached, ProcessedAt
-        // would never be saved, and the dispatch would report success over a
-        // message still pending - with nothing anywhere saying so.
+        // The concurrency catch, inside the atomic scope it runs in. The loser's
+        // UPDATE carries a stale xmin after the other resolver committed, so it
+        // matches no row - EF reports that as a concurrency failure, but no
+        // statement failed and the scope's transaction stays usable. The
+        // resolver re-reads the row and marks the obligation in the same
+        // commit.
         (Guid bookingId, Guid transactionId) = await SeedCancelledAndPaidAsync(daysUntilCheckIn: 163);
-
-        Guid messageId = Guid.CreateVersion7();
-
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            AppTransactionsDbContext transactions =
-                scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
-
-            transactions.Set<OutboxMessage>().Add(new OutboxMessage
-            {
-                Id = messageId,
-                Type = ConfirmBookingPaymentOutboxMessage.TypeName,
-                Payload = System.Text.Json.JsonSerializer.Serialize(
-                    new ConfirmBookingPaymentOutboxMessage(transactionId, bookingId),
-                    TransactionsJsonSerializerContext.Default.ConfirmBookingPaymentOutboxMessage),
-                CreatedAt = DateTimeOffset.UtcNow,
-                NextAttemptAt = DateTimeOffset.UtcNow
-            });
-
-            await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
-        }
 
         using (IServiceScope hostScope = factory.WithWebHostBuilder(builder =>
                    builder.ConfigureServices(services =>
@@ -309,20 +281,18 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
                            transactionId));
                    })).Services.CreateScope())
         {
-            await hostScope.ServiceProvider.GetRequiredService<TransactionsOutboxDispatcher>()
-                .DispatchPendingAsync(50, TestContext.Current.CancellationToken);
+            decimal? recorded = await ResolveInScopeAsync(
+                hostScope, reversal => reversal.ResolveRefundAsync(bookingId, TestContext.Current.CancellationToken));
+
+            // The other resolver recorded it; this one did not.
+            Assert.Null(recorded);
         }
 
-        // From a fresh scope, because the whole defect is that the tracked
-        // instance and the row disagreed.
-        using IServiceScope assertScope = factory.Services.CreateScope();
+        (Transaction payment, RefundObligation obligation) = await ReadAsync(bookingId, transactionId);
 
-        OutboxMessage persisted = await assertScope.ServiceProvider
-            .GetRequiredService<AppTransactionsDbContext>()
-            .Set<OutboxMessage>().AsNoTracking()
-            .SingleAsync(m => m.Id == messageId, TestContext.Current.CancellationToken);
-
-        Assert.NotNull(persisted.ProcessedAt);
+        Assert.Equal(TransactionStatus.RefundPending, payment.TransactionStatus);
+        Assert.Equal(100m, payment.RefundAmount!.Value.Amount);
+        Assert.NotNull(obligation.ResolvedAt);
     }
 
     [Fact]
@@ -368,8 +338,8 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
         // Act - B's own confirmation, which names B by id.
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            await scope.ServiceProvider.GetRequiredService<ITransactionReversal>()
-                .RefundUnusablePaymentByTransactionAsync(secondId, TestContext.Current.CancellationToken);
+            await ResolveInScopeAsync(
+                scope, reversal => reversal.RefundUnusablePaymentByTransactionAsync(secondId, TestContext.Current.CancellationToken));
         }
 
         using IServiceScope assertScope = factory.Services.CreateScope();
@@ -393,8 +363,8 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
     public async Task APaymentStateRead_DescribesOneMomentRatherThanTwo()
     {
         // 4b: describing a payment takes one read. As two - "is there a refund"
-        // then "is anything owed" - a dispatcher or the sweep can move the
-        // payment Succeeded -> RefundPending in between; the first read sees no
+        // then "is anything owed" - a resolver can move the payment
+        // Succeeded -> RefundPending in between; the first read sees no
         // refund, the second no succeeded payment, and the response reports
         // neither state.
         //

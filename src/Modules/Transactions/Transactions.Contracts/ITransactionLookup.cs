@@ -21,15 +21,11 @@ public interface ITransactionLookup
     ///     given back - a transaction in <c>Succeeded</c>, the one status that
     ///     means the gateway took the payment and nothing has reversed it.
     ///     <para>
-    ///         The authoritative answer to "may this booking be expired",
-    ///         because Bookings cannot answer it from its own state.
-    ///         MarkTransactionSucceededHandler commits <c>Succeeded</c> and an
-    ///         outbox row together and only then dispatches; until that row is
-    ///         delivered, a paid booking is still <c>Pending</c> with a
-    ///         <c>PaymentDueAt</c> in the past and is indistinguishable from
-    ///         an abandoned one. Delivery is not instant - OutboxRelayJob runs
-    ///         on a cron and the dead-letter sweep hourly - so that window is
-    ///         far wider than any payment deadline.
+    ///         The expiry job's check before expiring a booking
+    ///         (docs/adr/0020). MarkTransactionSucceededHandler confirms the
+    ///         booking in the commit that marks the payment <c>Succeeded</c>, so
+    ///         a <c>Pending</c> booking with a succeeded payment is not expected;
+    ///         the check guards that state should it occur.
     ///     </para>
     ///     <para>
     ///         <b>Deliberately unbounded in time.</b> "Succeeded before the

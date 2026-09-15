@@ -11,8 +11,8 @@ public interface ITransactionReversal
     ///     Everything a caller needs to describe this booking's payment, read
     ///     once.
     ///     <para>
-    ///         One read because the state moves: a dispatcher or the sweep can take
-    ///         a payment Succeeded -> RefundPending between two reads, and a refund
+    ///         One read because the state moves: a resolver can take a payment
+    ///         Succeeded -> RefundPending between two reads, and a refund
     ///         lookup followed by a succeeded-amount lookup would see neither.
     ///         Null means nothing succeeded and nothing was refunded.
     ///     </para>
@@ -28,10 +28,10 @@ public interface ITransactionReversal
     ///         two committed facts rather than predicting a write.
     ///     </para>
     ///     <para>
-    ///         Safe to call repeatedly and from anywhere: it is a no-op unless
-    ///         there is a Succeeded transaction and an unresolved obligation.
-    ///         That is what lets the outbox messages be latency optimisations
-    ///         over a sweep rather than the thing correctness depends on.
+    ///         Safe to call repeatedly: it is a no-op unless there is a Succeeded
+    ///         transaction and an unresolved obligation. Runs only inside the
+    ///         caller's atomic scope, with Transactions and Bookings
+    ///         participating; throws InvalidOperationException outside one.
     ///     </para>
     ///     <para>
     ///         Returns the amount recorded, or null when there was nothing to

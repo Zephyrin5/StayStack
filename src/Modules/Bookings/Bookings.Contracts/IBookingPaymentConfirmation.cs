@@ -24,9 +24,9 @@ public interface IBookingPaymentConfirmation
     ///         improve.
     ///     </para>
     ///     <para>
-    ///         Idempotent. A retried outbox message re-runs both halves; the
-    ///         hold transition accepts an already-'booked' hold and the
-    ///         booking transition is a no-op once Confirmed.
+    ///         Runs only inside the caller's atomic scope, with Bookings
+    ///         participating, so both halves commit with the payment. Throws
+    ///         InvalidOperationException outside one.
     ///     </para>
     ///     <para>
     ///         Throws NotFoundException if the booking doesn't exist.

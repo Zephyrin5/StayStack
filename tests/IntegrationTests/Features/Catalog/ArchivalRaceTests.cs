@@ -6,6 +6,7 @@ using Bookings.Contracts;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
 using Bookings.Features.HoldAvailability;
+using BuildingBlocks.Persistence;
 using Catalog;
 using Catalog.Contracts;
 using Catalog.Entities;
@@ -506,8 +507,12 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
         // hold check does see - a different and much easier case.
         using (IServiceScope paymentScope = factory.Services.CreateScope())
         {
-            Assert.True(await paymentScope.ServiceProvider.GetRequiredService<IBookingPaymentConfirmation>()
-                .ConfirmPaymentAsync(booking.BookingId, TestContext.Current.CancellationToken));
+            Assert.True(await paymentScope.ServiceProvider.GetRequiredService<IAtomicScope>().ExecuteAsync(
+                AtomicParticipants.Bookings,
+                AtomicParticipants.Bookings,
+                token => paymentScope.ServiceProvider.GetRequiredService<IBookingPaymentConfirmation>()
+                    .ConfirmPaymentAsync(booking.BookingId, token),
+                TestContext.Current.CancellationToken));
         }
 
         gate.Gate.SetResult();

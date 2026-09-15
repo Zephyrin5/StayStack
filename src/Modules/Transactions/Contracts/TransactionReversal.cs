@@ -36,11 +36,20 @@ internal class TransactionReversal(
     private async Task<decimal?> ResolveAsync(
         Guid bookingId, Guid? transactionId, bool refundWithoutAnObligation, CancellationToken cancellationToken)
     {
+        // The refund and the obligation's ResolvedAt commit together in the
+        // caller's atomic scope, with Transactions and Bookings participating.
+        // Both record a decision locally; no money moves here.
+        if (dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(TransactionReversal)} must run inside the caller's atomic scope: a refund committed apart " +
+                "from its obligation's marker, or from the cancellation it answers, can disagree with both.");
+        }
+
         // Step 1 - the ledger. The transaction's own status is the authority on
-        // whether a refund exists; the obligation's ResolvedAt is bookkeeping
-        // committed separately (docs/adr/0025). So the query accepts every status
-        // a recorded refund can be in, not only Succeeded: step 2 needs to see
-        // "already refunded" to finish the bookkeeping.
+        // whether a refund exists. So the query accepts every status a recorded
+        // refund can be in, not only Succeeded: step 2 needs to see "already
+        // refunded" to finish the bookkeeping.
         //
         // First matching row, never SingleOrDefault: a booking can have several
         // transactions, and the active index constrains only Pending and
@@ -71,8 +80,9 @@ internal class TransactionReversal(
         }
 
         // Step 2 - a refund is already recorded, so only the obligation's
-        // bookkeeping can be outstanding. Finish it; a crash between the refund
-        // commit and the marker lands here on the next run.
+        // bookkeeping can be outstanding: a refund recorded by the payment path
+        // before this booking was cancelled has no obligation to mark, and this
+        // call's marker commits with it.
         if (HasRecordedARefund(transaction.TransactionStatus))
         {
             await bookingLookup.MarkRefundObligationResolvedAsync(
@@ -88,13 +98,8 @@ internal class TransactionReversal(
         RefundObligationSnapshot? obligation =
             await bookingLookup.GetRefundObligationAsync(bookingId, cancellationToken);
 
-        // Deliberately no early return on obligation.IsResolved, and adding one
-        // loses refunds. The refund and the marker commit in different
-        // transactions, and which one is inside the caller's transaction
-        // depends on the dispatcher (OutboxDispatcherBase runs handlers inside
-        // its claim transaction). A claim that rolls back after this ran can
-        // leave the marker set with no refund behind it. The transaction status,
-        // read in step 1, is the authority; the marker only lets the sweep skip.
+        // No early return on obligation.IsResolved. The transaction status, read
+        // in step 1, is the authority; the marker only lets the sweep skip.
         if (obligation is null)
         {
             // No cancellation explains this payment. For a caller triggered by
@@ -136,13 +141,12 @@ internal class TransactionReversal(
             // throws when this context loaded the transaction already moved; two
             // resolvers loading it concurrently both pass that guard, and the
             // loser's UPDATE fails the xmin concurrency token instead. Either way
-            // the row is re-read rather than the exception trusted.
+            // the row is re-read rather than the exception trusted. A stale xmin
+            // makes the UPDATE match no row rather than fail, so the scope's
+            // transaction stays usable.
             //
-            // Reload this one entity, not ChangeTracker.Clear(): when the caller
-            // is TransactionsOutboxDispatcher, this scoped context also tracks the
-            // OutboxMessage being processed. Clearing would detach it, its
-            // ProcessedAt would never be saved, and the dispatcher would report
-            // success over a message still pending.
+            // Reload this one entity, not ChangeTracker.Clear(): the caller's scope
+            // may track other entities on this context.
             await dbContext.Entry(transaction).ReloadAsync(cancellationToken);
 
             bool refundExists = HasRecordedARefund(transaction.TransactionStatus);
@@ -163,11 +167,6 @@ internal class TransactionReversal(
             return null;
         }
 
-        // Two commits, and this is the second. A crash in between leaves the
-        // obligation unresolved and a later run takes step 2 above; a marker
-        // committed without its refund is ignored, because step 1 reads the
-        // transaction status.
-        //
         // MarkRefundObligationResolvedAsync filters ResolvedAt == null in its
         // own ExecuteUpdate, so every repeat is a zero-row no-op.
         await bookingLookup.MarkRefundObligationResolvedAsync(

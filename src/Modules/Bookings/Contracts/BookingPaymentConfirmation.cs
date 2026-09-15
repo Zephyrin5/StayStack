@@ -22,12 +22,9 @@ internal class BookingPaymentConfirmation(
                           .SingleOrDefaultAsync(cancellationToken)
                       ?? throw new NotFoundException(nameof(Booking), bookingId);
 
-        // The hold transition and the confirmation are one transaction, so a
-        // payment either sells the range and confirms the stay or does neither.
-        //
-        // MarkHoldPaidAsync still accepts a hold already 'booked': the outbox can
-        // deliver this message more than once, and a redelivery after a
-        // committed confirmation must be a no-op.
+        // The hold transition and the confirmation commit with the caller's
+        // payment (MarkTransactionSucceededHandler's atomic scope), so a payment
+        // either sells the range and confirms the stay or does neither.
         return await ConfirmUnderRowLockAsync(bookingId, holdId, cancellationToken);
     }
 
@@ -58,79 +55,71 @@ internal class BookingPaymentConfirmation(
     /// </summary>
     private async Task<bool> ConfirmUnderRowLockAsync(Guid bookingId, Guid holdId, CancellationToken cancellationToken)
     {
-        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
+        DbTransaction transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction()
+                                    ?? throw new InvalidOperationException(
+                                        $"{nameof(BookingPaymentConfirmation)}.{nameof(ConfirmPaymentAsync)} must run inside the caller's " +
+                                        "atomic scope: a confirmation committed on its own survives the payment it records rolling back.");
 
-        return await strategy.ExecuteAsync(async () =>
+        // The id alone, through Dapper rather than FromSqlRaw: Booking
+        // carries Money as a complex property and EF composes its own
+        // projection over a raw query, asking for a "TotalPrice_Amount"
+        // column the snake_case convention never produced. The row lock
+        // belongs to the transaction either way, so the entity can be
+        // read back through EF normally afterwards.
+        if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
         {
-            dbContext.ChangeTracker.Clear();
+            DbConnection connection = dbContext.Database.GetDbConnection();
 
-            await using IDbContextTransaction transaction =
-                await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
+                """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE""",
+                new { BookingId = bookingId },
+                transaction,
+                cancellationToken: cancellationToken));
+        }
 
-            // The id alone, through Dapper rather than FromSqlRaw: Booking
-            // carries Money as a complex property and EF composes its own
-            // projection over a raw query, asking for a "TotalPrice_Amount"
-            // column the snake_case convention never produced. The row lock
-            // belongs to the transaction either way, so the entity can be
-            // read back through EF normally afterwards.
-            if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
-            {
-                DbConnection connection = dbContext.Database.GetDbConnection();
+        // Re-read under the lock. Whatever this sees is committed and
+        // cannot change until this transaction ends.
+        Booking booking = await dbContext.Bookings
+                              .SingleOrDefaultAsync(b => b.Id == bookingId, cancellationToken)
+                          ?? throw new NotFoundException(nameof(Booking), bookingId);
 
-                await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
-                    """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE""",
-                    new { BookingId = bookingId },
-                    transaction.GetDbTransaction(),
-                    cancellationToken: cancellationToken));
-            }
+        // Checked explicitly rather than letting Booking.Confirm()'s own
+        // guard throw - a booking cancelled while this payment was in
+        // flight at the gateway is an expected outcome the caller reacts
+        // to with a refund, not an error to propagate.
+        //
+        // Whoever cancelled it released the hold as part of doing so, and
+        // the range may since have been sold to somebody else. Returning
+        // before the transition below is what keeps this payment from
+        // claiming it.
+        if (booking.BookingStatus == BookingStatus.Cancelled)
+        {
+            return false;
+        }
 
-            // Re-read under the lock. Whatever this sees is committed and
-            // cannot change until this transaction ends.
-            Booking booking = await dbContext.Bookings
-                                  .SingleOrDefaultAsync(b => b.Id == bookingId, cancellationToken)
-                              ?? throw new NotFoundException(nameof(Booking), bookingId);
+        // Joins this transaction rather than autocommitting - see
+        // HoldConfirmation.AmbientTransaction.
+        bool holdIsPaid = await holdConfirmation.MarkHoldPaidAsync(holdId, cancellationToken);
 
-            // Checked explicitly rather than letting Booking.Confirm()'s own
-            // guard throw - a booking cancelled while this payment was in
-            // flight at the gateway is an expected outcome the caller reacts
-            // to with a refund, not an error to propagate.
+        if (!holdIsPaid)
+        {
+            // The hold was released or expired before this payment
+            // resolved, so its range is no longer this booking's to sell.
+            // Reported as `false` rather than thrown: the caller's answer
+            // to "this payment cannot be turned into a stay" is a refund,
+            // and it already has that path for the cancelled-booking case
+            // above. Throwing would instead retry an outcome that will
+            // never improve.
             //
-            // Whoever cancelled it released the hold as part of doing so, and
-            // the range may since have been sold to somebody else. Returning
-            // before the transition below is what keeps this payment from
-            // claiming it.
-            if (booking.BookingStatus == BookingStatus.Cancelled)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return false;
-            }
+            // Reachable even under the lock: the hold is a different row
+            // with its own lifecycle, and nothing in this transaction
+            // stopped the expiry sweep from releasing it a moment ago.
+            return false;
+        }
 
-            // Joins this transaction rather than autocommitting - see
-            // HoldConfirmation.AmbientTransaction.
-            bool holdIsPaid = await holdConfirmation.MarkHoldPaidAsync(holdId, cancellationToken);
+        booking.Confirm();
+        await dbContext.SaveChangesAsync(cancellationToken);
 
-            if (!holdIsPaid)
-            {
-                // The hold was released or expired before this payment
-                // resolved, so its range is no longer this booking's to sell.
-                // Reported as `false` rather than thrown: the caller's answer
-                // to "this payment cannot be turned into a stay" is a refund,
-                // and it already has that path for the cancelled-booking case
-                // above. Throwing would instead retry an outcome that will
-                // never improve.
-                //
-                // Reachable even under the lock: the hold is a different row
-                // with its own lifecycle, and nothing in this transaction
-                // stopped the expiry sweep from releasing it a moment ago.
-                await transaction.RollbackAsync(cancellationToken);
-                return false;
-            }
-
-            booking.Confirm();
-            await dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-
-            return true;
-        });
+        return true;
     }
 }

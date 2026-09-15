@@ -27,8 +27,7 @@ namespace IntegrationTests.Features.Bookings;
 // A transient failure on COMMIT is the one failure an execution strategy
 // exists to absorb, and it is the one that exposes work built outside the
 // retried delegate: SaveChangesAsync defaults to acceptAllChangesOnSuccess,
-// so by the time it returns, every mutation and every enqueued outbox row is
-// already Unchanged. A retry then saves nothing at all - while the statements
+// so by the time it returns, every mutation is already Unchanged. A retry then saves nothing at all - while the statements
 // that are not EF's, like the hold release, run again quite happily.
 [Collection("Integration Tests")]
 public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
@@ -153,12 +152,10 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
         Assert.Equal("held", hold.Status);
 
-        // The compensations must be durable rows. The response says a refund
-        // is pending on the strength of them existing; without them the relay
-        // backstop has nothing to deliver and the promise is empty.
-        int compensations = await db.BookingsOutboxMessages.AsNoTracking()
-            .CountAsync(m => m.Payload.Contains(bookingId.ToString()), TestContext.Current.CancellationToken);
-        Assert.Equal(2, compensations);
+        // The refund obligation is what a late payment is refunded from; the
+        // retry must have written it.
+        Assert.Single(await db.RefundObligations.AsNoTracking()
+            .Where(o => o.BookingId == bookingId).ToListAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -168,11 +165,10 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
         // CancelBookingHandler re-reads the booking under its lock; finding it
         // already Cancelled, it answers success from persisted state instead of
         // treating its own committed cancellation as a conflict - and it must
-        // not enqueue the compensations a second time.
+        // not record the refund a second time.
         //
-        // Paid first, so there is a refund to report. The recovered attempt
-        // enqueued nothing, so nothing is dispatched inline and the refund is
-        // still outstanding - which is exactly what the response must say.
+        // Paid first, so there is a refund to report. The first attempt recorded
+        // it with the cancellation.
         (Guid bookingId, string managementToken, Guid holdId) = await CreateGuestBookingAsync();
 
         using (IServiceScope paymentScope = factory.Services.CreateScope())
@@ -227,15 +223,18 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal("held", (await db.UnitAvailabilityHolds.AsNoTracking()
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken)).Status);
 
-        // Exactly once: the first attempt's two compensations and one obligation,
+        // Exactly once: the first attempt's obligation, resolved, and its refund,
         // with nothing added by the recovered attempt.
-        Assert.Equal(2, await db.BookingsOutboxMessages.AsNoTracking()
-            .CountAsync(m => m.Payload.Contains(bookingId.ToString()), TestContext.Current.CancellationToken));
         RefundObligation obligation = Assert.Single(await db.RefundObligations.AsNoTracking()
             .Where(o => o.BookingId == bookingId).ToListAsync(TestContext.Current.CancellationToken));
+        Assert.NotNull(obligation.ResolvedAt);
 
-        // The response reports the refund as it stands: owed, not yet recorded,
-        // at the amount the obligation committed.
+        Transaction refunded = await assertScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>()
+            .Transactions.AsNoTracking().SingleAsync(t => t.BookingId == bookingId, TestContext.Current.CancellationToken);
+        Assert.Equal(TransactionStatus.RefundPending, refunded.TransactionStatus);
+        Assert.Equal(obligation.PolicyRefundAmount, refunded.RefundAmount?.Amount);
+
+        // The response reports the refund as it stands: recorded, not yet settled.
         Assert.Equal(RefundStatus.Pending, cancelled.RefundStatus);
         Assert.Equal(obligation.PolicyRefundAmount, cancelled.RefundAmount);
     }

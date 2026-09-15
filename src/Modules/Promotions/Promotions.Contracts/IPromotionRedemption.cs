@@ -44,6 +44,10 @@ public interface IPromotionRedemption
     ///     and the guest email for reuse. Idempotent/no-op if this booking
     ///     never redeemed anything, or already had its redemption reversed -
     ///     same shape as Catalog.Contracts.IHoldConfirmation.ReleaseHoldAsync.
+    ///     <para>
+    ///         Runs only inside the caller's atomic scope, with Promotions
+    ///         participating. Throws InvalidOperationException outside one.
+    ///     </para>
     /// </summary>
     Task ReverseRedemptionAsync(Guid bookingId, CancellationToken cancellationToken);
 }

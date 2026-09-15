@@ -1,18 +1,15 @@
-using Microsoft.Extensions.Options;
 using Bookings.Entities;
 using Bookings.Features.Common;
-using Bookings.Outbox;
 using Dapper;
 using System.Data.Common;
 using BuildingBlocks.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using Bookings.Serialization;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using BuildingBlocks.Time;
 using Mediator;
-using Outbox;
+using Promotions.Contracts;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using Transactions.Contracts;
@@ -21,8 +18,9 @@ namespace Bookings.Features.CancelBooking;
 
 public class CancelBookingHandler(
     AppBookingsDbContext dbContext,
-    BookingsOutboxDispatcher dispatcher,
+    IAtomicScope atomicScope,
     IHoldConfirmation holdConfirmation,
+    IPromotionRedemption promotionRedemption,
     ITransactionReversal transactionReversal,
     ICurrentUserProvider currentUserProvider,
     IBookingSessions bookingSessions,
@@ -67,8 +65,8 @@ public class CancelBookingHandler(
             return booking.TotalPrice * (percent / 100m);
         }
 
-        // A re-cancel writes nothing: the first cancellation's obligation and
-        // outbox rows are durable and retried by the relay (docs/adr/0003).
+        // A re-cancel writes nothing: the first cancellation committed its
+        // obligation, release, reversal and refund decision together.
         if (booking.BookingStatus != BookingStatus.Cancelled)
         {
             // Eligibility is separate from access. A management link stays usable
@@ -91,143 +89,128 @@ public class CancelBookingHandler(
 
             // Everything that must survive a retry is built inside the delegate
             // (docs/adr/0025). SaveChangesAsync accepts its changes before the
-            // commit, so a booking mutated and rows enqueued outside it would be
-            // seen as unchanged on a retry: the save would write nothing while
-            // the hold release, a plain statement, ran again.
-            IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
-
-            CancelOutcome outcome = await strategy.ExecuteAsync(async () =>
-            {
-                dbContext.ChangeTracker.Clear();
-
-                await using IDbContextTransaction transaction =
-                    await dbContext.Database.BeginTransactionAsync(cancellationToken);
-
-                // BookingPaymentLock first, then the booking row lock, then the
-                // hold (docs/adr/0028). The position is load-bearing:
-                // ExpireUnpaidBookingsJob takes the same two locks, and two paths
-                // taking them in different orders can deadlock; taken first, a
-                // wait on it holds no row lock, so BookingPaymentConfirmation -
-                // which takes only the row lock - never queues behind an
-                // initiation. The advisory lock exists because initiation, in
-                // Transactions, cannot take a row lock on this table.
-                if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
+            // commit, so a booking mutated outside it would be seen as unchanged on
+            // a retry: the save would write nothing while the hold release, a plain
+            // statement, ran again.
+            //
+            // The cancellation, its refund obligation, the hold release, the
+            // redemption reversal and the refund decision commit together.
+            Booking cancelled = await atomicScope.ExecuteAsync(
+                AtomicParticipants.Bookings,
+                AtomicParticipants.Bookings | AtomicParticipants.Transactions | AtomicParticipants.Promotions,
+                async token =>
                 {
-                    await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
-                        AdvisoryLock.AcquireExclusiveSql,
-                        new { LockKey = BookingPaymentLock.KeyFor(request.BookingId) },
-                        transaction.GetDbTransaction(),
-                        cancellationToken: cancellationToken));
-                }
+                    DbTransaction transaction = dbContext.Database.CurrentTransaction!.GetDbTransaction();
 
-                // The booking row before the hold, matching
-                // BookingPaymentConfirmation; the reverse order deadlocks against a
-                // concurrent payment.
-                //
-                // The id through Dapper, then the entity through EF. A FromSqlRaw
-                // over `SELECT *` fails: EF composes a projection asking for
-                // "TotalPrice_Amount", a column the snake_case convention never
-                // produces for the complex Money property.
-                //
-                // FOR UPDATE rather than SKIP LOCKED: a caller is waiting and must
-                // see the committed outcome.
-                if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
-                {
-                    DbConnection connection = dbContext.Database.GetDbConnection();
+                    // BookingPaymentLock first, then the booking row lock, then the
+                    // hold, then the transaction row the refund decision writes
+                    // (docs/adr/0028). The position is load-bearing:
+                    // ExpireUnpaidBookingsJob takes the same two locks, and two paths
+                    // taking them in different orders can deadlock; taken first, a
+                    // wait on it holds no row lock, so MarkTransactionSucceededHandler
+                    // - which takes the row lock and no advisory lock - never queues
+                    // behind an initiation. The advisory lock exists because
+                    // initiation, in Transactions, cannot take a row lock on this
+                    // table.
+                    if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
+                    {
+                        await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
+                            AdvisoryLock.AcquireExclusiveSql,
+                            new { LockKey = BookingPaymentLock.KeyFor(request.BookingId) },
+                            transaction,
+                            cancellationToken: token));
+                    }
 
-                    await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
-                        """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE""",
-                        new { request.BookingId },
-                        transaction.GetDbTransaction(),
-                        cancellationToken: cancellationToken));
-                }
+                    // The booking row before the hold and before the transaction row,
+                    // matching MarkTransactionSucceededHandler; the reverse order
+                    // deadlocks against a concurrent payment.
+                    //
+                    // The id through Dapper, then the entity through EF. A FromSqlRaw
+                    // over `SELECT *` fails: EF composes a projection asking for
+                    // "TotalPrice_Amount", a column the snake_case convention never
+                    // produces for the complex Money property.
+                    //
+                    // FOR UPDATE rather than SKIP LOCKED: a caller is waiting and must
+                    // see the committed outcome.
+                    if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
+                    {
+                        DbConnection connection = dbContext.Database.GetDbConnection();
 
-                // Re-read under the lock: the instance BookingAccessChecker
-                // returned predates the transaction, and on a retry may describe a
-                // state a previous attempt changed.
-                Booking? locked = await dbContext.Bookings
-                    .SingleOrDefaultAsync(b => b.Id == request.BookingId, cancellationToken);
+                        await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
+                            """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE""",
+                            new { request.BookingId },
+                            transaction,
+                            cancellationToken: token));
+                    }
 
-                if (locked is null)
-                {
-                    throw new NotFoundException(nameof(Booking), request.BookingId);
-                }
+                    // Re-read under the lock: the instance BookingAccessChecker
+                    // returned predates the transaction, and on a retry may describe a
+                    // state a previous attempt changed.
+                    Booking? locked = await dbContext.Bookings
+                        .SingleOrDefaultAsync(b => b.Id == request.BookingId, token);
 
-                // Already cancelled under the lock means an earlier attempt of this
-                // request committed and lost its acknowledgement: its obligation and
-                // outbox rows are durable, so this is success, not a conflict.
-                if (locked.BookingStatus == BookingStatus.Cancelled)
-                {
-                    await transaction.RollbackAsync(cancellationToken);
-                    return new CancelOutcome(locked, null, null);
-                }
+                    if (locked is null)
+                    {
+                        throw new NotFoundException(nameof(Booking), request.BookingId);
+                    }
 
-                if (!locked.CanBeCancelledOn(today))
-                {
-                    throw new BookingNotCancellableException(locked.Id);
-                }
+                    // Already cancelled under the lock means an earlier attempt of this
+                    // request committed and lost its acknowledgement, so this is
+                    // success, not a conflict.
+                    if (locked.BookingStatus == BookingStatus.Cancelled)
+                    {
+                        return locked;
+                    }
 
-                DateTimeOffset cancelledAt = timeProvider.GetUtcNow();
-                locked.Cancel(cancelledAt);
+                    if (!locked.CanBeCancelledOn(today))
+                    {
+                        throw new BookingNotCancellableException(locked.Id);
+                    }
 
-                // The refund obligation, in the cancellation's own transaction, so
-                // it is visible if and only if the cancellation committed. It says
-                // nothing about whether a payment exists; the resolver decides
-                // that (docs/adr/0027).
-                dbContext.RefundObligations.Add(new RefundObligation
-                {
-                    BookingId = locked.Id,
-                    CancelledAt = cancelledAt,
-                    PolicyRefundAmount = refundAmount.Amount,
-                    Currency = refundAmount.Currency,
-                    Cause = BookingCancellationCause.GuestCancellation,
-                    // Due immediately; the sweep acts only if the inline dispatch
-                    // below does not.
-                    NextAttemptAt = cancelledAt
-                });
+                    DateTimeOffset cancelledAt = timeProvider.GetUtcNow();
+                    locked.Cancel(cancelledAt);
 
-                OutboxMessage reverseTransactionRow = dispatcher.Enqueue(
-                    // The booking id only. The amount lives on the obligation, and a
-                    // second copy here could disagree with it.
-                    new ReverseTransactionOutboxMessage(locked.Id),
-                    BookingsJsonSerializerContext.Default.ReverseTransactionOutboxMessage);
-                OutboxMessage reverseRedemptionRow = dispatcher.Enqueue(
-                    new ReverseRedemptionOutboxMessage(locked.Id),
-                    BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
+                    // The refund obligation, committed with the cancellation. It says
+                    // nothing about whether a payment exists; the resolver below
+                    // decides that (docs/adr/0027).
+                    dbContext.RefundObligations.Add(new RefundObligation
+                    {
+                        BookingId = locked.Id,
+                        CancelledAt = cancelledAt,
+                        PolicyRefundAmount = refundAmount.Amount,
+                        Currency = refundAmount.Currency,
+                        Cause = BookingCancellationCause.GuestCancellation,
+                        NextAttemptAt = cancelledAt
+                    });
 
-                // Joins this transaction (HoldConfirmation.AmbientTransaction), so
-                // the release commits or rolls back with the cancellation.
-                await holdConfirmation.ReleaseHoldAsync(locked.HoldId, cancellationToken);
+                    await holdConfirmation.ReleaseHoldAsync(locked.HoldId, token);
 
-                await dbContext.SaveChangesAsync(cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
+                    await dbContext.SaveChangesAsync(token);
 
-                return new CancelOutcome(locked, reverseTransactionRow, reverseRedemptionRow);
-            });
+                    // The promo code goes back with the room.
+                    await promotionRedemption.ReverseRedemptionAsync(locked.Id, token);
 
-            // After the commit, and only for rows this attempt enqueued. A
-            // recovered commit's rows belong to its earlier attempt and are
-            // already dispatched or waiting for the relay.
-            if (outcome.ReverseTransactionRow is not null)
-            {
-                await dispatcher.TryDispatchAsync(outcome.ReverseTransactionRow, cancellationToken);
-            }
+                    // Reads the obligation saved above. Records the refund decision
+                    // locally - RefundPending and the obligation's ResolvedAt - and
+                    // moves no money; a provider call, when one exists, must not run
+                    // inside this scope. With no payment it records nothing, and the
+                    // obligation waits for a late one.
+                    await transactionReversal.ResolveRefundAsync(locked.Id, token);
 
-            if (outcome.ReverseRedemptionRow is not null)
-            {
-                await dispatcher.TryDispatchAsync(outcome.ReverseRedemptionRow, cancellationToken);
-            }
+                    return locked;
+                },
+                cancellationToken);
 
             // One observation of the payment, from committed state. Two reads could
-            // straddle a Succeeded -> RefundPending transition made by a dispatcher
-            // or the sweep and describe a state that never existed.
+            // straddle a Succeeded -> RefundPending transition made by a payment or
+            // the sweep and describe a state that never existed.
             PaymentStateSnapshot? payment =
-                await transactionReversal.GetPaymentStateAsync(outcome.Booking.Id, cancellationToken);
+                await transactionReversal.GetPaymentStateAsync(cancelled.Id, cancellationToken);
 
             if (payment?.RefundAmount is { } recorded)
             {
                 return BuildResponse(
-                    outcome.Booking,
+                    cancelled,
                     recorded.Amount,
                     recorded.Currency,
                     payment.Amount.Amount == 0m ? null : recorded.Amount / payment.Amount.Amount * 100m,
@@ -239,10 +222,10 @@ public class CancelBookingHandler(
                 // No payment: no refund. Reporting the policy figure would promise
                 // money to every guest who cancels an unpaid booking.
                 return BuildResponse(
-                    outcome.Booking, refundAmount: null, currency: null, refundPercent: null, RefundStatus.None);
+                    cancelled, refundAmount: null, currency: null, refundPercent: null, RefundStatus.None);
             }
 
-            return await BuildPendingRefundResponseAsync(outcome.Booking, payment, cancellationToken);
+            return await BuildPendingRefundResponseAsync(cancelled, payment, cancellationToken);
         }
 
         // A re-cancel reports state settled by an earlier request, from the same
@@ -300,14 +283,6 @@ public class CancelBookingHandler(
 
         return BuildResponse(booking, amount.Amount, amount.Currency, percent, RefundStatus.Pending);
     }
-
-    /// <summary>
-    ///     What the retried delegate produced: the committed booking, and the rows
-    ///     to dispatch - null when this attempt recovered an earlier attempt's
-    ///     commit, whose rows are already in flight.
-    /// </summary>
-    private sealed record CancelOutcome(
-        Booking Booking, OutboxMessage? ReverseTransactionRow, OutboxMessage? ReverseRedemptionRow);
 
     /// <summary>
     ///     The second factor on the destructive action - see

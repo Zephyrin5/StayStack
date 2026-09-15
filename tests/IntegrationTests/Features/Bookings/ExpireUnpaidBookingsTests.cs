@@ -1,4 +1,5 @@
 using Bookings;
+using BuildingBlocks.Persistence;
 using Bookings.Entities;
 using Dapper;
 using Bookings.Contracts;
@@ -97,12 +98,22 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
     {
         return new ExpireUnpaidBookingsJob(
             scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
+            scope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.IAtomicScope>(),
             scope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
+            scope.ServiceProvider.GetRequiredService<global::Promotions.Contracts.IPromotionRedemption>(),
             scope.ServiceProvider.GetRequiredService<ITransactionLookup>(),
-            scope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>(),
             timeProvider,
             NullLogger<ExpireUnpaidBookingsJob>.Instance);
     }
+
+    // ConfirmPaymentAsync runs only inside an atomic scope; this is the smallest
+    // one, with the payment side left out.
+    private static Task<bool> ConfirmPaymentAsync(IServiceScope scope, Guid bookingId, CancellationToken cancellationToken) =>
+        scope.ServiceProvider.GetRequiredService<IAtomicScope>().ExecuteAsync(
+            AtomicParticipants.Bookings,
+            AtomicParticipants.Bookings,
+            token => scope.ServiceProvider.GetRequiredService<IBookingPaymentConfirmation>().ConfirmPaymentAsync(bookingId, token),
+            cancellationToken);
 
     private static FakeTimeProvider At(DateTimeOffset instant)
     {
@@ -209,9 +220,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
 
         using (IServiceScope paymentScope = factory.Services.CreateScope())
         {
-            IBookingPaymentConfirmation paymentConfirmation =
-                paymentScope.ServiceProvider.GetRequiredService<IBookingPaymentConfirmation>();
-            Assert.True(await paymentConfirmation.ConfirmPaymentAsync(bookingId, TestContext.Current.CancellationToken));
+            Assert.True(await ConfirmPaymentAsync(paymentScope, bookingId, TestContext.Current.CancellationToken));
         }
 
         // Paying moves the hold the rest of the way, which is what makes
@@ -230,23 +239,16 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
     }
 
     [Fact]
-    public async Task APaymentThatSucceededButWhoseConfirmationIsStillOnTheOutbox_IsNotExpired()
+    public async Task APendingBookingWithASucceededPayment_IsNotExpired()
     {
-        // The failure this job could not see. Every other test here reaches
-        // the job through Bookings state, which is exactly the blind spot:
-        // MarkTransactionSucceededHandler commits Succeeded and its outbox row
-        // together and then dispatches inline as a best effort. When that best
-        // effort fails, the row waits for OutboxRelayJob's cron - and through
-        // that whole window the booking is still Pending with a lapsed
-        // PaymentDueAt, which is precisely what the scan looks for.
+        // The state docs/adr/0020's payment check guards: a Succeeded payment
+        // behind a booking still Pending with a lapsed PaymentDueAt, which is
+        // precisely what the scan looks for. MarkTransactionSucceededHandler
+        // confirms the booking in the commit that marks the payment Succeeded,
+        // so the state is seeded directly.
         //
         // The re-check under the row lock does not help. It re-reads the same
-        // Bookings rows, and no Bookings row knows about the payment yet.
-        //
-        // What followed was not just a lost booking: the expiry cancels, the
-        // confirmation finally arrives, ConfirmPaymentAsync sees Cancelled and
-        // returns false, and TransactionsOutboxDispatcher refunds a payment
-        // that succeeded minutes earlier.
+        // Bookings rows, and no Bookings row knows about the payment.
         // Arrange
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
@@ -257,12 +259,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         Guid holdId = await SeedHoldAsync(unit.Id, checkIn, checkIn.AddDays(2), "pending_payment");
         Guid bookingId = await SeedBookingAsync(unit.Id, holdId, now.AddMinutes(-1));
 
-        // The payment, committed on the Transactions side with nothing
-        // dispatched - the withheld delivery, modelled by simply not
-        // delivering it. Going through MarkTransactionSucceededHandler would
-        // dispatch inline and confirm the booking, which is the case the
-        // existing "a paid booking is never expired" test already covers and a
-        // different failure mode entirely.
+        // The payment, committed on the Transactions side alone.
         using (IServiceScope paymentScope = factory.Services.CreateScope())
         {
             AppTransactionsDbContext transactions =
@@ -289,15 +286,12 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         Assert.Equal(BookingStatus.Pending, await GetBookingStatusAsync(bookingId));
         Assert.Equal("pending_payment", await GetHoldStatusAsync(holdId));
 
-        // And the delayed confirmation still lands correctly when it finally
-        // does arrive. Without this the test would prove only that the booking
-        // survived one sweep, not that the payment ends up buying the stay it
-        // paid for - which is the outcome the guest cares about and the one
-        // the refund path was destroying.
+        // And a confirmation still lands correctly afterwards. Without this the
+        // test would prove only that the booking survived one sweep, not that
+        // the payment can still buy the stay it paid for.
         using (IServiceScope confirmScope = factory.Services.CreateScope())
         {
-            Assert.True(await confirmScope.ServiceProvider.GetRequiredService<IBookingPaymentConfirmation>()
-                .ConfirmPaymentAsync(bookingId, TestContext.Current.CancellationToken));
+            Assert.True(await ConfirmPaymentAsync(confirmScope, bookingId, TestContext.Current.CancellationToken));
         }
 
         Assert.Equal(BookingStatus.Confirmed, await GetBookingStatusAsync(bookingId));
@@ -423,8 +417,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         Task<bool> payment = Task.Run(async () =>
         {
             using IServiceScope paymentScope = factory.Services.CreateScope();
-            return await paymentScope.ServiceProvider.GetRequiredService<IBookingPaymentConfirmation>()
-                .ConfirmPaymentAsync(bookingId, CancellationToken.None);
+            return await ConfirmPaymentAsync(paymentScope, bookingId, CancellationToken.None);
         });
 
         // Long enough to have reached the lock and be waiting there. Without
@@ -471,12 +464,10 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
     [Fact]
     public async Task MarkingAHoldPaidTwice_Succeeds_BecauseARetryMustBeAbleToFinishTheJob()
     {
-        // Payment marks the hold paid and then confirms the booking, on two
-        // DbContexts against two schemas. A crash between them, or a retried
-        // outbox message, replays the first half against a hold that is
-        // already 'booked'. If that were rejected, the retry meant to finish
-        // the job would be the thing that permanently failed it - and the
-        // booking would never leave Pending.
+        // MarkHoldPaidAsync accepts a hold already 'booked', so a repeated call
+        // is not the thing that fails a payment. If that were rejected, a
+        // retry meant to finish the job would be the thing that permanently
+        // failed it - and the booking would never leave Pending.
         // Arrange
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);

@@ -7,8 +7,9 @@ namespace Bookings.Entities;
 ///     same transaction as the cancellation itself.
 ///     <para>
 ///         Persistence-layer construct, not a Domain aggregate: the row is the
-///         work item, and the outbox message that usually carries it is a
-///         latency optimisation over the job that sweeps for unresolved ones.
+///         work item. A cancellation resolves it in its own scope, and a payment
+///         succeeding afterwards resolves it in the payment's;
+///         ResolveOutstandingRefundsJob sweeps for any left unresolved.
 ///     </para>
 ///     <para>
 ///         The cancellation decides nothing about payments. It records that a

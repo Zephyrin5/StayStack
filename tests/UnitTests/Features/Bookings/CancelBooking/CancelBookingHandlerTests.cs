@@ -3,11 +3,9 @@ using Bookings.Contracts;
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.CancelBooking;
-using Bookings.Outbox;
 using BuildingBlocks.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Persistence.Interceptors;
@@ -15,10 +13,11 @@ using Promotions.Contracts;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using Transactions.Contracts;
+using UnitTests.Persistence;
 namespace UnitTests.Features.Bookings.CancelBooking;
 
 // The cancellation response must distinguish "nothing to refund" from "a refund
-// is queued but its dispatch has not landed yet". See
+// is owed and not yet recorded". See
 // CancelBookingResponse.RefundPending's own doc comment and
 // ITransactionReversal.GetPaymentStateAsync.
 public class CancelBookingHandlerTests : IDisposable
@@ -65,33 +64,26 @@ public class CancelBookingHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task Handle_WhenTheInlineReverseTransactionDispatchFails_StillReportsTheComputedRefund_AsPending()
+    public async Task Handle_WhenThePaymentIsStillAwaitingItsRefund_ReportsTheComputedRefund_AsPending()
     {
         // Arrange - a booking with real money behind it (a Succeeded
-        // transaction), where the inline dispatch attempt for
-        // ReverseTransactionOutboxMessage fails transiently (simulated by
-        // making ReverseTransactionAsync throw).
+        // transaction) and no refund recorded against it yet.
         Booking booking = await SeedBookingAsync();
 
         Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
-        transactionReversalMock
-            .Setup(x => x.ResolveRefundAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Transactions is temporarily unreachable."));
         // One observation now, replacing the pair of reads that could straddle
         // a Succeeded -> RefundPending transition. Paid, nothing refunded yet.
         transactionReversalMock
             .Setup(x => x.GetPaymentStateAsync(booking.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PaymentStateSnapshot { Amount = Money.Of(200m, Currency.KWD), AwaitingRefund = true });
 
-        BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
-            _dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
-            new Mock<IPromotionRedemption>().Object, TimeProvider.System, NullLogger<BookingsOutboxDispatcher>.Instance);
 
         Mock<ICurrentUserProvider> currentUserProviderMock = new Mock<ICurrentUserProvider>();
         currentUserProviderMock.Setup(x => x.UserId).Returns(_customerId);
 
         CancelBookingHandler handler = new CancelBookingHandler(
-            _dbContext, dispatcher, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
+            _dbContext, new SingleContextAtomicScope(_dbContext), new Mock<IHoldConfirmation>().Object,
+            new Mock<IPromotionRedemption>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
             new Mock<IBookingSessions>().Object, TimeProvider.System);
 
         CancelBookingRequest request = new CancelBookingRequest { BookingId = booking.Id };
@@ -120,15 +112,13 @@ public class CancelBookingHandlerTests : IDisposable
 
         Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
 
-        BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
-            _dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
-            new Mock<IPromotionRedemption>().Object, TimeProvider.System, NullLogger<BookingsOutboxDispatcher>.Instance);
 
         Mock<ICurrentUserProvider> currentUserProviderMock = new Mock<ICurrentUserProvider>();
         currentUserProviderMock.Setup(x => x.UserId).Returns(_customerId);
 
         CancelBookingHandler handler = new CancelBookingHandler(
-            _dbContext, dispatcher, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
+            _dbContext, new SingleContextAtomicScope(_dbContext), new Mock<IHoldConfirmation>().Object,
+            new Mock<IPromotionRedemption>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
             new Mock<IBookingSessions>().Object, TimeProvider.System);
 
         CancelBookingRequest request = new CancelBookingRequest { BookingId = booking.Id };
@@ -170,15 +160,13 @@ public class CancelBookingHandlerTests : IDisposable
                 RefundStatus = settled
             });
 
-        BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
-            _dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
-            new Mock<IPromotionRedemption>().Object, TimeProvider.System, NullLogger<BookingsOutboxDispatcher>.Instance);
 
         Mock<ICurrentUserProvider> currentUserProviderMock = new Mock<ICurrentUserProvider>();
         currentUserProviderMock.Setup(x => x.UserId).Returns(_customerId);
 
         CancelBookingHandler handler = new CancelBookingHandler(
-            _dbContext, dispatcher, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
+            _dbContext, new SingleContextAtomicScope(_dbContext), new Mock<IHoldConfirmation>().Object,
+            new Mock<IPromotionRedemption>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
             new Mock<IBookingSessions>().Object, TimeProvider.System);
 
         CancelBookingRequest request = new CancelBookingRequest { BookingId = booking.Id };
@@ -197,7 +185,7 @@ public class CancelBookingHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task Handle_OnRecancelBeforeTheOriginalReversalLands_ResolvesTheRefundAsOfTheOriginalCancellation_NotToday()
+    public async Task Handle_OnRecancelWhileTheRefundIsStillOwed_ReportsItAsOfTheOriginalCancellation_NotToday()
     {
         // Arrange - a dedicated context with the real audit interceptor
         // wired in (the shared fixture's _dbContext doesn't have one), so
@@ -235,26 +223,20 @@ public class CancelBookingHandlerTests : IDisposable
 
         Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
         transactionReversalMock
-            .Setup(x => x.ResolveRefundAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Transactions is temporarily unreachable."));
-        transactionReversalMock
             .Setup(x => x.GetPaymentStateAsync(booking.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PaymentStateSnapshot { Amount = Money.Of(200m, Currency.KWD), AwaitingRefund = true });
 
-        BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
-            dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
-            new Mock<IPromotionRedemption>().Object, timeProvider, NullLogger<BookingsOutboxDispatcher>.Instance);
 
         CancelBookingHandler handler = new CancelBookingHandler(
-            dbContext, dispatcher, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
+            dbContext, new SingleContextAtomicScope(dbContext), new Mock<IHoldConfirmation>().Object,
+            new Mock<IPromotionRedemption>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
             new Mock<IBookingSessions>().Object, timeProvider);
 
         CancelBookingRequest request = new CancelBookingRequest { BookingId = booking.Id };
 
-        // Act - cancel at T1 (100% tier); the inline dispatch fails
-        // (arranged above), so nothing lands. Advance the clock past the
-        // default policy's 5-day boundary, then recancel before the
-        // (still-failing) reversal has landed.
+        // Act - cancel at T1 (100% tier) with the refund still owed (arranged
+        // above). Advance the clock past the default policy's 5-day boundary,
+        // then recancel.
         CancelBookingResponse firstResponse = await handler.Handle(request, TestContext.Current.CancellationToken);
         timeProvider.Advance(TimeSpan.FromDays(2));
         CancelBookingResponse secondResponse = await handler.Handle(request, TestContext.Current.CancellationToken);
@@ -308,15 +290,13 @@ public class CancelBookingHandlerTests : IDisposable
         transactionReversalMock
             .Setup(x => x.GetPaymentStateAsync(booking.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PaymentStateSnapshot { Amount = Money.Of(200m, Currency.KWD), AwaitingRefund = true });
-        BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
-            dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
-            new Mock<IPromotionRedemption>().Object, timeProvider, NullLogger<BookingsOutboxDispatcher>.Instance);
 
         Mock<ICurrentUserProvider> currentUserProviderMock = new Mock<ICurrentUserProvider>();
         currentUserProviderMock.Setup(x => x.UserId).Returns(_customerId);
 
         CancelBookingHandler handler = new CancelBookingHandler(
-            dbContext, dispatcher, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
+            dbContext, new SingleContextAtomicScope(dbContext), new Mock<IHoldConfirmation>().Object,
+            new Mock<IPromotionRedemption>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
             new Mock<IBookingSessions>().Object, timeProvider);
 
         CancelBookingResponse response = await handler.Handle(
@@ -324,91 +304,5 @@ public class CancelBookingHandlerTests : IDisposable
 
         Assert.Equal(50m, response.RefundPercent);
         Assert.Equal(100m, response.RefundAmount);
-    }
-
-    [Fact]
-    public async Task Handle_FreshCancel_ReturnsTheSameResponse_WhetherTheInlineDispatchLandsOrNot()
-    {
-        // The response must not depend on whether this request's own inline
-        // dispatch happened to win. Whether the refund landed before the
-        // read-back or not, one action gets one shape - the caller cannot see
-        // that race.
-        //
-        // Both scenarios below are driven through the handler and the whole
-        // response compared field by field.
-        CancelBookingResponse landed = await CancelFreshBookingAsync(reversalLandsInline: true);
-        CancelBookingResponse didNotLand = await CancelFreshBookingAsync(reversalLandsInline: false);
-
-        Assert.Equal(didNotLand.RefundPending, landed.RefundPending);
-        Assert.Equal(didNotLand.RefundAmount, landed.RefundAmount);
-        Assert.Equal(didNotLand.RefundPercent, landed.RefundPercent);
-        Assert.Equal(didNotLand.Currency, landed.Currency);
-        Assert.Equal(didNotLand.BookingStatus, landed.BookingStatus);
-
-        // Pending either way: the durable outbox row is the guarantee, and
-        // whether it also executed within this request is not something the
-        // contract should express. A later re-cancel reports what landed.
-        Assert.True(landed.RefundPending);
-        Assert.Equal(200m, landed.RefundAmount);
-        Assert.Equal(100m, landed.RefundPercent);
-    }
-
-    private async Task<CancelBookingResponse> CancelFreshBookingAsync(bool reversalLandsInline)
-    {
-        // Check-in well beyond the default policy's 5-day tier, so the refund
-        // is a real 100%/200 rather than the degenerate 0 a same-day check-in
-        // produces - two zero refunds would compare equal without proving
-        // anything.
-        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(10);
-        Booking booking = Booking.Create(
-            Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), _customerId,
-            "Jane Guest", "jane@example.com", null,
-            checkIn, checkIn.AddDays(2),
-            2, Money.Of(200m, Currency.KWD), Money.Of(200m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait", DateTimeOffset.UtcNow.AddMinutes(30));
-        _dbContext.Bookings.Add(booking);
-        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        Mock<ITransactionReversal> transactionReversalMock = new Mock<ITransactionReversal>();
-        transactionReversalMock
-            .Setup(x => x.GetPaymentStateAsync(booking.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PaymentStateSnapshot { Amount = Money.Of(200m, Currency.KWD), AwaitingRefund = true });
-
-        if (reversalLandsInline)
-        {
-            // The resolver landed inline, so the read-back finds the refund
-            // already recorded.
-            transactionReversalMock
-                .Setup(x => x.GetPaymentStateAsync(booking.Id, It.IsAny<CancellationToken>()))
-                // RefundPending: true, because that is what landing means - the
-                // resolver moves the transaction to RefundPending, so a read
-                // taken straight afterwards describes a refund that has been
-                // asked for, not one that has settled.
-                .ReturnsAsync(new PaymentStateSnapshot
-                {
-                    Amount = Money.Of(200m, Currency.KWD),
-                    RefundAmount = Money.Of(200m, Currency.KWD),
-                    RefundStatus = RefundStatus.Pending
-                });
-        }
-        else
-        {
-            transactionReversalMock
-                .Setup(x => x.ResolveRefundAsync(booking.Id, It.IsAny<CancellationToken>()))
-                .ThrowsAsync(new InvalidOperationException("Transactions is temporarily unreachable."));
-        }
-
-        BookingsOutboxDispatcher dispatcher = new BookingsOutboxDispatcher(
-            _dbContext, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object,
-            new Mock<IPromotionRedemption>().Object, TimeProvider.System, NullLogger<BookingsOutboxDispatcher>.Instance);
-
-        Mock<ICurrentUserProvider> currentUserProviderMock = new Mock<ICurrentUserProvider>();
-        currentUserProviderMock.Setup(x => x.UserId).Returns(_customerId);
-
-        CancelBookingHandler handler = new CancelBookingHandler(
-            _dbContext, dispatcher, new Mock<IHoldConfirmation>().Object, transactionReversalMock.Object, currentUserProviderMock.Object,
-            new Mock<IBookingSessions>().Object, TimeProvider.System);
-
-        return await handler.Handle(
-            new CancelBookingRequest { BookingId = booking.Id }, TestContext.Current.CancellationToken);
     }
 }

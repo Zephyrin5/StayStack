@@ -5,7 +5,6 @@ using Bookings.Features.ConfirmBooking;
 using Bookings.Features.CreateBookingSession;
 using Bookings.Features.HoldAvailability;
 using Bookings.Jobs;
-using Bookings.Outbox;
 using Catalog;
 using Catalog.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -105,8 +104,9 @@ public class PendingRefundReportingTests(IntegrationTestWebApplicationFactory fa
         return body;
     }
 
-    // A payment committed Succeeded with nothing dispatched - the delayed
-    // resolution, modelled by not delivering it.
+    // A payment committed Succeeded without MarkTransactionSucceededHandler,
+    // whose scope would record the refund in the same commit. What is left is
+    // the refund owed and not yet recorded, which is the state these report on.
     private async Task PaySilentlyAsync(Guid bookingId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
@@ -127,8 +127,11 @@ public class PendingRefundReportingTests(IntegrationTestWebApplicationFactory fa
     {
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            await scope.ServiceProvider.GetRequiredService<ITransactionReversal>()
-                .ResolveRefundAsync(bookingId, TestContext.Current.CancellationToken);
+            await scope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.IAtomicScope>().ExecuteAsync(
+                BuildingBlocks.Persistence.AtomicParticipants.Bookings,
+                BuildingBlocks.Persistence.AtomicParticipants.Bookings | BuildingBlocks.Persistence.AtomicParticipants.Transactions,
+                token => scope.ServiceProvider.GetRequiredService<ITransactionReversal>().ResolveRefundAsync(bookingId, token),
+                TestContext.Current.CancellationToken);
         }
 
         using IServiceScope readScope = factory.Services.CreateScope();
@@ -168,15 +171,16 @@ public class PendingRefundReportingTests(IntegrationTestWebApplicationFactory fa
         {
             await new ExpireUnpaidBookingsJob(
                     jobScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
+                    jobScope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.IAtomicScope>(),
                     jobScope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
+                    jobScope.ServiceProvider.GetRequiredService<global::Promotions.Contracts.IPromotionRedemption>(),
                     jobScope.ServiceProvider.GetRequiredService<ITransactionLookup>(),
-                    jobScope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>(),
                     TimeProvider.System,
                     NullLogger<ExpireUnpaidBookingsJob>.Instance)
                 .ExpireAsync(null!, TestContext.Current.CancellationToken);
         }
 
-        // The payment lands after the expiry, and its resolution is delayed.
+        // The payment lands after the expiry.
         await PaySilentlyAsync(checkout.BookingId);
 
         // Act - the guest asks.

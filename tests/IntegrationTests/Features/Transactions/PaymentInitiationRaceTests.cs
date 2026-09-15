@@ -308,9 +308,10 @@ public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory fac
 
             await new ExpireUnpaidBookingsJob(
                     jobScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
+                    jobScope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.IAtomicScope>(),
                     jobScope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
+                    jobScope.ServiceProvider.GetRequiredService<global::Promotions.Contracts.IPromotionRedemption>(),
                     jobScope.ServiceProvider.GetRequiredService<ITransactionLookup>(),
-                    jobScope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>(),
                     TimeProvider.System,
                     NullLogger<ExpireUnpaidBookingsJob>.Instance)
                 .ExpireAsync(null!, TestContext.Current.CancellationToken)

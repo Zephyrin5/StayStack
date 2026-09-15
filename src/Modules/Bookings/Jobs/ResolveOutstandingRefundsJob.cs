@@ -1,4 +1,4 @@
-using Bookings.Entities;
+using BuildingBlocks.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using TickerQ.Utilities.Base;
@@ -9,10 +9,11 @@ namespace Bookings.Jobs;
 /// <summary>
 ///     Resolves refund obligations nobody has settled yet.
 ///     <para>
-///         This makes the refund independent of message ordering. The outbox
-///         messages that usually trigger resolution are latency optimisations
-///         over this sweep, so any interleaving in which no message resolves an
-///         obligation ends here (docs/adr/0027).
+///         A cancellation resolves its obligation in the scope that commits
+///         it, and a payment succeeding afterwards resolves it in the payment's.
+///         What reaches this sweep is an obligation with no payment yet, waiting
+///         for a late one, or one those resolutions did not record
+///         (docs/adr/0027).
 ///     </para>
 ///     <para>
 ///         Lives in Bookings because the obligations are Bookings' rows. It
@@ -22,6 +23,7 @@ namespace Bookings.Jobs;
 /// </summary>
 public partial class ResolveOutstandingRefundsJob(
     AppBookingsDbContext dbContext,
+    IAtomicScope atomicScope,
     ITransactionReversal transactionReversal,
     TimeProvider timeProvider,
     ILogger<ResolveOutstandingRefundsJob> logger)
@@ -32,14 +34,12 @@ public partial class ResolveOutstandingRefundsJob(
     private const int MaxResultsPerRun = 1000;
 
     /// <summary>
-    ///     Long enough that the ordinary path - an outbox message delivered
-    ///     within seconds - has already resolved the obligation, so this job
-    ///     normally finds nothing.
+    ///     Keeps the sweep off obligations committed moments ago.
     ///     <para>
-    ///         Not a correctness bound. Resolution is idempotent and this
-    ///         running early would simply do the work the message was about to
-    ///         do; the grace exists to keep the sweep off rows that are being
-    ///         handled, not to give anything permission to be slow.
+    ///         Not a correctness bound. Resolution is idempotent, so running
+    ///         early would repeat work already committed; the grace exists to
+    ///         keep the sweep off fresh rows, not to give anything permission to
+    ///         be slow.
     ///     </para>
     /// </summary>
     private static readonly TimeSpan ResolutionGrace = TimeSpan.FromMinutes(2);
@@ -70,10 +70,11 @@ public partial class ResolveOutstandingRefundsJob(
         // newer obligation with an actual payment was never reached. That is
         // the ordinary workload, not an error condition: most cancellations are
         // of bookings nobody paid for.
-        List<RefundObligation> candidates = await dbContext.RefundObligations
+        var candidates = await dbContext.RefundObligations.AsNoTracking()
             .Where(o => o.ResolvedAt == null && o.NextAttemptAt <= cutoff)
             .OrderBy(o => o.NextAttemptAt)
             .Take(MaxResultsPerRun)
+            .Select(o => new { o.BookingId, o.Attempts })
             .ToListAsync(cancellationToken);
 
         if (candidates.Count == 0)
@@ -91,7 +92,7 @@ public partial class ResolveOutstandingRefundsJob(
             LogResultsCapped(logger, MaxResultsPerRun, candidates.Max(o => o.Attempts));
         }
 
-        foreach (RefundObligation obligation in candidates)
+        foreach (var obligation in candidates)
         {
             Guid bookingId = obligation.BookingId;
 
@@ -100,14 +101,20 @@ public partial class ResolveOutstandingRefundsJob(
             // same split every other sweep in this module makes.
             try
             {
-                decimal? resolved = await transactionReversal.ResolveRefundAsync(bookingId, cancellationToken);
+                // The refund and the obligation's ResolvedAt commit together.
+                // ResolvedAt means the decision is recorded locally, not that money
+                // moved. A payment-provider call must never run inside this scope:
+                // it cannot roll back, and it would hold the connection, the row
+                // locks and a pool slot for the length of an HTTP round trip. It
+                // belongs after the commit, driven by the recorded RefundPending.
+                decimal? resolved = await atomicScope.ExecuteAsync(
+                    AtomicParticipants.Bookings,
+                    AtomicParticipants.Bookings | AtomicParticipants.Transactions,
+                    token => transactionReversal.ResolveRefundAsync(bookingId, token),
+                    cancellationToken);
 
                 if (resolved is not null)
                 {
-                    // Worth a Warning rather than Information: the messages
-                    // should have handled this, so a steady stream here means
-                    // outbox delivery is not working, and the only visible
-                    // symptom would otherwise be refunds arriving minutes late.
                     LogResolvedByTheBackstop(logger, bookingId, resolved.Value);
                     continue;
                 }
@@ -120,8 +127,7 @@ public partial class ResolveOutstandingRefundsJob(
                 // still possible, and that is precisely the case this row
                 // exists to catch; marking it settled would throw the case away
                 // to tidy the queue.
-                obligation.Attempts++;
-                obligation.NextAttemptAt = timeProvider.GetUtcNow() + BackoffFor(obligation.Attempts);
+                await BackOffAsync(bookingId, obligation.Attempts + 1, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -129,18 +135,22 @@ public partial class ResolveOutstandingRefundsJob(
                 // throws every run would otherwise hold its place and starve
                 // everything behind it, which is how a per-item guard turns
                 // into a queue-wide outage.
-                obligation.Attempts++;
-                obligation.NextAttemptAt = timeProvider.GetUtcNow() + BackoffFor(obligation.Attempts);
-
                 LogResolveFailed(logger, bookingId, ex);
+                await BackOffAsync(bookingId, obligation.Attempts + 1, cancellationToken);
             }
         }
-
-        // One save for the whole batch. These are scheduling hints, not the
-        // refund itself, so losing them to a failure costs a repeated sweep
-        // rather than anything a guest can see.
-        await dbContext.SaveChangesAsync(cancellationToken);
     }
+
+    // A scheduling hint, not the refund itself, so losing one to a failure costs
+    // a repeated sweep rather than anything a guest can see. Filtered on
+    // still-unresolved, so it never touches an obligation resolved meanwhile.
+    private Task BackOffAsync(Guid bookingId, int attempts, CancellationToken cancellationToken) =>
+        dbContext.RefundObligations
+            .Where(o => o.BookingId == bookingId && o.ResolvedAt == null)
+            .ExecuteUpdateAsync(o => o
+                    .SetProperty(row => row.Attempts, attempts)
+                    .SetProperty(row => row.NextAttemptAt, timeProvider.GetUtcNow() + BackoffFor(attempts)),
+                cancellationToken);
 
     private static TimeSpan BackoffFor(int attempts)
     {
@@ -152,7 +162,7 @@ public partial class ResolveOutstandingRefundsJob(
     }
 
     [LoggerMessage(LogLevel.Warning,
-        "Refund obligation for booking {BookingId} was settled by the backstop sweep at {Amount}, not by its outbox message - a steady stream of these means outbox delivery is failing")]
+        "Refund obligation for booking {BookingId} was settled by the backstop sweep at {Amount} - cancellation and payment success resolve inline, so neither recorded it")]
     private static partial void LogResolvedByTheBackstop(ILogger logger, Guid bookingId, decimal amount);
 
     [LoggerMessage(LogLevel.Error,
