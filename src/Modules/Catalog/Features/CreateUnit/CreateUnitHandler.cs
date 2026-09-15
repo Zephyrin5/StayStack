@@ -1,10 +1,10 @@
 using BuildingBlocks.Exceptions;
-using BuildingBlocks.Persistence;
-using Catalog.Archival;
-using Dapper;
 using BuildingBlocks.Identity;
 using BuildingBlocks.Localization;
+using BuildingBlocks.Persistence;
+using Catalog.Archival;
 using Catalog.Entities;
+using Dapper;
 using Hosts.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
@@ -23,7 +23,7 @@ public class CreateUnitHandler(
 {
     public async ValueTask<CreateUnitResponse> Handle(CreateUnitRequest request, CancellationToken cancellationToken)
     {
-        // Chosen first, before anything that could retry - see docs/adr/0025.
+        // Minted before anything that could retry (docs/adr/0025).
         Guid unitId = Guid.CreateVersion7();
 
         Property? property = await dbContext.Properties
@@ -34,10 +34,6 @@ public class CreateUnitHandler(
             throw new NotFoundException(nameof(Property), request.PropertyId);
         }
 
-        // Administrators may create a Unit under any Property; a Host may
-        // only do so under their own. Branching on role here is safe - it
-        // decides whether to run an extra check, not whether to trust
-        // client-supplied data over the token.
         if (!currentUserProvider.Roles.Contains(AuthorizationPolicies.Administrator))
         {
             hostAuthorization.RequireOwnership(property.HostId, nameof(Property), request.PropertyId);
@@ -45,8 +41,7 @@ public class CreateUnitHandler(
 
         LocalizedText name = LocalizedText.Create(request.Name, localizationSettings.Value.DefaultCulture);
 
-        // null (omitted) means "use Unit.Create's own default" - only build
-        // one from the request when tiers were actually provided.
+        // Omitted tiers use Unit.Create's default policy.
         CancellationPolicy? cancellationPolicy = request.CancellationTiers is not null
             ? CancellationPolicy.Create(request.CancellationTiers)
             : null;
@@ -60,15 +55,6 @@ public class CreateUnitHandler(
             request.Currency,
             cancellationPolicy);
 
-        // Shared against the exclusive lock DeletePropertyHandler takes, so
-        // concurrent creation under one property still runs in parallel and
-        // only archival is excluded.
-        //
-        // Without it, a property archive that read its units a moment ago
-        // commits, this insert lands, and the result is a live unit under an
-        // archived property - the orphan UnitLookup throws
-        // OrphanedUnitException for. No per-unit lock can cover that: there was
-        // no row to lock.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
         await strategy.ExecuteAsync(async () =>
@@ -78,32 +64,21 @@ public class CreateUnitHandler(
             await using IDbContextTransaction transaction =
                 await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-            // An earlier attempt may already have committed and lost its
-            // acknowledgement. The unit and its id were built before this
-            // delegate, so a retry would re-add the same entity and collide with
-            // its own committed row on the primary key - a 500 for a unit that
-            // exists. Asked before the property re-read below, and past the
-            // soft-delete filter: the commit is the outcome, and an archive
-            // landing in between must not hide it (docs/adr/0025).
+            // Past the soft-delete filter: the unit is this request's earlier committed attempt (docs/adr/0025).
             if (await dbContext.Units.IgnoreQueryFilters().AnyAsync(u => u.Id == unit.Id, cancellationToken))
             {
                 await transaction.RollbackAsync(cancellationToken);
                 return;
             }
 
-            if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
-            {
-                await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
-                    AdvisoryLock.AcquireSharedSql,
-                    new { LockKey = PropertyUnitsLock.KeyFor(request.PropertyId) },
-                    transaction.GetDbTransaction(),
-                    cancellationToken: cancellationToken));
-            }
+            // Shared against DeletePropertyHandler's exclusive lock, so no unit lands under an archived property.
+            await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
+                AdvisoryLock.AcquireSharedSql,
+                new { LockKey = PropertyUnitsLock.KeyFor(request.PropertyId) },
+                transaction.GetDbTransaction(),
+                cancellationToken: cancellationToken));
 
-            // Re-read under the lock. The property was resolved before this
-            // transaction opened, and the lock only orders this against
-            // archival; the soft-delete filter answers what archival did - an
-            // archived property is not found.
+            // Re-read under the lock; an archived property is not found.
             if (!await dbContext.Properties.AnyAsync(p => p.Id == request.PropertyId, cancellationToken))
             {
                 throw new NotFoundException(nameof(Property), request.PropertyId);

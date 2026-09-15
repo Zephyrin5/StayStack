@@ -1,14 +1,14 @@
 using Bookings.Contracts;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
-using Mediator;
 using BuildingBlocks.Persistence;
 using Dapper;
-using Microsoft.EntityFrameworkCore.Storage;
+using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Persistence;
 using Transactions.Entities;
 using Transactions.Entities.Configurations;
-using Persistence;
 using Transactions.Exceptions;
 namespace Transactions.Features.InitiateTransaction;
 
@@ -20,16 +20,7 @@ public class InitiateTransactionHandler(
 {
     public async ValueTask<InitiateTransactionResponse> Handle(InitiateTransactionRequest request, CancellationToken cancellationToken)
     {
-        // Ownership proof first, via the same two-path check
-        // CancelBookingHandler and GetBookingForManagementHandler use: a
-        // matching CustomerId (authenticated) or a valid management token
-        // (guest checkout). Without it, anyone holding a booking id could open a
-        // Pending transaction, and the partial unique index would reject the
-        // real guest's payment with 409.
-        //
-        // The 404-vs-409 split below is kept: it would be a status oracle only
-        // if anyone could ask, and an owner is entitled to know why their own
-        // booking cannot be paid for.
+        // Ownership first: without it anyone with a booking id could block the guest's payment.
         BookingAccessResult booking = await bookingLookup.VerifyBookingAccessAsync(
                                           request.BookingId,
                                           currentUserProvider.UserId,
@@ -41,76 +32,39 @@ public class InitiateTransactionHandler(
             throw new BookingNotPayableException(request.BookingId);
         }
 
-        // Everything from here runs under the booking's payment lock. The check
-        // above and the insert below are otherwise independent, so a
-        // cancellation committing between them leaves a pending payment against
-        // a cancelled booking - and if that cancellation moved an earlier payment
-        // to RefundPending, the booking ends up with a RefundPending and a
-        // Succeeded transaction at once.
-        //
-        // This path takes no other lock. Paths that take it with the booking row
-        // lock take it first (docs/adr/0028).
-
-        // Once, outside the retry (docs/adr/0025). A fresh id per attempt would
-        // make a retry after a lost acknowledgement find its own row as "a
-        // transaction already in progress" and answer 409 to the guest who just
-        // created it.
+        // Minted before the retry so a lost acknowledgement finds its own row (docs/adr/0025).
         Guid transactionId = Guid.CreateVersion7();
 
-        // Bookings participates read-only: the re-read under the lock runs on this
-        // transaction's connection rather than a second pooled one.
         return await atomicScope.ExecuteAsync(
             AtomicParticipants.Transactions,
             AtomicParticipants.Transactions | AtomicParticipants.Bookings,
             async token =>
-        {
-            if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
             {
+                // Excludes a cancellation committing between the payability check and the insert (docs/adr/0028).
                 await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
                     AdvisoryLock.AcquireExclusiveSql,
                     new { LockKey = BookingPaymentLock.KeyFor(request.BookingId) },
                     dbContext.Database.CurrentTransaction!.GetDbTransaction(),
                     cancellationToken: token));
-            }
 
-            // An earlier attempt of this request may already have committed.
-            //
-            // Asked under the lock, and that is what makes one read enough. An
-            // earlier attempt held this same lock until its transaction ended,
-            // and Postgres makes a commit visible before it releases that
-            // transaction's locks - so by the time this attempt holds the lock,
-            // the earlier one has either committed visibly or rolled back. There
-            // is no in-flight commit left to race.
-            //
-            // Asked first - before the payability re-read and before the
-            // active-transaction check - because both would otherwise judge the
-            // request against a world containing its own row: the active check
-            // refuses it as "already in progress", and a cancellation that
-            // landed since would refuse it as not payable. Neither is true of
-            // an operation that has already happened. The commit is the
-            // outcome; what follows it is somebody else's concern, and a payment
-            // against a booking cancelled afterwards is exactly what the refund
-            // obligation exists to settle.
-            Transaction? committed = await dbContext.Transactions.AsNoTracking()
-                .SingleOrDefaultAsync(t => t.Id == transactionId, token);
+                // Before the checks below, which would otherwise judge the request against its own committed row.
+                Transaction? committed = await dbContext.Transactions.AsNoTracking()
+                    .SingleOrDefaultAsync(t => t.Id == transactionId, token);
 
-            if (committed is not null)
-            {
-                return BuildResponse(committed);
-            }
+                if (committed is not null)
+                {
+                    return BuildResponse(committed);
+                }
 
-            // Re-read under the lock: the lock orders this against a
-            // cancellation, and only a read says what that cancellation did.
-            BookingAccessResult? current = await bookingLookup.GetBookingDetailsAsync(
-                request.BookingId, token);
+                BookingAccessResult? current = await bookingLookup.GetBookingDetailsAsync(request.BookingId, token);
 
-            if (current is null || !current.IsPending)
-            {
-                throw new BookingNotPayableException(request.BookingId);
-            }
+                if (current is null || !current.IsPending)
+                {
+                    throw new BookingNotPayableException(request.BookingId);
+                }
 
-            return await InsertAsync(transactionId, request, current, token);
-        },
+                return await InsertAsync(transactionId, request, current, token);
+            },
             cancellationToken);
     }
 
@@ -118,16 +72,7 @@ public class InitiateTransactionHandler(
         Guid transactionId, InitiateTransactionRequest request, BookingAccessResult booking,
         CancellationToken cancellationToken)
     {
-        // A Pending or Succeeded transaction blocks a new one - Failed
-        // leaves room for a retry, and the refund states are moot since a
-        // booking only reaches those via cancellation, which already fails
-        // IsPending above. Spelled out as the exact active set, not
-        // "!= Failed" - that would also match the refund states by
-        // accident. This check is just a fast-path/friendly-error
-        // optimization: it doesn't prevent double-charging under
-        // concurrent requests (two callers can both pass it before either
-        // inserts) - the partial unique index below is the real
-        // authority, enforced via the DbUpdateException catch.
+        // A friendly early answer; the active-transaction index is the authority.
         bool hasTransactionInProgress = await dbContext.Transactions
             .AnyAsync(
                 t => t.BookingId == request.BookingId
@@ -140,7 +85,6 @@ public class InitiateTransactionHandler(
         }
 
         Transaction transaction = Transaction.Create(transactionId, request.BookingId, booking.TotalPrice);
-
         dbContext.Transactions.Add(transaction);
 
         try
@@ -149,10 +93,6 @@ public class InitiateTransactionHandler(
         }
         catch (DbUpdateException ex) when (ex.IsViolationOf(TransactionConfiguration.ActiveTransactionIndex))
         {
-            // Another transaction for this booking is already Pending or
-            // Succeeded. Any other violation propagates: this request's own
-            // committed row is found by the lookup at the top of the delegate,
-            // under the payment lock, before an insert is attempted.
             throw new TransactionAlreadyInProgressException(request.BookingId);
         }
 
@@ -168,5 +108,4 @@ public class InitiateTransactionHandler(
             Currency = transaction.Amount.Currency,
             TransactionStatus = transaction.TransactionStatus
         };
-
 }

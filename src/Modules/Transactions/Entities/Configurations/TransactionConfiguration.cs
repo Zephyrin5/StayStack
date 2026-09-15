@@ -13,41 +13,28 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
     {
         builder.HasKey(t => t.Id);
 
-// The xmin concurrency token is applied by
-        // AppTransactionsDbContext, not here: it is a Postgres system column
-        // and only exists under that provider.
+        // Every transition guards its starting state in memory; xmin makes a stale write match no row.
+        builder.Property<uint>("xmin")
+            .HasColumnName("xmin")
+            .IsRowVersion()
+            .ValueGeneratedOnAddOrUpdate();
 
         builder.ComplexProperty(t => t.Amount, money => money.ConfigureMoney("amount"));
-        // Mapped by backing-field name, not by the Money?-typed RefundAmount
-        // property: the currency lives on amount_currency and is paired back
-        // on read, so this stays exactly the one column it has always been -
-        // a type-only change with no migration. See Transaction.RefundAmount.
+
+        // The currency is amount_currency, paired back on read; see Transaction.RefundAmount.
         builder.Property<decimal?>(Transaction.RefundAmountField)
             .HasColumnName("refund_amount")
             .HasColumnType("numeric(12,3)");
 
-        // Stored as text, not the integer enum value - same reasoning as
-        // Booking.BookingStatus: legible in psql, safe against the enum's
-        // underlying values ever being reordered.
+        // Enums as text: legible in psql and safe against reordering.
         builder.Property(t => t.TransactionStatus).HasConversion<string>().HasMaxLength(20).IsRequired();
-
         builder.Property(t => t.FailureReason).HasMaxLength(500);
-
-        // Text, like TransactionStatus above and for the same reasons: legible
-        // in psql, and safe against the enum's underlying values being
-        // reordered.
         builder.Property(t => t.RefundCause).HasConversion<string>().HasMaxLength(20);
 
-        // Two indexes over the same column, not one reconfigured - see
-        // docs/adr/0011 for the naming gotchas that requires.
+        // Two indexes on one column need explicit names (docs/adr/0011).
         builder.HasIndex(t => t.BookingId, "ix_transactions_booking_id");
 
-        // A Pending or Succeeded transaction is the "active" one for a
-        // booking - only one may exist at a time. Enforced here, not just
-        // in InitiateTransactionHandler's pre-check, which alone can't
-        // stop two concurrent requests both passing it and both inserting -
-        // see the handler's DbUpdateException catch, which turns a
-        // violation of this index into TransactionAlreadyInProgressException.
+        // The authority behind InitiateTransactionHandler's early check.
         builder.HasIndex(t => t.BookingId, ActiveTransactionIndex)
             .IsUnique()
             .HasDatabaseName(ActiveTransactionIndex)

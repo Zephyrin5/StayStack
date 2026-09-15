@@ -6,8 +6,8 @@ namespace Bookings.Entities.Configurations;
 public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAvailabilityHold>
 {
     /// <summary>
-    ///     No overlapping holds per unit. Created by raw SQL in Catalog's Initial
-    ///     migration, which EF cannot express; SchemaInvariantsTests pins it.
+    ///     No overlapping holds per unit. Raw SQL in a migration, since EF cannot express EXCLUDE USING gist;
+    ///     SchemaInvariantsTests pins it (docs/adr/0010).
     /// </summary>
     public const string OverlapExclusionConstraint = "unit_availability_holds_overlap_excl";
 
@@ -24,33 +24,13 @@ public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAv
 
         builder.HasIndex(h => h.UnitId);
 
-        // Backs HoldAvailabilityHandler's concurrent-hold cap - partial on
-        // the two statuses that query counts, matching its WHERE clause
-        // exactly. A filter narrower than the query silently stops covering
-        // it, and the cap runs inside a Serializable transaction on the hold
-        // path, so a sequential scan there is not merely slower. 'booked' is
-        // excluded, as in that query. hold_expires_at > @Now is a residual
-        // filter: a runtime comparison cannot be a partial-index predicate.
-        // Keyed on client_key, which the caller cannot choose (docs/adr/0016).
+        // Backs the per-client hold cap; the filter must match that query's statuses exactly (docs/adr/0016).
         builder.HasIndex(h => h.ClientKey, "ix_unit_availability_holds_client_key_active")
             .HasFilter($"status IN ('{HoldStatuses.Held}', '{HoldStatuses.PendingPayment}')")
             .HasDatabaseName("ix_unit_availability_holds_client_key_active");
 
-
-        // Covers both cleanup queries' predicate shape - the global sweep
-        // (ExpiredHoldsSweepJob: status = 'held' AND hold_expires_at <=
-        // now(), no unit_id) and, combined with the UnitId index above,
-        // HoldAvailabilityHandler's per-unit cleanup. Partial on
-        // status = 'held' since a 'booked' row is never a cleanup target,
-        // letting Postgres locate candidates through this index instead of
-        // scanning the whole table (the DELETE still visits the matching
-        // heap tuples - this isn't index-only).
+        // Backs the expired-hold cleanup queries.
         builder.HasIndex(h => h.HoldExpiresAt)
             .HasFilter("status = 'held'");
-
-        // NOTE: the actual double-booking guard - the exclusion constraint
-        // on (unit_id, stay_range) - is NOT configured here, since Npgsql's
-        // EF Core provider has no fluent API for EXCLUDE USING gist
-        // constraints. See docs/adr/0010 and docs/adr/0011.
     }
 }

@@ -1,19 +1,19 @@
+using Bookings.Contracts;
 using Bookings.Entities;
 using Bookings.Features.Common;
-using Dapper;
-using System.Data.Common;
-using BuildingBlocks.Persistence;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
+using BuildingBlocks.Persistence;
 using BuildingBlocks.Time;
+using Dapper;
 using Mediator;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Promotions.Contracts;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
+using System.Data.Common;
 using Transactions.Contracts;
-using Bookings.Contracts;
 namespace Bookings.Features.CancelBooking;
 
 public class CancelBookingHandler(
@@ -28,118 +28,58 @@ public class CancelBookingHandler(
 {
     public async ValueTask<CancelBookingResponse> Handle(CancelBookingRequest request, CancellationToken cancellationToken)
     {
-        // Two proofs of ownership - a matching CustomerId, or a booking session
-        // opened from the management token - and no distinction between "does
-        // not exist" and "is not yours". See BookingAccessChecker.
+        // "Does not exist" and "is not yours" are indistinguishable; see BookingAccessChecker.
         BookingAccess access = await BookingAccessChecker.ResolveAsync(
-                              dbContext, request.BookingId, currentUserProvider.UserId,
-                              await bookingSessions.GetSessionBookingIdAsync(cancellationToken), cancellationToken)
-                          ?? throw new NotFoundException(nameof(Booking), request.BookingId);
+                                   dbContext, request.BookingId, currentUserProvider.UserId,
+                                   await bookingSessions.GetSessionBookingIdAsync(cancellationToken), cancellationToken)
+                               ?? throw new NotFoundException(nameof(Booking), request.BookingId);
 
         Booking booking = access.Booking;
 
-        // In the property's zone: refund tiers count days to CheckIn, a
-        // property-local date, so a UTC "today" crosses tier boundaries a day
-        // early or late (docs/adr/0018).
+        // Refund tiers count days to a property-local check-in (docs/adr/0018).
         DateOnly today = PropertyTimeZone.Today(timeProvider, booking.TimeZoneId);
-
-        // A booking without a snapshotted policy gets the default new units get,
-        // rather than a claim about what applied when it was made.
         CancellationPolicy cancellationPolicy = booking.CancellationPolicy ?? CancellationPolicy.CreateDefault();
 
-        // A re-cancel writes nothing: the first cancellation committed its
-        // obligation, release, reversal and refund decision together.
+        // A re-cancel writes nothing and only reports.
         if (booking.BookingStatus != BookingStatus.Cancelled)
         {
-            // Eligibility is separate from access. A management link stays usable
-            // long after checkout, and cancelling a stay in progress or already
-            // ended would release nights back to inventory. A re-cancel skips
-            // this, since it changes nothing.
             if (!booking.CanBeCancelledOn(today))
             {
                 throw new BookingNotCancellableException(booking.Id);
             }
 
-            // After the eligibility check, and only on the branch that cancels:
-            // asking for the guest's email for a stay that cannot be cancelled, or
-            // for a re-cancel that changes nothing, would refuse harmless requests.
-            // Checking eligibility first leaks nothing the management response
-            // does not already show.
+            // After eligibility, so a refused or no-op request is not asked for the email.
             RequireGuestEmailForLinkAccess(access, request.GuestEmail);
 
             // Once, outside the retry, so attempts either side of a tier boundary agree.
             Money refundAmount = CancellationRefund.Compute(booking.TotalPrice, cancellationPolicy, booking.CheckIn, today);
 
-            // Everything that must survive a retry is built inside the delegate
-            // (docs/adr/0025). SaveChangesAsync accepts its changes before the
-            // commit, so a booking mutated outside it would be seen as unchanged on
-            // a retry: the save would write nothing while the hold release, a plain
-            // statement, ran again.
-            //
-            // The cancellation, its refund obligation, the hold release, the
-            // redemption reversal and the refund decision commit together.
             Booking cancelled = await atomicScope.ExecuteAsync(
                 AtomicParticipants.Bookings,
                 AtomicParticipants.Bookings | AtomicParticipants.Transactions | AtomicParticipants.Promotions,
                 async token =>
                 {
                     DbTransaction transaction = dbContext.Database.CurrentTransaction!.GetDbTransaction();
+                    DbConnection connection = dbContext.Database.GetDbConnection();
 
-                    // BookingPaymentLock first, then the booking row lock, then the
-                    // hold, then the transaction row the refund decision writes
-                    // (docs/adr/0028). The position is load-bearing:
-                    // ExpireUnpaidBookingsJob takes the same two locks, and two paths
-                    // taking them in different orders can deadlock; taken first, a
-                    // wait on it holds no row lock, so MarkTransactionSucceededHandler
-                    // - which takes the row lock and no advisory lock - never queues
-                    // behind an initiation. The advisory lock exists because
-                    // initiation, in Transactions, cannot take a row lock on this
-                    // table.
-                    if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
-                    {
-                        await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
-                            AdvisoryLock.AcquireExclusiveSql,
-                            new { LockKey = BookingPaymentLock.KeyFor(request.BookingId) },
-                            transaction,
-                            cancellationToken: token));
-                    }
+                    // Advisory lock, booking row, hold, transaction row (docs/adr/0028).
+                    await connection.ExecuteAsync(new CommandDefinition(
+                        AdvisoryLock.AcquireExclusiveSql,
+                        new { LockKey = BookingPaymentLock.KeyFor(request.BookingId) },
+                        transaction,
+                        cancellationToken: token));
 
-                    // The booking row before the hold and before the transaction row,
-                    // matching MarkTransactionSucceededHandler; the reverse order
-                    // deadlocks against a concurrent payment.
-                    //
-                    // The id through Dapper, then the entity through EF. A FromSqlRaw
-                    // over `SELECT *` fails: EF composes a projection asking for
-                    // "TotalPrice_Amount", a column the snake_case convention never
-                    // produces for the complex Money property.
-                    //
-                    // FOR UPDATE rather than SKIP LOCKED: a caller is waiting and must
-                    // see the committed outcome.
-                    if (dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
-                    {
-                        DbConnection connection = dbContext.Database.GetDbConnection();
+                    // FOR UPDATE, not SKIP LOCKED: the caller waits for the committed outcome.
+                    await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
+                        """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE""",
+                        new { request.BookingId },
+                        transaction,
+                        cancellationToken: token));
 
-                        await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
-                            """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE""",
-                            new { request.BookingId },
-                            transaction,
-                            cancellationToken: token));
-                    }
+                    Booking locked = await dbContext.Bookings.SingleOrDefaultAsync(b => b.Id == request.BookingId, token)
+                                     ?? throw new NotFoundException(nameof(Booking), request.BookingId);
 
-                    // Re-read under the lock: the instance BookingAccessChecker
-                    // returned predates the transaction, and on a retry may describe a
-                    // state a previous attempt changed.
-                    Booking? locked = await dbContext.Bookings
-                        .SingleOrDefaultAsync(b => b.Id == request.BookingId, token);
-
-                    if (locked is null)
-                    {
-                        throw new NotFoundException(nameof(Booking), request.BookingId);
-                    }
-
-                    // Already cancelled under the lock means an earlier attempt of this
-                    // request committed and lost its acknowledgement, so this is
-                    // success, not a conflict.
+                    // Already cancelled under the lock: this request's earlier attempt committed (docs/adr/0025).
                     if (locked.BookingStatus == BookingStatus.Cancelled)
                     {
                         return locked;
@@ -153,9 +93,6 @@ public class CancelBookingHandler(
                     DateTimeOffset cancelledAt = timeProvider.GetUtcNow();
                     locked.Cancel(cancelledAt);
 
-                    // The refund obligation, committed with the cancellation. It says
-                    // nothing about whether a payment exists; the resolver below
-                    // decides that (docs/adr/0027).
                     dbContext.RefundObligations.Add(new RefundObligation
                     {
                         BookingId = locked.Id,
@@ -167,91 +104,48 @@ public class CancelBookingHandler(
                     });
 
                     await holdConfirmation.ReleaseHoldAsync(locked.HoldId, token);
-
                     await dbContext.SaveChangesAsync(token);
-
-                    // The promo code goes back with the room.
                     await promotionRedemption.ReverseRedemptionAsync(locked.Id, token);
 
-                    // Reads the obligation saved above. Records the refund decision
-                    // locally - RefundPending and the obligation's ResolvedAt - and
-                    // moves no money; a provider call, when one exists, must not run
-                    // inside this scope. With no payment it records nothing, and the
-                    // obligation waits for a late one.
+                    // Records the refund decision locally; no provider call may run inside the scope (docs/adr/0027).
                     await transactionReversal.ResolveRefundAsync(locked.Id, token);
 
                     return locked;
                 },
                 cancellationToken);
 
-            // One observation of the payment, from committed state. Two reads could
-            // straddle a Succeeded -> RefundPending transition made by a payment or
-            // the sweep and describe a state that never existed.
-            PaymentStateSnapshot? payment =
-                await transactionReversal.GetPaymentStateAsync(cancelled.Id, cancellationToken);
-
-            if (payment?.RefundAmount is { } recorded)
-            {
-                return BuildResponse(
-                    cancelled,
-                    recorded.Amount,
-                    recorded.Currency,
-                    payment.Amount.Amount == 0m ? null : recorded.Amount / payment.Amount.Amount * 100m,
-                    payment.RefundStatus);
-            }
-
-            if (payment is not { AwaitingRefund: true })
-            {
-                // No payment: no refund. Reporting the policy figure would promise
-                // money to every guest who cancels an unpaid booking.
-                return BuildResponse(
-                    cancelled, refundAmount: null, currency: null, refundPercent: null, RefundStatus.None);
-            }
-
-            return await BuildPendingRefundResponseAsync(cancelled, payment, cancellationToken);
+            return await BuildResponseAsync(cancelled, cancellationToken);
         }
 
-        // A re-cancel reports state settled by an earlier request, from the same
-        // single observation.
-        PaymentStateSnapshot? paymentState =
-            await transactionReversal.GetPaymentStateAsync(booking.Id, cancellationToken);
+        return await BuildResponseAsync(booking, cancellationToken);
+    }
 
-        if (paymentState?.RefundAmount is { } settledRefund)
+    // One read of the payment, so the report cannot straddle a Succeeded -> RefundPending transition.
+    private async Task<CancelBookingResponse> BuildResponseAsync(Booking booking, CancellationToken cancellationToken)
+    {
+        PaymentStateSnapshot? payment = await transactionReversal.GetPaymentStateAsync(booking.Id, cancellationToken);
+
+        if (payment?.RefundAmount is { } recorded)
         {
-            // Transaction.Create forbids a zero amount, but that rule lives in
-            // another module and decimal division by zero throws; a null percent
-            // beside a real amount is the answer if it ever changes.
-            decimal? refundPercent = paymentState.Amount.Amount == 0m
-                ? null
-                : settledRefund.Amount / paymentState.Amount.Amount * 100m;
-
-            return BuildResponse(
-                booking, settledRefund.Amount, settledRefund.Currency,
-                refundPercent, paymentState.RefundStatus);
+            return BuildResponse(booking, recorded.Amount, recorded.Currency, PercentOf(recorded, payment.Amount), payment.RefundStatus);
         }
 
-        if (paymentState is not { AwaitingRefund: true })
+        if (payment is not { AwaitingRefund: true })
         {
             return BuildResponse(booking, refundAmount: null, currency: null, refundPercent: null, RefundStatus.None);
         }
 
-        return await BuildPendingRefundResponseAsync(booking, paymentState, cancellationToken);
+        return await BuildPendingRefundResponseAsync(booking, payment, cancellationToken);
     }
 
-    /// <summary>
-    ///     A refund owed and not yet recorded, reported at the amount the resolver
-    ///     will record: RefundDecision over the committed obligation
-    ///     (docs/adr/0027). Guest policy enters only as the obligation's amount.
-    /// </summary>
+    // A refund owed and not yet recorded, at the amount the resolver will record (docs/adr/0027).
     private async Task<CancelBookingResponse> BuildPendingRefundResponseAsync(
         Booking booking, PaymentStateSnapshot payment, CancellationToken cancellationToken)
     {
         RefundObligation? obligation = await dbContext.RefundObligations.AsNoTracking()
             .SingleOrDefaultAsync(o => o.BookingId == booking.Id, cancellationToken);
 
-        // No obligation means no cancellation explains the payment - unreachable
-        // for a booking either cancelling path cancelled. Reported as what then
-        // happens to it: a payment against a cancelled booking is refunded in full.
+        // No obligation: nothing cancelled explains the payment, so it is refunded in full.
         Money amount = obligation is null
             ? payment.Amount
             : RefundDecision.For(
@@ -260,26 +154,16 @@ public class CancelBookingHandler(
                 obligation.CancelledAt,
                 Money.Of(obligation.PolicyRefundAmount, obligation.Currency)).Amount;
 
-        // The same ratio the settled branch reports, so a pending figure and the
-        // refund it becomes agree on percent too.
-        decimal? percent = payment.Amount.Amount == 0m ? null : amount.Amount / payment.Amount.Amount * 100m;
-
-        return BuildResponse(booking, amount.Amount, amount.Currency, percent, RefundStatus.Pending);
+        return BuildResponse(booking, amount.Amount, amount.Currency, PercentOf(amount, payment.Amount), RefundStatus.Pending);
     }
 
-    /// <summary>
-    ///     The second factor on the destructive action - see
-    ///     CancelBookingRequest.GuestEmail for why it exists and why it does
-    ///     not apply to account holders.
-    /// </summary>
+    private static decimal? PercentOf(Money refund, Money paid) =>
+        paid.Amount == 0m ? null : refund.Amount / paid.Amount * 100m;
+
+    // The second factor for management-link access; see CancelBookingRequest.GuestEmail.
     private static void RequireGuestEmailForLinkAccess(BookingAccess access, string? supplied)
     {
-        if (access.Kind != BookingAccessKind.Link)
-        {
-            return;
-        }
-
-        if (CancellationGuestEmail.Matches(supplied, access.Booking.GuestEmail))
+        if (access.Kind != BookingAccessKind.Link || CancellationGuestEmail.Matches(supplied, access.Booking.GuestEmail))
         {
             return;
         }
