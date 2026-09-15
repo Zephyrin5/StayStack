@@ -41,7 +41,6 @@ public static class TransactionsServicesRegistration
         services.AddAtomicParticipant<AppTransactionsDbContext>(AtomicParticipants.Transactions);
 
         services.AddScoped<ITransactionReversal, TransactionReversal>();
-        services.AddScoped<ITransactionLookup, TransactionLookup>();
 
         return services;
     }

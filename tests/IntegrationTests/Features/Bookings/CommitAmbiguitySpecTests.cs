@@ -278,7 +278,6 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
             scope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.IAtomicScope>(),
             new ReleaseHoldThenFail(scope.ServiceProvider.GetRequiredService<IHoldConfirmation>()),
             scope.ServiceProvider.GetRequiredService<global::Promotions.Contracts.IPromotionRedemption>(),
-            scope.ServiceProvider.GetRequiredService<global::Transactions.Contracts.ITransactionLookup>(),
             timeProvider,
             NullLogger<ExpireUnpaidBookingsJob>.Instance);
 

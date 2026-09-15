@@ -7,7 +7,6 @@ using System.Data.Common;
 using Microsoft.Extensions.Logging;
 using BuildingBlocks.Persistence;
 using Promotions.Contracts;
-using Transactions.Contracts;
 using TickerQ.Utilities.Base;
 using TickerQ.Utilities.Models;
 namespace Bookings.Jobs;
@@ -33,7 +32,6 @@ public partial class ExpireUnpaidBookingsJob(
     IAtomicScope atomicScope,
     IHoldConfirmation holdConfirmation,
     IPromotionRedemption promotionRedemption,
-    ITransactionLookup transactionLookup,
     TimeProvider timeProvider,
     ILogger<ExpireUnpaidBookingsJob> logger)
 {
@@ -94,7 +92,7 @@ public partial class ExpireUnpaidBookingsJob(
     {
         bool expired = await atomicScope.ExecuteAsync(
             AtomicParticipants.Bookings,
-            AtomicParticipants.Bookings | AtomicParticipants.Transactions | AtomicParticipants.Promotions,
+            AtomicParticipants.Bookings | AtomicParticipants.Promotions,
             async token =>
             {
                 DbTransaction transaction = dbContext.Database.CurrentTransaction!.GetDbTransaction();
@@ -152,22 +150,13 @@ public partial class ExpireUnpaidBookingsJob(
 
                 // Re-checked under the lock rather than trusted from the scan: a payment
                 // can confirm the booking in between, and expiring it would take a paid
-                // stay away and hand the range to someone else.
+                // stay away and hand the range to someone else. Payment success confirms
+                // the booking in the commit that marks the payment Succeeded, under this
+                // row lock, so Pending here means no payment has succeeded.
                 if (booking.BookingStatus != BookingStatus.Pending
                     || booking.PaymentDueAt is null
                     || booking.PaymentDueAt > timeProvider.GetUtcNow())
                 {
-                    return false;
-                }
-
-                // A succeeded payment against a booking still Pending (docs/adr/0020).
-                // MarkTransactionSucceededHandler confirms the booking in the commit
-                // that marks its payment Succeeded, under this booking's row lock, so
-                // this is not expected to match; it is kept as the ADR records it.
-                // Read on this scope's connection, after the row lock.
-                if (await transactionLookup.HasSucceededPaymentAsync(booking.Id, token))
-                {
-                    LogPaidButUnconfirmed(logger, booking.Id);
                     return false;
                 }
 
@@ -177,7 +166,7 @@ public partial class ExpireUnpaidBookingsJob(
                 DateTimeOffset cancelledAt = timeProvider.GetUtcNow();
                 booking.Cancel(cancelledAt);
 
-                // A refund obligation on every expiry, so a payment resolving after
+                // A refund obligation on every expiry, so a payment succeeding after
                 // this commit has a refund path (docs/adr/0027). On the ordinary path
                 // there is no payment and the resolver records nothing.
                 //
@@ -214,10 +203,6 @@ public partial class ExpireUnpaidBookingsJob(
     [LoggerMessage(LogLevel.Information,
         "Expired unpaid booking {BookingId}; its hold was released and any promo redemption reversed")]
     private static partial void LogExpired(ILogger logger, Guid bookingId);
-
-    [LoggerMessage(LogLevel.Warning,
-        "Booking {BookingId} is past its payment deadline but has a succeeded payment, so it was left alone. Payment success confirms the booking in the same commit, so this needs a look")]
-    private static partial void LogPaidButUnconfirmed(ILogger logger, Guid bookingId);
 
     [LoggerMessage(LogLevel.Error,
         "Failed to expire unpaid booking {BookingId}; the batch continued and the next run will retry it. A row failing every run is holding inventory and needs a look")]

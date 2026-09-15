@@ -100,7 +100,6 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
             scope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.IAtomicScope>(),
             scope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
             scope.ServiceProvider.GetRequiredService<global::Promotions.Contracts.IPromotionRedemption>(),
-            scope.ServiceProvider.GetRequiredService<ITransactionLookup>(),
             timeProvider,
             NullLogger<ExpireUnpaidBookingsJob>.Instance);
     }
@@ -235,108 +234,6 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         // Assert
         Assert.Equal(BookingStatus.Confirmed, await GetBookingStatusAsync(bookingId));
         Assert.Equal("booked", await GetHoldStatusAsync(holdId));
-    }
-
-    [Fact]
-    public async Task APendingBookingWithASucceededPayment_IsNotExpired()
-    {
-        // The state docs/adr/0020's payment check guards: a Succeeded payment
-        // behind a booking still Pending with a lapsed PaymentDueAt, which is
-        // precisely what the scan looks for. MarkTransactionSucceededHandler
-        // confirms the booking in the commit that marks the payment Succeeded,
-        // so the state is seeded directly.
-        //
-        // The re-check under the row lock does not help. It re-reads the same
-        // Bookings rows, and no Bookings row knows about the payment.
-        // Arrange
-        Unit unit = CreateTestUnit();
-        await SeedCatalogAsync(unit);
-
-        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(47));
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-
-        Guid holdId = await SeedHoldAsync(unit.Id, checkIn, checkIn.AddDays(2), "pending_payment");
-        Guid bookingId = await SeedBookingAsync(unit.Id, holdId, now.AddMinutes(-1));
-
-        // The payment, committed on the Transactions side alone.
-        using (IServiceScope paymentScope = factory.Services.CreateScope())
-        {
-            AppTransactionsDbContext transactions =
-                paymentScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
-
-            Transaction payment = Transaction.Create(Guid.CreateVersion7(), bookingId, Money.Of(200m, Currency.KWD));
-            payment.MarkSucceeded(DateTimeOffset.UtcNow);
-            transactions.Transactions.Add(payment);
-            await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
-        }
-
-        // The booking is untouched by that - which is the point.
-        Assert.Equal(BookingStatus.Pending, await GetBookingStatusAsync(bookingId));
-
-        using IServiceScope scope = factory.Services.CreateScope();
-        ExpireUnpaidBookingsJob job = CreateJob(scope, At(now));
-
-        // Act
-        await job.ExpireAsync(null!, TestContext.Current.CancellationToken);
-
-        // Assert - neither half of the expiry ran. Both matter: cancelling
-        // loses the stay, and releasing the hold hands the range to somebody
-        // else, which is what makes the loss unrecoverable.
-        Assert.Equal(BookingStatus.Pending, await GetBookingStatusAsync(bookingId));
-        Assert.Equal("pending_payment", await GetHoldStatusAsync(holdId));
-
-        // And a confirmation still lands correctly afterwards. Without this the
-        // test would prove only that the booking survived one sweep, not that
-        // the payment can still buy the stay it paid for.
-        using (IServiceScope confirmScope = factory.Services.CreateScope())
-        {
-            Assert.True(await ConfirmPaymentAsync(confirmScope, bookingId, TestContext.Current.CancellationToken));
-        }
-
-        Assert.Equal(BookingStatus.Confirmed, await GetBookingStatusAsync(bookingId));
-        Assert.Equal("booked", await GetHoldStatusAsync(holdId));
-    }
-
-    [Fact]
-    public async Task ABookingWhosePaymentWasRefunded_IsExpirableAgain()
-    {
-        // The other edge of the same check, and the reason it tests Succeeded
-        // rather than "has a transaction". A payment that was taken and then
-        // given back leaves nothing outstanding, so the deadline applies again
-        // - a check written as "any transaction exists" would block this
-        // booking's inventory forever.
-        // Arrange
-        Unit unit = CreateTestUnit();
-        await SeedCatalogAsync(unit);
-
-        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(48));
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-
-        Guid holdId = await SeedHoldAsync(unit.Id, checkIn, checkIn.AddDays(2), "pending_payment");
-        Guid bookingId = await SeedBookingAsync(unit.Id, holdId, now.AddMinutes(-1));
-
-        using (IServiceScope paymentScope = factory.Services.CreateScope())
-        {
-            AppTransactionsDbContext transactions =
-                paymentScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
-
-            Transaction payment = Transaction.Create(Guid.CreateVersion7(), bookingId, Money.Of(200m, Currency.KWD));
-            payment.MarkSucceeded(DateTimeOffset.UtcNow);
-            payment.MarkRefundPending(Money.Of(200m, Currency.KWD), RefundCause.GuestCancellation);
-            payment.MarkRefunded();
-            transactions.Transactions.Add(payment);
-            await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
-        }
-
-        using IServiceScope scope = factory.Services.CreateScope();
-        ExpireUnpaidBookingsJob job = CreateJob(scope, At(now));
-
-        // Act
-        await job.ExpireAsync(null!, TestContext.Current.CancellationToken);
-
-        // Assert
-        Assert.Equal(BookingStatus.Cancelled, await GetBookingStatusAsync(bookingId));
-        Assert.Equal("held", await GetHoldStatusAsync(holdId));
     }
 
     [Fact]

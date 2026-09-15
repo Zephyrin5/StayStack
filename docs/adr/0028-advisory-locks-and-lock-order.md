@@ -24,7 +24,7 @@ Several pairs of operations must exclude each other but share no row to lock: on
 
 **Advisory lock, then the booking row lock, then the hold, then the transaction row, then the refund obligation.**
 
-Cancellation, expiry and payment success each run as one atomic scope spanning Bookings, Transactions and Promotions (docs/design/transaction-ownership.md), so every lock a workflow takes is held until its single commit, across modules. The order is derived over the merged scopes:
+Cancellation, expiry and payment success each run as one atomic scope across the modules they touch - Bookings with Transactions, Promotions or both (docs/extraction-inventory.md), so every lock a workflow takes is held until its single commit, across modules. The order is derived over the merged scopes:
 
 - Two paths take both `BookingPaymentLock` and the booking's `FOR UPDATE` row lock - cancellation and expiry - so they take them in one order. Advisory first also means a path waiting on it holds no row lock while it waits, so payment success, which takes the row lock and no advisory lock, never queues behind an unrelated initiation.
 - Booking before hold: payment success (`BookingPaymentConfirmation`) locks the booking and then marks the hold paid, so cancellation locks the booking before releasing the hold. The reverse order deadlocks against a concurrent payment; `40P01` is retried, but only by redoing the whole scope under contention.

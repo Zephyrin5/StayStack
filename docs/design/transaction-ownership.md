@@ -45,7 +45,7 @@ What each transaction site became. "Calls out while holding" meant it resolved a
 | `PromotionRedemption.RedeemAsync` | no | participant (Stage 4) |
 | `PromotionRedemption.ReverseRedemptionAsync` | inside an outbox claim | participant (Stage 5) |
 | `CancelBookingHandler` | no; dispatched after commit | scope owner: Bookings; Transactions, Promotions (Stage 5) |
-| `ExpireUnpaidBookingsJob` | yes, the payment lookup under the row lock | scope owner: Bookings; Transactions, Promotions (Stage 5) |
+| `ExpireUnpaidBookingsJob` | yes, the payment lookup under the row lock | scope owner: Bookings; Promotions (Stage 5). The payment lookup was later deleted: payment success confirms the booking in the same commit, so a booking still `Pending` under the lock has no succeeded payment |
 | `BookingPaymentConfirmation` | no | participant (Stage 5) |
 | `MarkTransactionSucceededHandler` | save plus outbox row, then dispatch | scope owner: Transactions; Bookings (Stage 5) |
 | `TransactionReversal` | two separate commits | participant; owned by `ResolveOutstandingRefundsJob`'s scope in the sweep (Stage 5) |

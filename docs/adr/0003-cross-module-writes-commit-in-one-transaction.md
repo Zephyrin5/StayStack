@@ -9,7 +9,7 @@ This is a modular monolith: each module (Identity, Catalog, Hosts, Promotions, B
 - **Becoming a host** (`BecomeHostHandler`): registers a `Host` (Hosts) and links it to the caller's account (Identity).
 - **Confirming a booking** (`ConfirmBookingHandler`): claims the hold and writes the `Booking` (Bookings), redeeming a promotion (Promotions) on the way.
 - **A payment succeeding** (`MarkTransactionSucceededHandler`): marks the `Transaction` succeeded (Transactions) and confirms the `Booking` (Bookings), or refunds the payment if the booking can no longer use it.
-- **Cancelling or expiring a booking**: cancels the `Booking` and releases its hold (Bookings), records any refund (Transactions), and reverses any redemption (Promotions).
+- **Cancelling or expiring a booking**: cancels the `Booking` and releases its hold (Bookings) and reverses any redemption (Promotions); a guest cancellation also records any refund (Transactions).
 
 Each module's writes going through its own context on its own connection made every one of these several commits. The design that answered that - compensating actions delivered by a transactional outbox, durable intent records for forward calls, and reconcile jobs over both - carried 22 distinct recovery states, and the outbox relay held a claim transaction while its handlers opened a second module's connection. At `MaxPoolSize=5`, 20 concurrent payment successes stalled for 15-46 s on pool exhaustion (docs/design/transaction-ownership.md, Stage 0).
 
