@@ -350,10 +350,8 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
     public async Task ReleasingAClaimedHold_Works_WhichIsWhatEveryCompensationDependsOn()
     {
         // ReleaseHoldAsync must match 'pending_payment'. Matching 'booked'
-        // alone would turn every compensating release (ConfirmBookingHandler's
-        // failure paths, ReconcileOrphanedBookingIntentsJob,
-        // CancelBookingHandler, this expiry job) into a silent zero-row no-op
-        // that strands the hold. Nothing about that failure is loud.
+        // alone would turn every release (CancelBookingHandler, this expiry
+        // job) into a silent zero-row no-op that strands the hold. Nothing about that failure is loud.
         // Arrange
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);

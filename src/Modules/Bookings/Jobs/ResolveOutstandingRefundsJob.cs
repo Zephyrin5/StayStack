@@ -11,9 +11,8 @@ namespace Bookings.Jobs;
 ///     <para>
 ///         This makes the refund independent of message ordering. The outbox
 ///         messages that usually trigger resolution are latency optimisations
-///         over this sweep - the same relationship PendingBookingIntent has with
-///         its reconciler (docs/adr/0017) - so any interleaving in which no
-///         message resolves an obligation ends here (docs/adr/0027).
+///         over this sweep, so any interleaving in which no message resolves an
+///         obligation ends here (docs/adr/0027).
 ///     </para>
 ///     <para>
 ///         Lives in Bookings because the obligations are Bookings' rows. It

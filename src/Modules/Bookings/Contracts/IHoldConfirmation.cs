@@ -39,8 +39,7 @@ public interface IHoldConfirmation
     ///     back to 'held' with hold_expires_at reset to now, so the ordinary
     ///     expiry sweep reclaims it immediately rather than after whatever
     ///     was left on its original 15-minute window. Used by
-    ///     CancelBookingHandler, ReconcileOrphanedBookingIntentsJob, and the
-    ///     unpaid-booking expiry job. Best-effort/idempotent: a no-op if the hold is in neither
+    ///     CancelBookingHandler and the unpaid-booking expiry job. Best-effort/idempotent: a no-op if the hold is in neither
     ///     state (already released, or never existed).
     /// </summary>
     Task ReleaseHoldAsync(Guid holdId, CancellationToken cancellationToken);

@@ -2,10 +2,10 @@ using Outbox;
 using SeedWork.Enums;
 namespace Bookings.Outbox;
 
-// Shared by CancelBookingHandler (all three, as the follow-up to a durable
-// cancel) and ConfirmBookingHandler (ReleaseHold/ReverseRedemption only, as
-// the compensation when its own booking-save or promo-redemption fails) -
-// see docs/adr/0003.
+// CancelBookingHandler enqueues ReverseTransaction and ReverseRedemption after
+// a durable cancel; ExpireUnpaidBookingsJob enqueues ReverseRedemption. Nothing
+// enqueues ReleaseHold; the dispatcher still delivers it, and it goes with the
+// outbox - see docs/adr/0003.
 //
 // Each TypeName below is persisted into rows that outlive the deployment that
 // wrote them. Renaming one of these records is free; changing its TypeName

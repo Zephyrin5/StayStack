@@ -153,18 +153,13 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
     }
 
     [Fact]
-    public async Task AHoldTransitionWhoseTransactionFailsBeforeCommitting_LeavesNoHoldMovedWithoutAMarker()
+    public async Task AHoldTransitionWhoseTransactionFailsBeforeCommitting_LeavesNoHoldMovedWithoutABooking()
     {
-        // The marker and the transition must agree. A hold left
-        // pending_payment with no intent and no booking is invisible to every
-        // recovery path: nothing releases it and nothing knows it exists.
-        //
-        // Note what this test does NOT pin down: which of the two outcomes
-        // occurs. Rolling the transition back and recording a recoverable
-        // marker are both correct answers; leaving a hold moved with no marker
-        // is the only wrong one. Asserting the two agree is therefore the
-        // whole specification, and it holds regardless of where in the
-        // sequence the failure lands.
+        // The booking and the transition must agree. A hold left
+        // pending_payment with no booking is invisible to every recovery path:
+        // nothing releases it and nothing knows it exists. Asserting the two
+        // agree is the whole specification, and it holds regardless of where in
+        // the sequence the failure lands.
         Unit unit = CreateTestUnit();
         await SeedCatalogAsync(unit);
 
@@ -188,8 +183,8 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
         }, TestContext.Current.CancellationToken);
 
         // Assert - whatever the outcome, the system must still be able to
-        // reach that hold. Either the transition did not stick, or something
-        // durable points at it.
+        // reach that hold. Either the transition did not stick, or a booking
+        // points at it.
         using IServiceScope scope = factory.Services.CreateScope();
         AppBookingsDbContext availability = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
         AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
@@ -199,21 +194,19 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
 
         bool holdMoved = hold.Status == "pending_payment";
 
-        bool recoverable =
-            await bookings.Bookings.AsNoTracking().AnyAsync(b => b.HoldId == holdId, TestContext.Current.CancellationToken)
-            || await bookings.PendingBookingIntents.AsNoTracking().AnyAsync(i => i.HoldId == holdId, TestContext.Current.CancellationToken);
+        bool booked =
+            await bookings.Bookings.AsNoTracking().AnyAsync(b => b.HoldId == holdId, TestContext.Current.CancellationToken);
 
-        // Biconditional, not implication. "Moved implies recoverable" alone
-        // would also be satisfied by a handler that wrote an intent for a hold
-        // it never touched - a marker aimed at nothing, which the reconcile job
-        // would act on by releasing a hold that was never claimed.
+        // Biconditional, not implication. "Moved implies booked" alone would
+        // also be satisfied by a booking committed over a hold still 'held' -
+        // inventory sold that anyone else can hold again.
         Assert.True(
-            holdMoved == recoverable,
+            holdMoved == booked,
             holdMoved
-                ? "A hold left in pending_payment must have either a booking or an intent pointing at it. " +
+                ? "A hold left in pending_payment must have a booking pointing at it. " +
                   "Without one, the unit is held for a checkout nobody can find and nothing will release."
-                : "A hold that was rolled back to 'held' must leave no intent behind. " +
-                  "An intent pointing at an unclaimed hold makes the reconcile job release inventory that was never taken.");
+                : "A hold that was rolled back to 'held' must have no booking. " +
+                  "A booking over an unclaimed hold is inventory anyone can hold again.");
     }
 
     // ---- 2: inventory released, then the expiry rolls back ---------------

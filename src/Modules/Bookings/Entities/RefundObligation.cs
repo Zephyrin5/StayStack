@@ -6,11 +6,9 @@ namespace Bookings.Entities;
 ///     A durable record that a cancelled booking owes a refund, written in the
 ///     same transaction as the cancellation itself.
 ///     <para>
-///         Persistence-layer construct, not a Domain aggregate - the same
-///         reasoning as PendingBookingIntent, and the same relationship to its
-///         resolver as an intent has to its reconciler: the row is the work
-///         item, and the outbox message that usually carries it is a latency
-///         optimisation over the job that sweeps for unresolved ones.
+///         Persistence-layer construct, not a Domain aggregate: the row is the
+///         work item, and the outbox message that usually carries it is a
+///         latency optimisation over the job that sweeps for unresolved ones.
 ///     </para>
 ///     <para>
 ///         The cancellation decides nothing about payments. It records that a

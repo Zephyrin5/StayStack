@@ -9,7 +9,6 @@ public class AppBookingsDbContext(DbContextOptions<AppBookingsDbContext> options
 {
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<BookingManagementToken> BookingManagementTokens => Set<BookingManagementToken>();
-    public DbSet<PendingBookingIntent> PendingBookingIntents => Set<PendingBookingIntent>();
     public DbSet<CheckoutIdempotencyRecord> CheckoutIdempotencyRecords => Set<CheckoutIdempotencyRecord>();
     public DbSet<RefundObligation> RefundObligations => Set<RefundObligation>();
 
@@ -36,7 +35,6 @@ public class AppBookingsDbContext(DbContextOptions<AppBookingsDbContext> options
 
         modelBuilder.ApplyConfiguration(new BookingConfiguration());
         modelBuilder.ApplyConfiguration(new BookingManagementTokenConfiguration());
-        modelBuilder.ApplyConfiguration(new PendingBookingIntentConfiguration());
         modelBuilder.ApplyConfiguration(new CheckoutIdempotencyRecordConfiguration());
         modelBuilder.ApplyConfiguration(new RefundObligationConfiguration());
 

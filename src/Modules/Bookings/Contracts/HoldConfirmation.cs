@@ -223,8 +223,8 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
     {
         // Same open/close symmetry as ConfirmHoldAsync above. This is the one
         // most often called from a background scope - ExpireUnpaidBookingsJob
-        // and ReconcileOrphanedBookingIntentsJob release holds - where an
-        // unreturned connection would be held for the whole run.
+        // releases holds - where an unreturned connection would be held for the
+        // whole run.
         DbConnection connection = dbContext.Database.GetDbConnection();
         bool openedHere = connection.State != ConnectionState.Open;
         if (openedHere)
@@ -236,11 +236,10 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
         // holds at once instead of for whatever was left on the original timer,
         // and the row is immediately eligible for cleanup.
         //
-        // Matches both post-checkout states. Every caller is a compensation or
-        // cancellation (ReconcileOrphanedBookingIntentsJob, CancelBookingHandler,
-        // the expiry job), and most act on a 'pending_payment' hold; matching
-        // 'booked' alone would make each a silent zero-row no-op that strands the
-        // hold. 'held' is excluded: no booking stands behind a 'held' hold, so no
+        // Matches both post-checkout states. Every caller is a cancellation
+        // (CancelBookingHandler, the expiry job), and most act on a
+        // 'pending_payment' hold; matching 'booked' alone would make each a
+        // silent zero-row no-op that strands the hold. 'held' is excluded: no booking stands behind a 'held' hold, so no
         // caller has a claim on one.
         const string sql = $"""
                             UPDATE unit_availability_holds

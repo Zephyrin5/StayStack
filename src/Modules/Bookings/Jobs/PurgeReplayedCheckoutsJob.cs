@@ -12,24 +12,10 @@ namespace Bookings.Jobs;
 ///     passed.
 ///     <para>
 ///         Cleanup, not enforcement - ReplayAsync rejects an expired record
-///         on the request path, so a stopped or misconfigured job can no
-///         longer extend the window. What this removes is the stored
-///         credential itself, and unlike most retention sweeps that is not
-///         about table size. A completed
-///         record holds a guest's management token in plaintext - the single
-///         deliberate exception to the hash-only rule these tokens otherwise
-///         follow - so rows left behind are live credentials readable long
-///         after anything can use them.
-///     </para>
-///     <para>
-///         Incomplete records are left alone. Those belong to confirmations
-///         still in flight or crashed, and
-///         <see cref="ReconcileOrphanedBookingIntentsJob"/> owns them - it
-///         removes the reservation as part of unwinding the attempt, on the
-///         intent's own grace period, which is far shorter than this window.
-///         Deleting them here on a 24-hour clock would race that job for no
-///         benefit, and a record deleted out from under a live request would
-///         free a key that request is still using.
+///         on the request path, so a stopped or misconfigured job cannot
+///         extend the window. A record stores no credential (see
+///         <see cref="CheckoutIdempotencyRecord"/>), so what this bounds is
+///         the table's size.
 ///     </para>
 /// </summary>
 public class PurgeReplayedCheckoutsJob(
@@ -42,10 +28,8 @@ public class PurgeReplayedCheckoutsJob(
                                     WHERE completed_at IS NOT NULL AND completed_at <= @Cutoff;
                                     """;
 
-    // Hourly rather than daily, which is the cadence the other retention
-    // sweeps use. The difference is what is being retained: a daily sweep
-    // would leave a token readable for up to 24 hours past the window it was
-    // promised for, doubling the worst-case exposure to buy nothing.
+    // Hourly. ReplayAsync enforces the window, so the cadence only bounds how
+    // long expired rows linger.
     [TickerFunction(functionName: "Bookings.PurgeReplayedCheckouts", cronExpression: "20 * * * *")]
     public async Task PurgeAsync(TickerFunctionContext context, CancellationToken cancellationToken)
     {

@@ -288,11 +288,6 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
         // Neither is the key itself - only its hash - so a database reader
         // cannot replay other people's checkouts either.
         Assert.DoesNotContain(key, record.KeyHash, StringComparison.Ordinal);
-
-        // And the intent is gone: the two rows have deliberately different
-        // endings.
-        Assert.False(await context.PendingBookingIntents.AsNoTracking()
-            .AnyAsync(i => i.Id == created.BookingId, TestContext.Current.CancellationToken));
     }
 
     [Fact]
