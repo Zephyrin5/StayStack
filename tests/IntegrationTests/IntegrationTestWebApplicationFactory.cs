@@ -2,6 +2,7 @@ using Bookings;
 using Catalog;
 using Hosts;
 using Identity;
+using IntegrationTests.Measurements;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -26,10 +27,21 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
         .WithPassword("postgres")
         .Build();
 
+    private IdleInTransactionProbe? _idleInTransactionProbe;
+
+    public string ConnectionString => _dbContainer.GetConnectionString();
+
     public async ValueTask InitializeAsync()
     {
         await _dbContainer.StartAsync();
         await MigrateAllModulesAsync();
+
+        // Stage 0 measurement only; off unless an output file is named.
+        if (Environment.GetEnvironmentVariable("STAYSTACK_IDLE_TX_PROBE") is { Length: > 0 } probeOutput)
+        {
+            _idleInTransactionProbe = new IdleInTransactionProbe(_dbContainer.GetConnectionString(), probeOutput);
+            _idleInTransactionProbe.Start();
+        }
 
         // The administrator these tests sign in as, created here so the
         // credential lives for one run in one throwaway database. See
@@ -47,6 +59,11 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
         // DisposeAsync would stop the container without ever disposing the
         // host.
         await base.DisposeAsync();
+        if (_idleInTransactionProbe is not null)
+        {
+            await _idleInTransactionProbe.DisposeAsync();
+        }
+
         await _dbContainer.StopAsync();
         GC.SuppressFinalize(this);
     }
