@@ -1,6 +1,7 @@
 // Proves two confirmations for one hold leave exactly one booking (an unforced race), and that
-// two confirmations under one idempotency key get "in progress" or a completed replay, each pinned
-// by a barrier. Not verified by breaking the mechanisms.
+// a second confirmation under the same idempotency key replays the first's booking with a usable
+// token, whether it waits on the first's open transaction or arrives after the first commits; each
+// interleaving is pinned by a barrier. Not verified by breaking the mechanisms.
 using Bookings;
 using Bookings.Contracts;
 using Bookings.Features.CreateBookingSession;
@@ -12,19 +13,17 @@ using Catalog.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SeedWork.ValueObjects;
+using Npgsql;
 using System.Net;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Bookings;
 
 // Which arbiter decides a race for one hold.
 //
-// ExecuteConfirmAsync is a conditional UPDATE - WHERE status = 'held' - so it
-// is already an exactly-one-winner compare-and-set on the contended row. It
-// only gets to act as one if it runs before the intent insert; with the insert
-// first, the intent's unique index on hold_id decided races instead, and the
-// loser was told "a confirmation for this hold is already in progress" after a
-// recovery path dated another request's intent against a grace period to work
-// out which of three situations it was in.
+// ConfirmHoldAsync is a conditional UPDATE - WHERE status = 'held' - so it is an
+// exactly-one-winner compare-and-set on the contended row. A loser that reaches
+// it while the winner's transaction is open waits on the row lock, then matches
+// nothing once the winner commits.
 [Collection("Integration Tests")]
 public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory)
 {
@@ -131,10 +130,6 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
 
         Assert.Equal(1, await bookings.Bookings.AsNoTracking()
             .CountAsync(b => b.HoldId == holdId, TestContext.Current.CancellationToken));
-
-        // And the loser left nothing behind for the reconcile job to find.
-        Assert.Equal(0, await bookings.PendingBookingIntents.AsNoTracking()
-            .CountAsync(i => i.HoldId == holdId, TestContext.Current.CancellationToken));
     }
 
     // Two confirmations under one idempotency key, split into two tests
@@ -147,14 +142,9 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
     // Pauses a confirmation *before* it attempts the hold - after its
     // top-of-handler idempotency read has already missed.
     //
-    // The pause is deliberately on the second request rather than the first.
-    // Holding the first one open with its transaction still live also works to
-    // make the second miss its read, but the second then unblocks the instant
-    // the first commits its *first* transaction - so it finds the reservation
-    // with completed_at still null and is correctly told "in progress", which
-    // is the other test. Pausing the reader instead lets the winner finish
-    // entirely, which is the only way to reach the completed-replay branch
-    // deterministically.
+    // The pause is on the second request rather than the first, so the winner
+    // commits before the second reaches the hold at all. Pausing the winner
+    // instead is the other test: the second then waits on its row lock.
     private sealed class PauseBeforeConfirmingHold(
         IHoldConfirmation inner, TaskCompletionSource gate, TaskCompletionSource reached) : IHoldConfirmation
     {
@@ -165,9 +155,6 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
             return await inner.ConfirmHoldAsync(holdId, cancellationToken);
         }
 
-        public Task<ConfirmedHold?> GetConfirmedHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
-            inner.GetConfirmedHoldAsync(holdId, cancellationToken);
-
         public Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken) =>
             inner.MarkHoldPaidAsync(holdId, cancellationToken);
 
@@ -175,9 +162,8 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
             inner.ReleaseHoldAsync(holdId, cancellationToken);
     }
 
-    // Pauses the first confirmation *after* its first transaction has
-    // committed, so its idempotency record exists with completed_at still null
-    // - the only window in which "still in progress" is the right answer.
+    // Pauses the first confirmation after it has claimed the hold, with its
+    // transaction still open.
     private sealed class PauseBeforeBuildingTheBooking(
         IUnitLookup inner, TaskCompletionSource gate, TaskCompletionSource reached) : IUnitLookup
     {
@@ -209,9 +195,9 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
             new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
 
     [Fact]
-    public async Task ASecondConfirmationWhileTheFirstIsStillRunning_IsToldItIsInProgress()
+    public async Task ASecondConfirmationWhileTheFirstIsStillRunning_WaitsForItAndReplaysItsBooking()
     {
-        // Never 404. Both attempts are the same logical checkout, so the loser
+        // Never 404. Both attempts are the same logical checkout, so the second
         // must be answered as a repeat - not "that hold is gone", which reports
         // failure for a checkout that is succeeding. See docs/adr/0022.
         Guid holdId = await SeedHeldUnitAsync(daysUntilCheckIn: 16);
@@ -232,15 +218,66 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
         Task<HttpResponseMessage> first = SendConfirmAsync(paused, request, key);
         await reached.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
-        // The reservation is committed with completed_at null. This is the
-        // whole window the "in progress" answer exists for.
-        HttpResponseMessage second = await ConfirmAsync(request, key);
-
-        Assert.NotEqual(HttpStatusCode.NotFound, second.StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+        // The first holds the hold's row lock with nothing committed, so the
+        // second misses its idempotency read and blocks in ConfirmHoldAsync.
+        Task<HttpResponseMessage> second = ConfirmAsync(request, key);
+        await WaitUntilAHoldTransitionIsWaitingOnALockAsync();
 
         gate.SetResult();
-        Assert.Equal(HttpStatusCode.OK, (await first).StatusCode);
+
+        HttpResponseMessage winner = await first;
+        HttpResponseMessage repeat = await second;
+
+        Assert.Equal(HttpStatusCode.OK, winner.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, repeat.StatusCode);
+
+        ConfirmBookingResponse? original = await winner.Content
+            .ReadFromJsonAsync<ConfirmBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        ConfirmBookingResponse? replayed = await repeat.Content
+            .ReadFromJsonAsync<ConfirmBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(original);
+        Assert.NotNull(replayed);
+        Assert.Equal(original.BookingId, replayed.BookingId);
+
+        HttpResponseMessage exchange = await factory.CreateClient().PostAsJsonAsync(
+            $"/api/bookings/{replayed.BookingId}/manage/session",
+            new CreateBookingSessionRequest
+            {
+                BookingId = replayed.BookingId,
+                ManagementToken = replayed.ManagementToken!
+            }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, exchange.StatusCode);
+    }
+
+    // The barrier for the blocked side: Postgres reports the waiting statement,
+    // so the test proceeds only once the second request is parked on the
+    // first's row lock rather than after a guessed delay.
+    private async Task WaitUntilAHoldTransitionIsWaitingOnALockAsync()
+    {
+        await using NpgsqlConnection connection = new NpgsqlConnection(factory.ConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+
+        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+
+        while (true)
+        {
+            await using NpgsqlCommand command = new NpgsqlCommand(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_stat_activity
+                    WHERE wait_event_type = 'Lock' AND query LIKE '%UPDATE unit_availability_holds%')
+                """, connection);
+
+            if ((bool)(await command.ExecuteScalarAsync(timeout.Token))!)
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(20), timeout.Token);
+        }
     }
 
     [Fact]
@@ -255,11 +292,10 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
         // that read has missed and before it touches the hold, while the winner
         // runs to completion beside it.
         //
-        // Released, it walks into the recovery: the hold is gone, the intent
-        // under its own booking id does not exist, and the key resolves to a
-        // completed record. Replaying with that transaction still open would
-        // return a 200 and a real booking with a management token whose hash row
-        // rolls back on the way out - a credential that fails at first use.
+        // Released, it finds the hold gone and the key resolved to a completed
+        // record. Replaying with its own transaction still open would return a
+        // 200 and a real booking with a management token whose hash row rolls
+        // back on the way out - a credential that fails at first use.
         Guid holdId = await SeedHeldUnitAsync(daysUntilCheckIn: 17);
         ConfirmBookingRequest request = RequestFor(holdId);
         string key = Guid.NewGuid().ToString();

@@ -19,13 +19,9 @@ namespace Bookings.Entities;
 ///         stops being true when payment is wired up.
 ///     </para>
 ///     <para>
-///         Shaped after <see cref="PendingBookingIntent"/> - a row written
-///         before the work, keyed by the same pre-generated booking id,
-///         resolved by the same transaction that finishes the work. The
-///         difference is what happens at the end: an intent is deleted,
-///         because it carries nothing <c>Booking</c> does not already record.
-///         This row has to survive, because it carries the one thing that
-///         exists nowhere else once the response is lost.
+///         Written in the same atomic scope as the booking, keyed by its
+///         pre-generated id. It outlives the checkout because it carries the
+///         one thing that exists nowhere else once the response is lost.
 ///     </para>
 ///     <para>
 ///         It stores no credential. Replay mints a fresh management token and
@@ -46,10 +42,7 @@ namespace Bookings.Entities;
 public sealed class CheckoutIdempotencyRecord
 {
     /// <summary>
-    ///     The pre-generated booking id, exactly as
-    ///     <see cref="PendingBookingIntent.Id"/> is - so the reconcile job and
-    ///     the compensating paths can resolve this row without a second
-    ///     lookup, using the id they already hold.
+    ///     The pre-generated id of the booking this record replays.
     /// </summary>
     public Guid BookingId { get; set; }
 
@@ -80,11 +73,8 @@ public sealed class CheckoutIdempotencyRecord
     public DateTimeOffset CreatedAt { get; set; }
 
     /// <summary>
-    ///     Null while the confirmation is in flight. Set in the same
-    ///     transaction that inserts the <c>Booking</c>, so it is true if and
-    ///     only if there is a booking to replay - the same
-    ///     present-iff-committed property the intent gained when the hold
-    ///     transition joined its transaction.
+    ///     When the confirmation committed. Written with the <c>Booking</c>, so
+    ///     never null on a committed row; the purge job scans by it.
     /// </summary>
     public DateTimeOffset? CompletedAt { get; set; }
 

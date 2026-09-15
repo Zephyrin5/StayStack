@@ -145,9 +145,6 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
             throw new InvalidOperationException("Failure after the hold transition was written, before the commit.");
         }
 
-        public Task<ConfirmedHold?> GetConfirmedHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
-            inner.GetConfirmedHoldAsync(holdId, cancellationToken);
-
         public Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken) =>
             inner.MarkHoldPaidAsync(holdId, cancellationToken);
 
@@ -231,9 +228,6 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
     {
         public Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
             inner.ConfirmHoldAsync(holdId, cancellationToken);
-
-        public Task<ConfirmedHold?> GetConfirmedHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
-            inner.GetConfirmedHoldAsync(holdId, cancellationToken);
 
         public Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken) =>
             inner.MarkHoldPaidAsync(holdId, cancellationToken);

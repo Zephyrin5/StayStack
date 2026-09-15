@@ -35,9 +35,6 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
         public Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Availability is unreachable.");
 
-        public Task<ConfirmedHold?> GetConfirmedHoldAsync(Guid holdId, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("Availability is unreachable.");
-
         public Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Availability is unreachable.");
 
@@ -175,42 +172,6 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
     }
 
     [Fact]
-    public async Task ConfirmBooking_OnSuccess_LeavesNoIntentBehind()
-    {
-        Unit unit = await SeedUnitAsync();
-        Guid holdId = await HoldUnitAsync(unit.Id);
-
-        HttpResponseMessage response = await _client.PostAsJsonAsync(
-            "/api/bookings", CreateRequest(holdId), TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        // The row exists only while the work is in flight - a surviving one
-        // would be reconciled later and release the hold under a live booking.
-        Assert.Null(await GetIntentAsync(holdId));
-    }
-
-    [Fact]
-    public async Task ConfirmBooking_WhenHoldAlreadyConsumed_LeavesNoIntentBehind()
-    {
-        // The ordinary-exception path that has no compensation to run:
-        // ConfirmHoldAsync rejects an already-booked hold outright. Without
-        // the try/catch around that first call, this request's intent would
-        // sit until the grace period elapsed and the job released a hold that
-        // nothing was wrong with.
-        Unit unit = await SeedUnitAsync();
-        Guid holdId = await HoldUnitAsync(unit.Id);
-
-        Assert.Equal(HttpStatusCode.OK, (await _client.PostAsJsonAsync(
-            "/api/bookings", CreateRequest(holdId), TestContext.Current.CancellationToken)).StatusCode);
-
-        HttpResponseMessage second = await _client.PostAsJsonAsync(
-            "/api/bookings", CreateRequest(holdId), TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.NotFound, second.StatusCode);
-        Assert.Null(await GetIntentAsync(holdId));
-    }
-
-    [Fact]
     public async Task ReconcileAsync_ReleasesHoldAndDeletesIntent_ForAnAbandonedConfirmation()
     {
         // The crash this whole design exists for: the hold is 'booked' and no
@@ -282,152 +243,6 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
     }
 
     [Fact]
-    public async Task ConfirmBooking_WhileAnotherConfirmationHoldsTheIntent_Returns409()
-    {
-        // The unique index on hold_id keeps a second intent for one hold from
-        // surviving; the reconcile job releases the hold behind any intent past
-        // its grace period, and would release it under a live request.
-        //
-        // The state seeded below - a live intent for a hold that is back to
-        // 'held' - is not how a losing race looks (the conditional UPDATE
-        // settles those, and the loser gets 404). It is what CompensateAsync
-        // leaves between releasing a hold and discarding its intent: a real
-        // window, and a retryable one.
-        Unit unit = await SeedUnitAsync();
-        Guid holdId = await HoldUnitAsync(unit.Id);
-
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            AppBookingsDbContext bookingsDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
-            bookingsDb.PendingBookingIntents.Add(new PendingBookingIntent
-            {
-                Id = Guid.CreateVersion7(),
-                HoldId = holdId,
-                CreatedAt = DateTimeOffset.UtcNow
-            });
-            await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
-        }
-
-        HttpResponseMessage response = await _client.PostAsJsonAsync(
-            "/api/bookings", CreateRequest(holdId), TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-
-        // The hold is untouched. It is reached now - the UPDATE runs first
-        // and moves it - but the intent collision rolls the whole transaction
-        // back, which takes the transition with it. That is the property worth
-        // asserting either way: a refused confirmation must not consume the
-        // hold it refused.
-        Assert.Equal("held", await GetHoldStatusAsync(holdId));
-    }
-
-    [Fact]
-    public async Task ConfirmBooking_WhenTheJobReconcilesMidRequest_Returns409_AndWritesNoBooking()
-    {
-        // The race the whole design turns on. Nothing in ConfirmBookingHandler
-        // re-validates the hold after ConfirmHoldAsync, so a job firing
-        // mid-request releases a genuinely-'booked' hold while the request
-        // goes on to insert a confirmed Booking anyway - leaving that booking
-        // backed by a hold anyone can re-book. No grace period fixes this;
-        // only the success-path delete does, because it rides in the same
-        // transaction as the Booking insert and EF asserts its affected-row
-        // count.
-        Unit unit = await SeedUnitAsync();
-        Guid holdId = await HoldUnitAsync(unit.Id, dayOffset: 80);
-
-        HttpClient client = CreateClientWithSeam(async _ =>
-        {
-            // Stands in for the reconcile job winning: the intent is gone by
-            // the time the handler's final save runs. A second scope, because
-            // the handler's own DbContext must not see this coming.
-            using IServiceScope scope = factory.Services.CreateScope();
-            AppBookingsDbContext db = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
-            await db.PendingBookingIntents.Where(i => i.HoldId == holdId).ExecuteDeleteAsync();
-        });
-
-        HttpResponseMessage response = await client.PostAsJsonAsync(
-            "/api/bookings", CreateRequest(holdId), TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-
-        using IServiceScope assertScope = factory.Services.CreateScope();
-        AppBookingsDbContext bookingsDb = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
-        Assert.False(
-            await bookingsDb.Bookings.AnyAsync(b => b.HoldId == holdId, TestContext.Current.CancellationToken),
-            "A Booking was written even though the intent had already been reconciled - the structural guarantee is not holding.");
-    }
-
-    [Fact]
-    public async Task ConfirmBooking_WhenTheBookingAlreadyCommitted_ReturnsSuccess_AndCompensatesNothing()
-    {
-        // The committed-but-unacknowledged retry. SaveChangesAsync runs under
-        // EnableRetryOnFailure, and an execution strategy cannot tell a failed
-        // transaction from one that committed and lost its acknowledgement -
-        // it re-runs the batch, which then fails against its own rows.
-        // Simulated by committing a Booking under the intent's own Id (which
-        // *is* the bookingId) just before the handler's save.
-        //
-        // Without the verify step the handler would compensate a live booking:
-        // hold released back to immediately-re-bookable, redemption reversed,
-        // and a 500 for a booking that actually succeeded.
-        Unit unit = await SeedUnitAsync();
-        Guid holdId = await HoldUnitAsync(unit.Id, dayOffset: 100);
-
-        HttpClient client = CreateClientWithSeam(async _ =>
-        {
-            using IServiceScope scope = factory.Services.CreateScope();
-            AppBookingsDbContext db = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
-
-            PendingBookingIntent intent = await db.PendingBookingIntents.AsNoTracking()
-                .SingleAsync(i => i.HoldId == holdId);
-
-            // A deliberately distinguishable guest count and price, so the
-            // assertions below can tell "returned the already-committed row"
-            // apart from "created its own" - otherwise this test would pass
-            // just as happily if the seam never fired.
-            DateOnly checkIn = CatalogSeeding.Today().AddDays(100);
-            db.Bookings.Add(Booking.Create(
-                intent.Id, unit.Id, holdId, null,
-                "Committed By Retry", "jane@example.com", null,
-                checkIn, checkIn.AddDays(3), 1,
-                Money.Of(999m, Currency.KWD), Money.Of(999m, Currency.KWD), CancellationPolicy.CreateDefault(), "Asia/Kuwait", DateTimeOffset.UtcNow.AddMinutes(30)));
-            await db.SaveChangesAsync();
-        });
-
-        HttpResponseMessage response = await client.PostAsJsonAsync(
-            "/api/bookings", CreateRequest(holdId), TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        ConfirmBookingResponse? result = await response.Content.ReadFromJsonAsync<ConfirmBookingResponse>(
-            TestJsonOptions.Default, TestContext.Current.CancellationToken);
-        Assert.NotNull(result);
-
-        // The already-committed row's own figures, not a freshly-created
-        // booking's - this is what proves the verify query drove the outcome.
-        Assert.Equal(999m, result.TotalPrice);
-
-        // The hold stays claimed - compensation must not have run. (A
-        // released hold would read 'held' with its timer reset.)
-        Assert.Equal("pending_payment", await GetHoldStatusAsync(holdId));
-
-        using IServiceScope assertScope = factory.Services.CreateScope();
-        AppBookingsDbContext bookingsDb = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
-        Booking persisted = await bookingsDb.Bookings.AsNoTracking()
-            .SingleAsync(b => b.HoldId == holdId, TestContext.Current.CancellationToken);
-        Assert.Equal("Committed By Retry", persisted.GuestName);
-        Assert.Null(await GetIntentAsync(holdId));
-        Assert.False(
-            await bookingsDb.BookingsOutboxMessages.AnyAsync(
-                // global:: qualified - this file's own namespace
-                // (IntegrationTests.Features.Bookings) otherwise shadows the
-                // Bookings module's, the same collision UserManagementTests
-                // documents at its namespace declaration.
-                m => m.Type == nameof(global::Bookings.Outbox.ReleaseHoldOutboxMessage) && m.Payload.Contains(holdId.ToString()),
-                TestContext.Current.CancellationToken),
-            "A compensating release was queued for a booking that actually committed.");
-    }
-
-    [Fact]
     public async Task ReconcileAsync_WhenTheReleaseFails_LeavesTheIntentForTheNextRun()
     {
         // The claim must share a fate with the work it authorises. If the
@@ -471,38 +286,5 @@ public class PendingBookingIntentTests(IntegrationTestWebApplicationFactory fact
         await job.ReconcileAsync(null!, TestContext.Current.CancellationToken);
 
         Assert.NotNull(await GetIntentAsync(holdId));
-    }
-
-    [Fact]
-    public async Task ConfirmBooking_ConcurrentRequestsForTheSameHold_ExactlyOneSucceeds()
-    {
-        Unit unit = await SeedUnitAsync();
-        Guid holdId = await HoldUnitAsync(unit.Id);
-
-        const int concurrentRequests = 6;
-        Task<HttpResponseMessage>[] tasks =
-        [
-            .. Enumerable.Range(0, concurrentRequests)
-                .Select(_ => factory.CreateClient().PostAsJsonAsync(
-                    "/api/bookings", CreateRequest(holdId), TestContext.Current.CancellationToken))
-        ];
-
-        HttpResponseMessage[] responses = await Task.WhenAll(tasks);
-
-        Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
-
-        // The losers are rejected, never silently duplicated. Both shapes are
-        // correct: 409 when the intent insert lost the race, 404 when this one
-        // got far enough to find the hold already consumed.
-        Assert.All(
-            responses.Where(r => r.StatusCode != HttpStatusCode.OK),
-            r => Assert.Contains(r.StatusCode, new[] { HttpStatusCode.Conflict, HttpStatusCode.NotFound }));
-
-        using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext bookingsDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
-        int bookingCount = await bookingsDb.Bookings.CountAsync(
-            b => b.HoldId == holdId, TestContext.Current.CancellationToken);
-        Assert.Equal(1, bookingCount);
-        Assert.Null(await GetIntentAsync(holdId));
     }
 }

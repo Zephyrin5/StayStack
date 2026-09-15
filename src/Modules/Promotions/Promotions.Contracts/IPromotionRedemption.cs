@@ -21,6 +21,12 @@ public interface IPromotionRedemption
     ///     typing into. subtotal is the amount the discount applies against -
     ///     the caller decides whether that includes or excludes any
     ///     length-of-stay discount (see ConfirmBookingHandler).
+    ///     <para>
+    ///         Runs only inside the caller's atomic scope, with Promotions
+    ///         participating: the redemption commits with the booking it
+    ///         discounts or not at all. Throws InvalidOperationException
+    ///         outside one.
+    ///     </para>
     /// </summary>
     Task<PromotionRedemptionResult> RedeemAsync(
         string code,
@@ -28,6 +34,7 @@ public interface IPromotionRedemption
         string guestEmail,
         Money subtotal,
         Guid bookingId,
+        Guid redemptionId,
         CancellationToken cancellationToken);
 
     /// <summary>

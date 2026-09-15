@@ -1,6 +1,7 @@
-// Proves a confirmation whose booking-insert commit loses its acknowledgement (FailAfterCommit)
-// returns the committed booking. With the read-back recovery disabled it answers 500; a recovery
-// returning a different management token is caught only by the session exchange assertion.
+// Proves a confirmation whose commit loses its acknowledgement (FailAfterCommit) returns the
+// committed booking with a working management token, and that a discounted one counts its
+// promotion once. Verified by disabling the committed-booking lookup: both fail. A recovery returning a
+// different management token is caught only by the session exchange assertion.
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
@@ -11,17 +12,20 @@ using Catalog.Entities;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Promotions;
+using Promotions.Entities;
+using Promotions.Enums;
 using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Bookings;
 
-// ConfirmBookingHandler's recovery for a booking insert that committed and lost
-// its acknowledgement.
+// ConfirmBookingHandler's recovery for a confirmation that committed and lost its
+// acknowledgement.
 //
 // The booking id and the management token's plaintext are chosen before the
-// insert, so a retry that collides on the booking's primary key can read the
-// committed booking back and answer with it. The assertion that matters is the
+// atomic scope, so a retry finds the committed booking by id and answers with
+// it. The assertion that matters is the
 // token: a recovery that returns a 200 and a real booking id with a token whose
 // hash row rolled back hands out a credential that fails at first use, and a
 // test asserting only the status and id passes over that. This one uses the
@@ -67,8 +71,8 @@ public class ConfirmRetryTests(IntegrationTestWebApplicationFactory factory)
     {
         Guid holdId = await HoldAUnitAsync(daysUntilCheckIn: 150);
 
-        // After the commit that inserts the booking for this hold - the second of
-        // the confirmation's two commits, not the one that claims the hold.
+        // After the confirmation's one commit, which claims the hold and inserts
+        // the booking together.
         CommitFault<AppBookingsDbContext> lostAck = CommitFaults.FailAfterCommit<AppBookingsDbContext>(context =>
             context.ChangeTracker.Entries<Booking>().Any(e => e.Entity.HoldId == holdId));
 
@@ -91,13 +95,10 @@ public class ConfirmRetryTests(IntegrationTestWebApplicationFactory factory)
         {
             AppBookingsDbContext db = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
 
-            // One booking, the one returned; its intent gone; the hold claimed.
+            // One booking, the one returned; the hold claimed.
             Booking booking = Assert.Single(await db.Bookings.AsNoTracking()
                 .Where(b => b.HoldId == holdId).ToListAsync(TestContext.Current.CancellationToken));
             Assert.Equal(confirmed.BookingId, booking.Id);
-
-            Assert.False(await db.PendingBookingIntents.AsNoTracking()
-                .AnyAsync(i => i.HoldId == holdId, TestContext.Current.CancellationToken));
 
             Assert.Equal("pending_payment", (await db.UnitAvailabilityHolds.AsNoTracking()
                 .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken)).Status);
@@ -107,6 +108,76 @@ public class ConfirmRetryTests(IntegrationTestWebApplicationFactory factory)
         }
 
         // The one that matters: the token opens a session.
+        HttpResponseMessage exchange = await factory.CreateClient().PostAsJsonAsync(
+            $"/api/bookings/{confirmed.BookingId}/manage/session",
+            new CreateBookingSessionRequest { BookingId = confirmed.BookingId, ManagementToken = confirmed.ManagementToken },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, exchange.StatusCode);
+    }
+
+    [Fact]
+    public async Task ADiscountedConfirmationWhoseCommitLosesItsAcknowledgement_CountsItsRedemptionOnce()
+    {
+        // The retry re-runs the whole scope against a database that already holds
+        // this checkout's redemption. It must return the booking rather than meet
+        // its own redemption on the one-per-email index, and must not count a
+        // second slot.
+        Promotion promotion = Promotion.CreatePlatformPromotion(
+            Guid.CreateVersion7(),
+            $"RETRY{Guid.NewGuid():N}"[..12].ToUpperInvariant(),
+            PromotionDiscountType.Percentage,
+            10m,
+            null,
+            expiresAt: null,
+            maxRedemptions: null,
+            hostId: null);
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppPromotionsDbContext promotions = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+            promotions.Add(promotion);
+            await promotions.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        Guid holdId = await HoldAUnitAsync(daysUntilCheckIn: 151);
+
+        CommitFault<AppBookingsDbContext> lostAck = CommitFaults.FailAfterCommit<AppBookingsDbContext>(context =>
+            context.ChangeTracker.Entries<Booking>().Any(e => e.Entity.HoldId == holdId));
+
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
+
+        HttpResponseMessage response = await host.CreateClient().PostAsJsonAsync("/api/bookings",
+            new ConfirmBookingRequest
+            {
+                HoldId = holdId,
+                GuestName = "Jane Guest",
+                GuestEmail = "jane@example.com",
+                PromoCode = promotion.Code
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the confirmation.");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        ConfirmBookingResponse? confirmed = await response.Content
+            .ReadFromJsonAsync<ConfirmBookingResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(confirmed?.ManagementToken);
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            Booking booking = Assert.Single(await bookings.Bookings.AsNoTracking()
+                .Where(b => b.HoldId == holdId).ToListAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(confirmed.BookingId, booking.Id);
+
+            AppPromotionsDbContext promotions = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+            Assert.Single(await promotions.PromotionRedemptions.AsNoTracking()
+                .Where(r => r.BookingId == booking.Id).ToListAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(1, (await promotions.Promotions.AsNoTracking()
+                .SingleAsync(p => p.Id == promotion.Id, TestContext.Current.CancellationToken)).RedemptionCount);
+        }
+
         HttpResponseMessage exchange = await factory.CreateClient().PostAsJsonAsync(
             $"/api/bookings/{confirmed.BookingId}/manage/session",
             new CreateBookingSessionRequest { BookingId = confirmed.BookingId, ManagementToken = confirmed.ManagementToken },

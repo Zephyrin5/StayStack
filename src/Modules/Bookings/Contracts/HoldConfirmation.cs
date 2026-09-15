@@ -167,43 +167,6 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
         };
     }
 
-    public async Task<ConfirmedHold?> GetConfirmedHoldAsync(Guid holdId, CancellationToken cancellationToken)
-    {
-        DbConnection connection = dbContext.Database.GetDbConnection();
-        bool openedHere = connection.State != ConnectionState.Open;
-        if (openedHere)
-        {
-            await dbContext.Database.OpenConnectionAsync(cancellationToken);
-        }
-
-        try
-        {
-            // Deliberately no expiry check, unlike ConfirmHoldAsync's WHERE.
-            // A hold in 'pending_payment' has already been sold into a
-            // checkout; hold_expires_at stopped governing it at that
-            // transition, and the payment deadline on the Booking governs it
-            // now. Reading one back is not re-confirming it.
-            const string sql = $"""
-                                SELECT {HoldProjection}
-                                FROM unit_availability_holds
-                                WHERE id = @HoldId AND status = '{HoldStatuses.PendingPayment}';
-                                """;
-
-            ConfirmedHoldRow? row = await connection.QuerySingleOrDefaultAsync<ConfirmedHoldRow>(
-                new CommandDefinition(sql, new { HoldId = holdId },
-                    AmbientTransaction, cancellationToken: cancellationToken));
-
-            return row is null ? null : MapConfirmedHold(row);
-        }
-        finally
-        {
-            if (openedHere)
-            {
-                await dbContext.Database.CloseConnectionAsync();
-            }
-        }
-    }
-
     public async Task<bool> MarkHoldPaidAsync(Guid holdId, CancellationToken cancellationToken)
     {
         DbConnection connection = dbContext.Database.GetDbConnection();
@@ -274,12 +237,11 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
         // and the row is immediately eligible for cleanup.
         //
         // Matches both post-checkout states. Every caller is a compensation or
-        // cancellation (ConfirmBookingHandler's failure paths,
-        // ReconcileOrphanedBookingIntentsJob, CancelBookingHandler, the expiry
-        // job), and most act on a 'pending_payment' hold; matching 'booked'
-        // alone would make each a silent zero-row no-op that strands the hold.
-        // 'held' is deliberately excluded: ConfirmBookingHandler's second release
-        // is safe only because of it.
+        // cancellation (ReconcileOrphanedBookingIntentsJob, CancelBookingHandler,
+        // the expiry job), and most act on a 'pending_payment' hold; matching
+        // 'booked' alone would make each a silent zero-row no-op that strands the
+        // hold. 'held' is excluded: no booking stands behind a 'held' hold, so no
+        // caller has a claim on one.
         const string sql = $"""
                             UPDATE unit_availability_holds
                             SET status = '{HoldStatuses.Held}', hold_expires_at = @Now, booked_at = NULL

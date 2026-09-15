@@ -11,6 +11,7 @@ using Promotions.Enums;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using System.Data;
+using System.Data.Common;
 namespace Promotions.Contracts;
 
 // internal, same reasoning as Catalog.Contracts.HoldConfirmation - Bookings
@@ -26,6 +27,7 @@ internal class PromotionRedemption(
         string guestEmail,
         Money subtotal,
         Guid bookingId,
+        Guid redemptionId,
         CancellationToken cancellationToken)
     {
         string normalizedCode = code.Trim().ToUpperInvariant();
@@ -63,136 +65,102 @@ internal class PromotionRedemption(
 
         Money discountAmount = ComputeDiscountAmount(promotion, subtotal);
 
-        // Wrapped in the execution strategy, not called bare - same
-        // deadlock/retry reasoning as HoldAvailabilityHandler. Two
-        // statements share one transaction here (the redemption-cap
-        // increment and the PromotionRedemption insert) so a unique-email
-        // violation on the insert rolls back the increment too - a
-        // rejected duplicate attempt never burns a redemption slot.
-        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
+        // The caller's atomic scope owns the transaction: the cap increment and the
+        // insert below commit with the booking they discount, or not at all
+        // (ConfirmBookingHandler). A rejected duplicate therefore never burns a
+        // redemption slot, and nothing here commits, rolls back or retries.
+        DbTransaction transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction()
+                                    ?? throw new InvalidOperationException(
+                                        $"{nameof(PromotionRedemption)}.{nameof(RedeemAsync)} must run inside the caller's " +
+                                        "atomic scope: a redemption committed on its own survives the checkout it discounts failing.");
+        IDbConnection connection = dbContext.Database.GetDbConnection();
 
-        // Chosen outside the retry, so a retry can recognise its own committed
-        // redemption (docs/adr/0025).
-        Guid redemptionId = Guid.CreateVersion7();
+        // Every condition that decides whether this redemption is LEGAL
+        // lives in this one predicate, evaluated against the row this
+        // statement locks - not against the snapshot read above.
+        //
+        // The cap was always here, because a count obviously races. Expiry
+        // and archival race in exactly the same shape for two different
+        // reasons: expires_at is mutable (Promotion.SetExpiresAt), and it is
+        // also compared against a clock that keeps moving, so a code can lapse
+        // between the read and this write with nobody editing anything.
+        // Archival is the sharper of the two - the snapshot read goes through
+        // the soft-delete query filter, so a promotion deleted a moment later
+        // would still be redeemable without this predicate.
+        //
+        // status <> 2 is EntityStatus.Archived; Postgres only ever sees
+        // the stored int, same predicate PromotionConfiguration's partial
+        // unique index already uses.
+        //
+        // Host ownership is deliberately NOT here, and that is not an
+        // omission: Promotion.HostId is set in the constructor and has no
+        // mutator, so the value the snapshot read saw is the value this
+        // row will always have. There is nothing to race.
+        const string capSql = """
+                              UPDATE promotions
+                              SET redemption_count = redemption_count + 1
+                              WHERE id = @PromotionId
+                                AND status <> 2
+                                AND (expires_at IS NULL OR expires_at > @Now)
+                                AND (max_redemptions IS NULL OR redemption_count < max_redemptions);
+                              """;
 
-        await strategy.ExecuteAsync(async () =>
+        int rowsAffected = await connection.ExecuteAsync(new CommandDefinition(
+            capSql, new { PromotionId = promotion.Id, Now = timeProvider.GetUtcNow() },
+            transaction, cancellationToken: cancellationToken));
+
+        if (rowsAffected == 0)
         {
-            await using IDbContextTransaction transaction =
-                await dbContext.Database.BeginTransactionAsync(cancellationToken);
-            IDbConnection connection = dbContext.Database.GetDbConnection();
-
-            // An earlier attempt may already have committed and lost its
-            // acknowledgement. This lookup must run before the cap increment:
-            // the increment and the insert commit together, so finding the row
-            // means the slot was already counted, and running the increment again
-            // would burn a second slot or reject the guest's own redemption on the
-            // one-per-email index. It is the lookup, not idempotent writes, that
-            // makes the retry safe - neither the increment nor the insert is
-            // idempotent.
-            bool alreadyRedeemed = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
-                """SELECT EXISTS (SELECT 1 FROM promotion_redemptions WHERE id = @Id);""",
-                new { Id = redemptionId }, transaction.GetDbTransaction(), cancellationToken: cancellationToken));
-
-            if (alreadyRedeemed)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return;
-            }
-
-            // Every condition that decides whether this redemption is LEGAL
-            // lives in this one predicate, evaluated against the row this
-            // statement locks - not against the snapshot read above.
-            //
-            // The cap was always here, because a count obviously races. Expiry
-            // and archival were not, and they race in exactly the same shape
-            // for two different reasons: expires_at is mutable
-            // (Promotion.SetExpiresAt), and it is also compared against a
-            // clock that keeps moving, so a code can lapse between the read
-            // and this write with nobody editing anything. Archival is the
-            // sharper of the two - the snapshot read goes through the
-            // soft-delete query filter, so a promotion deleted a moment later
-            // was still redeemable here.
-            //
-            // status <> 2 is EntityStatus.Archived; Postgres only ever sees
-            // the stored int, same predicate PromotionConfiguration's partial
-            // unique index already uses.
-            //
-            // Host ownership is deliberately NOT here, and that is not an
-            // omission: Promotion.HostId is set in the constructor and has no
-            // mutator, so the value the snapshot read saw is the value this
-            // row will always have. There is nothing to race.
-            const string capSql = """
-                                  UPDATE promotions
-                                  SET redemption_count = redemption_count + 1
-                                  WHERE id = @PromotionId
-                                    AND status <> 2
-                                    AND (expires_at IS NULL OR expires_at > @Now)
-                                    AND (max_redemptions IS NULL OR redemption_count < max_redemptions);
-                                  """;
-
-            int rowsAffected = await connection.ExecuteAsync(new CommandDefinition(
-                capSql, new { PromotionId = promotion.Id, Now = timeProvider.GetUtcNow() },
-                transaction.GetDbTransaction(), cancellationToken: cancellationToken));
-
-            if (rowsAffected == 0)
-            {
-                // One predicate now covers three reasons, so the row is
-                // re-read to say which - a merged "this code isn't valid"
-                // would be a worse answer to a guest than the specific one
-                // they got before. Only ever runs on the failure path, and
-                // inside the same transaction, so it sees the same row the
-                // UPDATE just declined to touch.
-                PromotionStateRow? state = await connection.QuerySingleOrDefaultAsync<PromotionStateRow>(
-                    new CommandDefinition(
-                        """
-                        SELECT status AS "Status", expires_at AS "ExpiresAt",
-                               redemption_count AS "RedemptionCount", max_redemptions AS "MaxRedemptions"
-                        FROM promotions WHERE id = @PromotionId;
-                        """,
-                        new { PromotionId = promotion.Id }, transaction.GetDbTransaction(),
-                        cancellationToken: cancellationToken));
-
-                await transaction.RollbackAsync(cancellationToken);
-
-                throw new PromotionInvalidException(DescribeRejection(code, state));
-            }
-
-            const string insertSql = """
-                                     INSERT INTO promotion_redemptions (id, promotion_id, booking_id, guest_email, discount_amount, currency, redeemed_at)
-                                     VALUES (@Id, @PromotionId, @BookingId, @GuestEmail, @DiscountAmount, @Currency, @RedeemedAt);
-                                     """;
-
-            try
-            {
-                await connection.ExecuteAsync(new CommandDefinition(
-                    insertSql,
-                    new
-                    {
-                        Id = redemptionId,
-                        PromotionId = promotion.Id,
-                        BookingId = bookingId,
-                        GuestEmail = normalizedEmail,
-                        DiscountAmount = discountAmount.Amount,
-                        // The enum, not .ToString() - CurrencyTypeHandler
-                        // writes the character(3) code.
-                        discountAmount.Currency,
-                        RedeemedAt = timeProvider.GetUtcNow()
-                    },
-                    transaction.GetDbTransaction(),
+            // One predicate covers three reasons, so the row is re-read to say
+            // which - a merged "this code isn't valid" would be a worse answer to
+            // a guest. Only ever runs on the failure path, and inside the same
+            // transaction, so it sees the same row the UPDATE just declined to
+            // touch.
+            PromotionStateRow? state = await connection.QuerySingleOrDefaultAsync<PromotionStateRow>(
+                new CommandDefinition(
+                    """
+                    SELECT status AS "Status", expires_at AS "ExpiresAt",
+                           redemption_count AS "RedemptionCount", max_redemptions AS "MaxRedemptions"
+                    FROM promotions WHERE id = @PromotionId;
+                    """,
+                    new { PromotionId = promotion.Id }, transaction,
                     cancellationToken: cancellationToken));
-            }
-            catch (PostgresException ex) when (ex.IsViolationOf(PromotionRedemptionConfiguration.PromotionEmailIndex))
-            {
-                // The one-per-guest-email index rejected the insert - this
-                // guest already redeemed this code. Not classified as
-                // transient, so it propagates straight out of ExecuteAsync
-                // instead of being retried.
-                await transaction.RollbackAsync(cancellationToken);
-                throw new PromotionInvalidException($"Promo code '{code}' has already been used by this email address.");
-            }
 
-            await transaction.CommitAsync(cancellationToken);
-        });
+            throw new PromotionInvalidException(DescribeRejection(code, state));
+        }
+
+        const string insertSql = """
+                                 INSERT INTO promotion_redemptions (id, promotion_id, booking_id, guest_email, discount_amount, currency, redeemed_at)
+                                 VALUES (@Id, @PromotionId, @BookingId, @GuestEmail, @DiscountAmount, @Currency, @RedeemedAt);
+                                 """;
+
+        try
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                insertSql,
+                new
+                {
+                    Id = redemptionId,
+                    PromotionId = promotion.Id,
+                    BookingId = bookingId,
+                    GuestEmail = normalizedEmail,
+                    DiscountAmount = discountAmount.Amount,
+                    // The enum, not .ToString() - CurrencyTypeHandler
+                    // writes the character(3) code.
+                    discountAmount.Currency,
+                    RedeemedAt = timeProvider.GetUtcNow()
+                },
+                transaction,
+                cancellationToken: cancellationToken));
+        }
+        catch (PostgresException ex) when (ex.IsViolationOf(PromotionRedemptionConfiguration.PromotionEmailIndex))
+        {
+            // The one-per-guest-email index rejected the insert - this guest
+            // already redeemed this code. The failed statement aborted the
+            // transaction, so the caller's scope rolls back, cap increment
+            // included.
+            throw new PromotionInvalidException($"Promo code '{code}' has already been used by this email address.");
+        }
 
         return new PromotionRedemptionResult { RedemptionId = redemptionId, DiscountAmount = discountAmount };
     }

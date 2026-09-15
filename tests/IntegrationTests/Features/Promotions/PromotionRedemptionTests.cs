@@ -156,19 +156,12 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
     }
 
     [Fact]
-    public async Task ConfirmBooking_WhenTheCodeDoesNotBeatTheLengthOfStayDiscount_ReleasesTheHoldAndFreesTheDates()
+    public async Task ConfirmBooking_WhenTheCodeDoesNotBeatTheLengthOfStayDiscount_LeavesTheHoldAndTheCodeUnconsumed()
     {
-        // The compensation half of the "code doesn't beat the LoS discount"
-        // rejection. ConfirmHoldAsync has already moved the hold to
-        // 'pending_payment' by the time this branch rejects, so a 400 that
-        // reverses only the redemption would leave that row behind - and
-        // nothing would collect it: ExpiredHoldsSweepJob only deletes
-        // status = 'held', and the intent a reconcile job would work from is
-        // discarded on this very path.
-        //
-        // Asserting the hold row is not enough on its own, so this asserts
-        // the thing a guest would actually notice: the same range can be held
-        // again afterwards.
+        // The rejection comes after ConfirmHoldAsync has moved the hold and
+        // RedeemAsync has counted the redemption, so both writes exist when it
+        // throws. A refused checkout must consume neither: the hold stays
+        // claimable by the same guest, and the code's slot stays free.
         (_, string hostToken, Guid unitId) = await SeedHostWithUnitAsync(100m);
 
         // 3 nights at 100 = 300 subtotal, less a 20% LoS discount = 240 quoted.
@@ -177,7 +170,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         // 5% off the PRE-LoS subtotal is 285 - worse than the 240 already
         // quoted, so the code is rejected rather than silently burned.
         string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
-        await CreatePromotionAsync(hostToken, code, PromotionDiscountType.Percentage, 5m);
+        Guid promotionId = await CreatePromotionAsync(hostToken, code, PromotionDiscountType.Percentage, 5m);
 
         DateOnly checkIn = CatalogSeeding.Today().AddDays(40);
         DateOnly checkOut = checkIn.AddDays(3);
@@ -191,26 +184,22 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
             "provide additional savings",
             await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
 
-        // Back to 'held' and already expired - ReleaseHoldAsync resets
-        // hold_expires_at to now, which is what makes the row collectable.
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppBookingsDbContext availability =
-                scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
-            UnitAvailabilityHold hold = await availability.UnitAvailabilityHolds
-                .AsNoTracking()
-                .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
+            AppPromotionsDbContext promotions = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
 
-            Assert.Equal("held", hold.Status);
-            Assert.Null(hold.BookedAt);
+            Promotion promotion = await promotions.Promotions.AsNoTracking()
+                .SingleAsync(p => p.Id == promotionId, TestContext.Current.CancellationToken);
+            Assert.Equal(0, promotion.RedemptionCount);
+
+            Assert.False(await promotions.PromotionRedemptions.AsNoTracking()
+                .AnyAsync(r => r.PromotionId == promotionId, TestContext.Current.CancellationToken));
         }
 
-        // The property that actually matters to a guest: the dates are free.
-        // HoldAvailabilityHandler's per-unit cleanup DELETE removes the stale
-        // row before its INSERT, so this succeeds rather than hitting the
-        // exclusion constraint.
-        Guid secondHoldId = await HoldUnitAsync(unitId, checkIn, checkOut);
-        Assert.NotEqual(holdId, secondHoldId);
+        // The property that matters to the guest: the same hold, without the
+        // code, still books.
+        HttpResponseMessage withoutCode = await ConfirmBookingRawAsync(holdId, "guest@example.com", promoCode: null);
+        Assert.Equal(HttpStatusCode.OK, withoutCode.StatusCode);
     }
 
     private async Task<(Guid HostId, string HostToken, Guid UnitId)> SeedHostWithUnitAsync(

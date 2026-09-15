@@ -25,19 +25,6 @@ public interface IHoldConfirmation
     Task<ConfirmedHold> ConfirmHoldAsync(Guid holdId, CancellationToken cancellationToken);
 
     /// <summary>
-    ///     The snapshot <see cref="ConfirmHoldAsync"/> would have returned, for
-    ///     a hold already in 'pending_payment' - without transitioning
-    ///     anything. Null when the hold is in any other state.
-    ///     <para>
-    ///         For ConfirmBookingHandler's retry path: the hold transition and the
-    ///         PendingBookingIntent commit in one transaction, so finding its own
-    ///         intent proves the hold moved, and re-calling ConfirmHoldAsync
-    ///         would fail its status = 'held' guard.
-    ///     </para>
-    /// </summary>
-    Task<ConfirmedHold?> GetConfirmedHoldAsync(Guid holdId, CancellationToken cancellationToken);
-
-    /// <summary>
     ///     Completes the lifecycle on payment ('pending_payment' ->
     ///     'booked'), the one transition that turns a reservation into sold
     ///     inventory nothing reclaims on a timer. Returns false when no row
@@ -52,9 +39,8 @@ public interface IHoldConfirmation
     ///     back to 'held' with hold_expires_at reset to now, so the ordinary
     ///     expiry sweep reclaims it immediately rather than after whatever
     ///     was left on its original 15-minute window. Used by
-    ///     ConfirmBookingHandler's compensating paths, CancelBookingHandler,
-    ///     ReconcileOrphanedBookingIntentsJob, and the unpaid-booking expiry
-    ///     job. Best-effort/idempotent: a no-op if the hold is in neither
+    ///     CancelBookingHandler, ReconcileOrphanedBookingIntentsJob, and the
+    ///     unpaid-booking expiry job. Best-effort/idempotent: a no-op if the hold is in neither
     ///     state (already released, or never existed).
     /// </summary>
     Task ReleaseHoldAsync(Guid holdId, CancellationToken cancellationToken);

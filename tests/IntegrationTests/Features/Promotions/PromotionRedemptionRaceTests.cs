@@ -1,6 +1,7 @@
 // Proves redemption rejects a promotion that expires or is archived between snapshot and write,
 // placed there deterministically (an auto-advancing clock; an archive inside GetUnitAsync). Not
 // verified by breaking the mechanism.
+using BuildingBlocks.Persistence;
 using Catalog;
 using Catalog.Contracts;
 using Catalog.Entities;
@@ -19,11 +20,10 @@ using SeedWork.ValueObjects;
 namespace IntegrationTests.Features.Promotions;
 
 // RedeemAsync validates a promotion from a plain snapshot read, then enforces
-// the redemption cap atomically inside a transaction. Expiry and archival used
-// to be checked only in that snapshot, which left a window: a code could lapse
-// or be deleted between the read and the write, and still redeem.
-//
-// These drive that window deterministically rather than racing threads for it.
+// the redemption cap, expiry and archival in one conditional UPDATE. A code can
+// lapse or be deleted between the read and the write; these drive that window
+// deterministically rather than racing threads for it. RedeemAsync runs only
+// inside a caller's atomic scope, so each test opens one.
 [Collection("Integration Tests")]
 public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory factory)
 {
@@ -89,17 +89,18 @@ public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory f
 
         using IServiceScope scope = host.Services.CreateScope();
         IPromotionRedemption redemption = scope.ServiceProvider.GetRequiredService<IPromotionRedemption>();
+        IAtomicScope atomicScope = scope.ServiceProvider.GetRequiredService<IAtomicScope>();
 
         PromotionInvalidException exception = await Assert.ThrowsAsync<PromotionInvalidException>(() =>
-            redemption.RedeemAsync(
-                promotion.Code, Guid.NewGuid(), "guest@example.com",
-                Money.Of(200m, Currency.KWD), Guid.CreateVersion7(), TestContext.Current.CancellationToken));
+            atomicScope.ExecuteAsync(AtomicParticipants.Promotions, AtomicParticipants.Promotions, token =>
+                redemption.RedeemAsync(
+                    promotion.Code, Guid.NewGuid(), "guest@example.com",
+                    Money.Of(200m, Currency.KWD), Guid.CreateVersion7(), Guid.CreateVersion7(), token),
+                TestContext.Current.CancellationToken));
 
         Assert.Contains("has expired", exception.Message);
 
-        // The count must not have moved. A redemption rejected by the
-        // predicate has to leave no trace - if the UPDATE had matched and the
-        // rejection came later, the slot would be burned for nothing.
+        // The count must not have moved: a rejected redemption leaves no trace.
         await AssertRedemptionCountAsync(promotion.Id, expected: 0);
     }
 
@@ -109,14 +110,10 @@ public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory f
         // The archival half of the same window, driven through a real seam in
         // the production call order rather than simulated: for a host-scoped
         // promotion, RedeemAsync calls IUnitLookup.GetUnitAsync to check
-        // ownership *after* its snapshot read and *before* it opens the
-        // transaction. Archiving the promotion from inside that call is
+        // ownership *after* its snapshot read and *before* its conditional
+        // UPDATE. Archiving the promotion from inside that call is
         // exactly "a host deletes the code while a guest is checking out",
         // with the interleaving pinned instead of raced for.
-        //
-        // Under the previous predicate this redeemed successfully: the
-        // snapshot had already seen a live row, and the UPDATE had no status
-        // clause to notice otherwise.
         Property property = CatalogSeeding.CreateProperty();
         Unit unit = CatalogSeeding.CreateUnit(property);
         using (IServiceScope seedScope = factory.Services.CreateScope())
@@ -144,11 +141,14 @@ public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory f
 
         using IServiceScope scope = host.Services.CreateScope();
         IPromotionRedemption redemption = scope.ServiceProvider.GetRequiredService<IPromotionRedemption>();
+        IAtomicScope atomicScope = scope.ServiceProvider.GetRequiredService<IAtomicScope>();
 
         PromotionInvalidException exception = await Assert.ThrowsAsync<PromotionInvalidException>(() =>
-            redemption.RedeemAsync(
-                promotion.Code, unit.Id, "guest@example.com",
-                Money.Of(200m, Currency.KWD), Guid.CreateVersion7(), TestContext.Current.CancellationToken));
+            atomicScope.ExecuteAsync(AtomicParticipants.Promotions, AtomicParticipants.Promotions, token =>
+                redemption.RedeemAsync(
+                    promotion.Code, unit.Id, "guest@example.com",
+                    Money.Of(200m, Currency.KWD), Guid.CreateVersion7(), Guid.CreateVersion7(), token),
+                TestContext.Current.CancellationToken));
 
         // Reports "does not exist", matching what the snapshot read says for
         // an archived code - a caller should not be able to tell an archived

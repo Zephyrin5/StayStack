@@ -12,17 +12,16 @@ public class CheckoutIdempotencyRecordConfiguration : IEntityTypeConfiguration<C
         builder.HasKey(r => r.BookingId);
 
         // At most one record per key, and this is the concurrency control
-        // rather than a lookup optimisation. Two simultaneous requests
-        // carrying the same key both miss the replay read - it happens before
-        // either has written anything - so what separates them is this insert
-        // failing for the loser inside ConfirmBookingHandler's first
-        // transaction, before the hold is transitioned. Without it both would
-        // proceed and the second would fail confusingly on the consumed hold,
-        // reporting 404 for a checkout that had in fact succeeded.
+        // rather than a lookup optimisation. Two simultaneous requests carrying
+        // the same key both miss the replay read - it happens before either has
+        // written anything. For the same hold, the hold transition's row lock
+        // separates them. For different holds, this insert fails for the loser,
+        // and its atomic scope rolls its hold transition back with it, so one
+        // key never commits two bookings.
         //
-        // Plain, not partial: an unresolved record is deleted rather than
-        // flagged, so there is no resolved state to filter out. Named
-        // explicitly per ADR-0011's gotcha.
+        // Plain, not partial: a record is only ever written with its booking,
+        // so there is no unresolved state to filter out. Named explicitly per
+        // ADR-0011's gotcha.
         builder.HasIndex(r => r.KeyHash, KeyHashIndex)
             .IsUnique()
             .HasDatabaseName(KeyHashIndex);
