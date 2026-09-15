@@ -62,15 +62,10 @@ public class HoldAvailabilityHandler(
         // validator already confirmed CheckOut > CheckIn and GuestCount > 0 as
         // pure shape rules; these need the loaded Unit.
         //
-        // ValidationException, not Guard.Against.*, at all three sites below.
-        // These reject caller input, so they need a 400 carrying a message
-        // written for the caller. A guard clause throws
-        // ArgumentException/ArgumentOutOfRangeException, whose Message the BCL
-        // decorates with "(Parameter 'GuestCount')" - and the only way that
-        // ever became a 400 was GlobalExceptionHandler mapping the whole
-        // ArgumentException family to one, which meant any library's internal
-        // ArgumentException was a 400 leaking its message too. The handler that
-        // knows a value came from the caller is the right place to say so.
+        // ValidationException, not Guard.Against.*, at all three sites below:
+        // these reject caller input, so they need a 400 with a message written
+        // for the caller. A guard's ArgumentException is a 500 by design (see
+        // GlobalExceptionHandler), and its BCL message names parameters.
         if (request.GuestCount > pricing.MaxOccupancy)
         {
             throw new ValidationException(

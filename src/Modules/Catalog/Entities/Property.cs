@@ -81,11 +81,9 @@ public sealed class Property : Entity
         TimeZoneId = timeZoneId;
     }
 
-    // InvalidInput, not a raw TimeZoneInfo.FindSystemTimeZoneById call - that
-    // throws TimeZoneNotFoundException, which sits outside the
-    // ArgumentException family GlobalExceptionHandler maps to 400, so this
-    // backstop would surface a validation failure as a 500. The write
-    // validators reject bad ids first; this is the guard behind them.
+    // The backstop behind the write validators, which reject bad ids first.
+    // PropertyTimeZone.IsValid rather than FindSystemTimeZoneById, whose
+    // TimeZoneNotFoundException is not an input-validation failure.
     private static void GuardTimeZone(string timeZoneId)
     {
         Guard.Against.NullOrWhiteSpace(timeZoneId);

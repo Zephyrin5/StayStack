@@ -16,7 +16,7 @@ Don't write one for a decision that's local to a single handler/class and alread
 
 Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simple:
 
-- **Status** - Accepted, Superseded (link to the one that replaced it), or Deprecated.
+- **Status** - Accepted or Deprecated. When a decision changes, rewrite the ADR to the current decision rather than adding a superseding one; history lives in git.
 - **Context** - the problem and the constraints in play.
 - **Decision** - what was chosen.
 - **Alternatives considered** - what else was on the table, and why it lost.
@@ -46,7 +46,7 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 | [0018](0018-property-local-business-dates.md) | Business dates resolve in the property's time zone, never UTC | Accepted |
 | [0019](0019-total-count-is-opt-in-on-expensive-list-endpoints.md) | A total count is opt-in, not part of every paging envelope | Accepted |
 | [0020](0020-a-checkout-is-a-claim-with-a-deadline-not-a-sale.md) | A checkout is a claim with a deadline, not a sale | Accepted |
-| [0021](0021-availability-is-part-of-bookings.md) | Availability is part of Bookings, not a module upstream of it | Accepted |
+| [0021](0021-availability-is-part-of-bookings.md) | Holds are part of Bookings | Accepted |
 | [0022](0022-checkout-idempotency-keys.md) | Checkout idempotency keys | Accepted |
 | [0023](0023-booking-management-sessions.md) | The management token is exchanged once, not carried everywhere | Accepted |
 | [0024](0024-every-memory-cache-entry-declares-its-size.md) | Every IMemoryCache entry declares its size, in bytes | Accepted |

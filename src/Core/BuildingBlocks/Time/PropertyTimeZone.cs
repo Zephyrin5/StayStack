@@ -9,22 +9,21 @@ namespace BuildingBlocks.Time;
 ///         calendar, not the server's or the browser's. See docs/adr/0018.
 ///     </para>
 ///     <para>
-///         <b>At read time an unusable timezone is an error, never a guess.</b>
-///         Nothing here falls back to UTC: under a UTC+3 market that is
-///         precisely the permissive, money-losing skew this whole change
-///         exists to remove, so a wrong answer is worse than no answer. The
-///         one deliberate exception lives in the migration that backfilled
-///         existing rows, which is a data decision rather than a runtime one.
-///     </para>
+    ///     <para>
+    ///         <b>At read time an unusable timezone is an error, never a guess.</b>
+    ///         Nothing here falls back to UTC: under a UTC+3 market that skew is
+    ///         permissive and loses money, so a wrong answer is worse than no
+    ///         answer. The one exception is the migration that backfilled
+    ///         existing rows, a data decision rather than a runtime one.
+    ///     </para>
 /// </summary>
 public static class PropertyTimeZone
 {
     /// <summary>
-    ///     True if the id resolves on this machine. Uses Try… rather than
-    ///     FindSystemTimeZoneById deliberately: the latter throws
-    ///     TimeZoneNotFoundException, which is outside the ArgumentException
-    ///     family GlobalExceptionHandler maps to 400, so a domain guard built
-    ///     on it would surface a validation failure as a 500.
+    ///     True if the id resolves on this machine. TryFindSystemTimeZoneById
+    ///     rather than FindSystemTimeZoneById, so a validator or guard gets a
+    ///     boolean instead of a TimeZoneNotFoundException, which would surface
+    ///     as a 500.
     /// </summary>
     public static bool IsValid(string? timeZoneId) =>
         !string.IsNullOrWhiteSpace(timeZoneId)
@@ -48,35 +47,19 @@ public static class PropertyTimeZone
 
     /// <summary>
     ///     The local date a given instant fell on at that timezone. Used where
-    ///     the anchor is a recorded moment rather than now - e.g. resolving
-    ///     which date a booking was cancelled on from its ModifiedAt, so a
-    ///     recancel reports the same refund tier the original cancellation
-    ///     already queued.
+    ///     the anchor is a recorded moment rather than now, or where one clock
+    ///     reading is shared across many bookings.
+    ///     <para>
+    ///         Resolves per call rather than caching: TryFindSystemTimeZoneById
+    ///         hits the BCL's own cache, about 0.12-0.14 microseconds per call
+    ///         including the conversion. A per-request memo would save about
+    ///         0.13 milliseconds across 2000 bookings, less than any of the
+    ///         database round trips beside the one caller that loops
+    ///         (ListMyReviewableBookingsHandler). Worth re-measuring only for a
+    ///         hot path with no database work beside it.
+    ///     </para>
     /// </summary>
     /// <exception cref="InvalidOperationException">See <see cref="Today" />.</exception>
-    /// <summary>
-    ///     Resolves per call rather than caching, deliberately, and measured
-    ///     rather than assumed: TimeZoneInfo.TryFindSystemTimeZoneById hits the
-    ///     BCL's own cache, so a call costs about 0.12-0.14 microseconds
-    ///     including the conversion - a dictionary lookup, not a tzdata parse.
-    ///     <para>
-    ///         Memoising the TimeZoneInfo per request roughly halves that,
-    ///         which is worth about 6 microseconds across 100 bookings and
-    ///         0.13 milliseconds across 2000. The one caller that loops over a
-    ///         list - ListMyReviewableBookingsHandler - makes two database
-    ///         round trips and a cross-module unit lookup in the same request,
-    ///         each of which costs more than the entire timezone workload. A
-    ///         per-request memo would add a dictionary and a closure to buy
-    ///         noise.
-    ///     </para>
-    ///     <para>
-    ///         What did matter there was the number of bookings, not the cost
-    ///         per booking, and that is fixed at the source: the query is now
-    ///         bounded to the review window instead of a customer's whole
-    ///         history. Worth re-measuring only if some future caller resolves
-    ///         zones in a genuinely hot path with no database work beside it.
-    ///     </para>
-    /// </summary>
     public static DateOnly ToLocalDate(DateTimeOffset instant, string timeZoneId)
     {
         if (!TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId, out TimeZoneInfo? timeZone))

@@ -258,11 +258,10 @@ internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider tim
 
     public async Task ReleaseHoldAsync(Guid holdId, CancellationToken cancellationToken)
     {
-        // Same open/close symmetry as ConfirmHoldAsync above, and this is the
-        // one of the two most likely to be called from outside a request:
-        // ReconcileOrphanedBookedHoldsJob releases orphans from a background
-        // scope, where an unreturned connection would be held for the length
-        // of the run rather than of a request.
+        // Same open/close symmetry as ConfirmHoldAsync above. This is the one
+        // most often called from a background scope - ExpireUnpaidBookingsJob
+        // and ReconcileOrphanedBookingIntentsJob release holds - where an
+        // unreturned connection would be held for the whole run.
         DbConnection connection = dbContext.Database.GetDbConnection();
         bool openedHere = connection.State != ConnectionState.Open;
         if (openedHere)

@@ -13,10 +13,8 @@ public sealed class UpdatePropertyRequestValidator : Validator<UpdatePropertyReq
         RuleFor(x => x.City).MaximumLength(100);
 
         // Rejected here rather than at the domain guard so the caller gets a
-        // field-level 400. PropertyTimeZone.IsValid wraps
-        // TimeZoneInfo.TryFindSystemTimeZoneById - never the throwing
-        // FindSystemTimeZoneById, whose TimeZoneNotFoundException would
-        // escape GlobalExceptionHandler's ArgumentException arm as a 500.
+        // field-level 400. PropertyTimeZone.IsValid never throws; the throwing
+        // FindSystemTimeZoneById would surface a bad id as a 500.
         RuleFor(x => x.TimeZoneId)
             .NotEmpty()
             .Must(PropertyTimeZone.IsValid)

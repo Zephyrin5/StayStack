@@ -2,7 +2,7 @@
 
 **Status:** Accepted - recording a boundary, not endorsing it
 
-Bounds a claim [ADR-0004](0004-module-boundaries-via-contracts-projects.md)'s inverted-interface pattern made possible and [ADR-0021](0021-availability-is-part-of-bookings.md) inherited: `IUnitAvailabilityLookup.GetBlockedUnitIdsAsync`, the cross-module read that lets Catalog filter search results by availability.
+Records the cost of `IUnitAvailabilityLookup.GetBlockedUnitIdsAsync`, the cross-module read ([ADR-0004](0004-module-boundaries-via-contracts-projects.md)) that lets Catalog filter search results by availability held in Bookings ([ADR-0021](0021-availability-is-part-of-bookings.md)).
 
 ## Context
 

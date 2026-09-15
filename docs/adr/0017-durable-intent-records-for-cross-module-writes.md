@@ -1,6 +1,6 @@
 # 0017 - Durable intent records for the forward half of cross-module writes
 
-**Status:** Accepted (partially supersedes [ADR-0003](0003-compensating-actions-over-distributed-transactions.md))
+**Status:** Accepted
 
 ## Context
 
@@ -72,5 +72,5 @@ The intent must outlive every step whose failure it recovers: register, link `Ho
 - A reconciled hold is immediately expired (`hold_expires_at = now`); a guest retrying the same `HoldId` gets 404 and must re-hold, which is why the "rolled back" 409 says to start over.
 - Orphan cleanup depends on `ix_promotion_redemptions_promotion_email` being partial on `reversed_at IS NULL`, so a reversal frees the slot for the guest's retry.
 - `booked_at` on holds is diagnostic and write-only; no index or reader should be assumed.
-- **Replacing a recovery mechanism against a live database needs an overlap release.** An orphan created before the new mechanism existed has no intent, so removing the old mechanism in the same release strands it. Backfilling intents from a join across modules is not an alternative. This application has no deployed database, which is the only reason past replacements did not need the overlap.
+- **Replacing a recovery mechanism against a live database needs an overlap release.** An orphan created before the new mechanism existed has no intent, so removing the old mechanism in the same release strands it. Backfilling intents from a join across modules is not an alternative. This application has no deployed database yet; once it has one, every such replacement needs the overlap.
 - Every new cross-module write is checked against this rule alongside ADR-0003's: if its first cross-module call commits where this module cannot see it, it needs an intent record, because compensation runs only if the process survives to run it.

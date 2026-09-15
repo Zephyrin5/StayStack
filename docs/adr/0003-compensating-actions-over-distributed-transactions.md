@@ -51,7 +51,7 @@ These span `DbContext`s and connections, so none can be one ACID transaction.
 - **One EF transaction shared across module contexts**, since they share an instance. Rejected: atomic only while the modules stay co-located, which defeats the extractability [ADR-0004](0004-module-boundaries-via-contracts-projects.md)'s boundaries exist for. An outbox stays correct if they separate.
 - **Direct compensating calls without an outbox.** Rejected: a compensation that fails, or a process that dies before it runs, is lost with nothing to retry.
 - **A messaging library (`MassTransit`, `CAP`, `Brighter`).** Rejected: broker-first and reflection-based, for reliable in-process delivery over one Postgres instance.
-- **`ZeroAlloc.Outbox`.** The right shape - source-generated, no reflection, retry and dead-letter built in - but immature at the time of this decision, and it brings a parallel `ZeroAlloc.*` ecosystem including its own mediator. Hand-rolled, the outbox is a few files per module. Worth revisiting if a library in this space builds a track record.
+- **`ZeroAlloc.Outbox`.** The right shape - source-generated, no reflection, retry and dead-letter built in - but immature, and it brings a parallel `ZeroAlloc.*` ecosystem including its own mediator. Hand-rolled, the outbox is a few files per module. Worth revisiting if a library in this space builds a track record.
 - **Outboxing forward calls too.** Rejected: their results are needed synchronously by the write in progress.
 - **A reconciliation job per message type that re-derives the correct outcome.** Rejected in favour of replaying the stored payload.
 

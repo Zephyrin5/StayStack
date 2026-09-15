@@ -2,15 +2,11 @@
 
 **Status:** Accepted
 
-Narrows the bearer-credential handling in [ADR-0016](0016-trust-model-for-anonymous-endpoints.md) and adds a second token type alongside [ADR-0009](0009-refresh-token-rotation-with-family-reuse-detection.md)'s. Amends [ADR-0004](0004-module-boundaries-via-contracts-projects.md) with one more Api-implemented interface.
-
 ## Context
 
 `BookingManagementToken` is what makes guest checkout work without an account. It is a bearer credential: whoever holds it can view, cancel and review a booking. Its lifetime is measured in months - `CheckOut + ManagementTokenLifetimeDaysAfterCheckOut`, 90 days by default - because the review window depends on it.
 
-It was presented on **every** management call: four requests across three modules (`GetBookingForManagement`, `CancelBooking`, `CreateStayReview`, `InitiateTransaction`). One of those is a `GET`, so the credential travelled in `?managementToken=` - reaching the access log of every hop, the browser's history, and the `Referer` header of any outbound link on the page.
-
-The credential was not weak. It was simply *everywhere*, repeatedly, for months.
+Four management calls across three modules need ownership proof (`GetBookingForManagement`, `CancelBooking`, `CreateStayReview`, `InitiateTransaction`), and one of them is a `GET`. Carried on each, the token would travel in `?managementToken=` - into the access log of every hop, the browser's history, and the `Referer` header of any outbound link - repeatedly, for months. The credential is strong; the exposure is the problem. The session token is a second token type beside [ADR-0009](0009-refresh-token-rotation-with-family-reuse-detection.md)'s access and refresh tokens.
 
 ## Decision
 
@@ -27,9 +23,9 @@ Subsequent management calls send `Authorization: Bearer <sessionToken>`. The man
 
 ### A signed claim, not a row
 
-The session is a JWT: no new table, no new sweep job, expiry enforced by the authentication handler rather than by handler code that could forget. The trade is no revocation inside the session window, which is the same trade the access token already makes and is acceptable at 45 minutes.
+The session is a JWT: no table, no sweep job, expiry enforced by the authentication handler rather than by handler code that could forget. The trade is no revocation inside the session window, which is the same trade the access token already makes and is acceptable at 45 minutes.
 
-The long-lived token behind it stays revocable in the only way it ever was - by deleting its row.
+The long-lived token behind it is revocable only by deleting its row.
 
 ### The boundary is the audience, not a claim
 
@@ -50,31 +46,30 @@ Two more limits follow from the same reasoning:
 
 `CookieSecurityOptions.SameSite` defaults to `Lax` while the CORS policy calls `AllowCredentials()`. Those are consistent for a same-site deployment and silently contradictory for a cross-site one: CORS allows the origin, the preflight passes, and the browser never attaches the cookie - cookie-mode refresh 401s with nothing wrong in any log.
 
-**Bearer is the primary carrier; cookie mode is a same-origin convenience.** A cross-origin SPA uses body tokens, which already works and avoids owning CSRF protection on every cookie-authenticated endpoint. A new startup check makes the contradiction loud instead of silent.
+**Bearer is the primary carrier; cookie mode is a same-origin convenience.** A cross-origin SPA uses body tokens, which already works and avoids owning CSRF protection on every cookie-authenticated endpoint. A startup check makes the contradiction loud instead of silent.
 
 ## Consequences
 
-- **The startup check needs an origin the app cannot discover.** Behind a TLS-terminating proxy the bound addresses are the proxy's, so anything derived at runtime describes the wrong side of the hop - the same mistake that once shipped refresh tokens without `Secure`. `Cookies:ApiOrigin` is therefore declared. It is optional, and when absent the check logs that it *could not run* rather than staying silent, because silence reads as "checked, fine".
+- **The startup check needs an origin the app cannot discover.** Behind a TLS-terminating proxy the bound addresses are the proxy's, so anything derived at runtime describes the wrong side of the hop (the same reason `Secure` on cookies is configured, `CookieSecurityOptions`). `Cookies:ApiOrigin` is therefore declared. It is optional, and when absent the check logs that it *could not run* rather than staying silent, because silence reads as "checked, fine".
 - **Registrable-domain comparison is approximate and biased toward not failing.** Last-two-labels gets `a.co.uk` vs `b.co.uk` wrong, calling them same-site. That is the right way to be wrong for a startup hint: a missed warning leaves a deployment where it already was, a false positive refuses to start a correct one. A Public Suffix List dependency is not worth it here.
-- **The old carrier is gone.** `ManagementToken` has been removed from `GetBookingForManagementRequest`, `CancelBookingRequest`, `CreateStayReviewRequest` and `InitiateTransactionRequest`. It survives in exactly two places, which are the two ends of one hand-off: `ConfirmBookingResponse`, which issues it once, and `CreateBookingSessionRequest`, which spends it.
-- **Token validation is a separate method, not a nullable parameter.** `BookingAccessChecker.ResolveAsync` no longer takes a management token at all; `ResolveByManagementTokenAsync` does, and has one caller. A parameter that every caller but one passes `null` to is an invitation to start passing something - the split makes "exactly one place validates the long-lived credential" a fact the type system enforces rather than a convention.
+- **The management token appears in exactly two contracts**, the two ends of one hand-off: `ConfirmBookingResponse`, which issues it, and `CreateBookingSessionRequest`, which spends it. The four management requests carry no token.
+- **Token validation is a separate method, not a nullable parameter.** `BookingAccessChecker.ResolveAsync` takes no management token; `ResolveByManagementTokenAsync` does, and has one caller. A parameter that every caller but one passes `null` to is an invitation to start passing something - the split makes "exactly one place validates the long-lived credential" a fact the type system enforces rather than a convention.
 - **That method has no authenticated-customer path either.** A signed-in owner does not need a session, because their access token already proves ownership everywhere a session would. Accepting one would only mint a credential nobody uses.
-- **Removing the parameter stranded real dependencies.** `BookingLookup` lost its `TimeProvider` and `BookingLifecyclePolicyOptions`, and `CancelBookingHandler` lost its options too: all three existed solely to bound the management token's lifetime, and none of those types see the token any more. The compiler does not flag an unused primary-constructor parameter, so this is the kind of residue a mechanical removal leaves behind.
 - **Checkout is the one place a token exists without a session.** It was minted seconds earlier by the confirm call, so the client exchanges it right there before starting payment - otherwise initiating a transaction would be the single flow with no way to prove ownership.
-- **Three tests moved rather than changed.** "Wrong management token" and "expired management token" were asserted against cancel and review, which no longer see a token; those refusals now happen one step earlier, at the exchange. Each was re-pointed there, and the endpoint kept the half it still owes: with no session, it refuses and reveals nothing.
-- **`[Sensitive]` was missing on every `ManagementToken` property**, and on `ConfirmBookingRequest`'s guest name, email, phone and promo code, and on the management token in `ConfirmBookingResponse`. The redaction model is a denylist, so each gap is paid for on the day telemetry is switched on - and `ConfigureObservabilityServices` is currently commented out, which is exactly what made this free to fix now and expensive to discover later.
-- **New request/response types must be registered in the module's `JsonSerializerContext`.** Native AOT source generation ([ADR-0001](0001-native-aot-compatibility.md)) means an unregistered type fails at runtime with a 500, not at compile time - the exchange endpoint did exactly that on first run.
+- **Wrong and expired management tokens are refused at the exchange**, and the endpoints behind it, with no session, refuse and reveal nothing.
+- **Every `ManagementToken` property, and the guest's name, email, phone and promo code on `ConfirmBookingRequest`, carry `[Sensitive]`.** Redaction is a deny-list, so a missing annotation is paid for the day telemetry is switched on.
+- **New request/response types must be registered in the module's `JsonSerializerContext`.** Source-generated serialization ([ADR-0001](0001-native-aot-compatibility.md)) means an unregistered type fails at runtime with a 500, not at compile time.
 - **Link delivery is not built.** There is no email infrastructure; the management link is rendered in the checkout receipt. The fragment-based hand-off (`/bookings/manage/{id}#t=<token>`, read once, exchanged, then `history.replaceState`) is implemented on the client because it is worth having whether the link arrives by email or by copy-paste - a fragment is never sent to any server, so it appears in no access log and no `Referer`. Mobile deep links are moot until there is an app.
 
 ## Cancelling asks for the guest email
 
-Anyone who saw the link could cancel a stay. They now have to confirm the address the booking was made with, and the check sits on the **destructive branch only** - after the eligibility check, inside the fresh-cancel path.
+A link can be forwarded or screenshotted, so cancelling requires confirming the address the booking was made with, and the check sits on the **destructive branch only** - after the eligibility check, inside the fresh-cancel path.
 
 Ordering is the whole of it. Ahead of eligibility, a guest would type their address and still be told 409 for a stay that cannot be cancelled at all. Ahead of the idempotent branch, a re-cancel that changes nothing would be refused. Neither is destructive, so neither is what this guards. Checking eligibility first leaks nothing either: `CheckIn`, `CheckOut` and `CanCancel` are already in the management response.
 
-What makes one form field worth anything is that `GetBookingForManagementResponse` carries **no guest email**, so a link holder cannot read the answer back out of the API. That dependency is load-bearing and now has its own test - if the field is ever added to that response, the confirmation becomes theatre, and the test says so.
+What makes one form field worth anything is that `GetBookingForManagementResponse` carries **no guest email**, so a link holder cannot read the answer back out of the API. That dependency is load-bearing and has its own test - if the field is ever added to that response, the confirmation becomes theatre, and the test says so.
 
-An authenticated customer is not asked. A matching `CustomerId` cannot be forwarded or screenshotted, and `BookingAccessChecker` now reports *how* ownership was proven (`Account` or `Link`) so the handler can tell them apart. A session counts as `Link`, deliberately - otherwise exchanging the token would launder away the requirement, which is exactly the hole a second factor exists to close.
+An authenticated customer is not asked. A matching `CustomerId` cannot be forwarded or screenshotted, and `BookingAccessChecker` reports *how* ownership was proven (`Account` or `Link`) so the handler can tell them apart. A session counts as `Link`, deliberately - otherwise exchanging the token would launder away the requirement, which is exactly the hole a second factor exists to close.
 
 ## The link hand-off, client side
 
