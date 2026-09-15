@@ -31,9 +31,9 @@ The deadline and the sweep belong to Bookings, which owns both the booking and t
 
 ### Payment confirmation
 
-`MarkTransactionSucceededHandler` enqueues `ConfirmBookingPaymentOutboxMessage`, which reaches `IBookingPaymentConfirmation.ConfirmPaymentAsync`. That endpoint is admin-reachable today, so the final transition is exercised by integration tests before a provider exists.
+`MarkTransactionSucceededHandler` calls `IBookingPaymentConfirmation.ConfirmPaymentAsync` inside its atomic scope ([ADR-0003](0003-cross-module-writes-commit-in-one-transaction.md)). That endpoint is admin-reachable today, so the final transition is exercised by integration tests before a provider exists.
 
-`ConfirmPaymentAsync` runs one transaction: lock the booking row, return `false` if the booking is cancelled, mark the hold paid, confirm the booking, commit. A booking is never confirmed with its inventory released, nor a hold sold against a booking left `Pending`. `MarkHoldPaidAsync` accepts an already-`booked` hold, so a redelivered message succeeds.
+`ConfirmPaymentAsync` locks the booking row, returns `false` if the booking is cancelled, marks the hold paid and confirms the booking, and all of it commits with the transaction's `Succeeded`. A booking is never confirmed with its inventory released, nor a hold sold against a booking left `Pending`. `MarkHoldPaidAsync` accepts an already-`booked` hold, so a repeated call succeeds.
 
 A hold released or expired before payment lands also returns `false`: a payment that cannot become a stay is refunded, and throwing would only retry an outcome that cannot improve.
 
@@ -41,7 +41,7 @@ A hold released or expired before payment lands also returns `false`: a payment 
 
 `ExpireUnpaidBookingsJob` locks the booking with `FOR UPDATE SKIP LOCKED` and re-checks its status under the lock; `ConfirmPaymentAsync` takes `FOR UPDATE` and re-reads inside it. `Booking` carries no concurrency token, so an unlocked read followed by an update would overwrite a committed `Cancelled` with `Confirmed`. The modes differ because the needs do: a sweep steps over a row someone else holds and revisits it next run, while a payment in hand must wait to observe the committed outcome, which is how it learns a refund is owed. Lock order with `BookingPaymentLock` is [ADR-0028](0028-advisory-locks-and-lock-order.md).
 
-Before expiring, the job asks `ITransactionLookup.HasSucceededPaymentAsync`: a payment whose confirmation message has not been delivered leaves a paid booking `Pending` and overdue, and must not be expired.
+Before expiring, the job asks `ITransactionLookup.HasSucceededPaymentAsync`, and leaves a booking with a succeeded payment alone. Payment success confirms the booking in the commit that marks the payment `Succeeded`, under this booking's row lock, so the check is not expected to match; it guards the state (a paid booking `Pending` and overdue) should it arise, and a payment succeeding after an expiry committed is refunded from the expiry's obligation ([ADR-0027](0027-refunds-are-decided-once-from-a-durable-obligation.md)).
 
 ## Alternatives considered
 

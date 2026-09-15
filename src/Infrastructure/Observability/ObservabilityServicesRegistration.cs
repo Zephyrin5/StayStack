@@ -85,8 +85,8 @@ public static class ObservabilityServicesRegistration
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation()
                 // Wildcard rather than one AddMeter per source. Module-owned
-                // meters (Bookings' orphaned-intent counter, and whatever
-                // follows it) can't be named here as constants without this
+                // meters (Bookings' expiry counters, and whatever follows
+                // them) can't be named here as constants without this
                 // Infrastructure project referencing the modules themselves,
                 // inverting the dependency direction ADR-0004 sets. Every
                 // meter in this codebase is named "StayStack.<area>", so one

@@ -28,7 +28,7 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 |---|---|---|
 | [0001](0001-native-aot-compatibility.md) | Native AOT compatibility as a design constraint | Accepted |
 | [0002](0002-tickerq-for-background-jobs.md) | TickerQ for background jobs | Accepted |
-| [0003](0003-compensating-actions-over-distributed-transactions.md) | Compensating actions and a transactional outbox for cross-module writes | Accepted |
+| [0003](0003-cross-module-writes-commit-in-one-transaction.md) | Cross-module writes commit in one database transaction | Accepted |
 | [0004](0004-module-boundaries-via-contracts-projects.md) | Module boundaries via per-module Contracts projects | Accepted |
 | [0005](0005-host-is-a-capability-not-a-separate-account.md) | Host is a capability on an account, not a separate account type | Accepted |
 | [0006](0006-materialize-then-map-for-jsonb-value-objects.md) | Materialize-then-map for JSONB-converted value objects | Accepted |
@@ -42,7 +42,6 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 | [0014](0014-ef-core-vs-dapper-decision-rule.md) | EF Core vs. Dapper: which owns a given database operation | Accepted |
 | [0015](0015-money-value-type-for-currency-amounts.md) | A `Money` value type for currency amounts, at the domain boundary only | Accepted |
 | [0016](0016-trust-model-for-anonymous-endpoints.md) | Trust model for anonymous endpoints | Accepted |
-| [0017](0017-durable-intent-records-for-cross-module-writes.md) | Durable intent records for the forward half of cross-module writes | Accepted |
 | [0018](0018-property-local-business-dates.md) | Business dates resolve in the property's time zone, never UTC | Accepted |
 | [0019](0019-total-count-is-opt-in-on-expensive-list-endpoints.md) | A total count is opt-in, not part of every paging envelope | Accepted |
 | [0020](0020-a-checkout-is-a-claim-with-a-deadline-not-a-sale.md) | A checkout is a claim with a deadline, not a sale | Accepted |
@@ -54,3 +53,4 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 | [0026](0026-stay-search-materialises-the-platform-wide-blocked-set.md) | Stay search materialises a platform-wide blocked set, and that is a known ceiling | Accepted (records a boundary) |
 | [0027](0027-refunds-are-decided-once-from-a-durable-obligation.md) | Refunds are decided once, from a durable obligation | Accepted |
 | [0028](0028-advisory-locks-and-lock-order.md) | Advisory locks and lock order | Accepted |
+| [0029](0029-atomic-scopes-for-cross-module-work.md) | Atomic scopes for cross-module work | Accepted |

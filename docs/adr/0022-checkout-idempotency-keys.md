@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 
-Builds on [ADR-0017](0017-durable-intent-records-for-cross-module-writes.md) (the durable-marker shape this reuses) and [ADR-0021](0021-availability-is-part-of-bookings.md) (which puts this row in the same transaction as the hold transition). Bearer credentials are stored only as hashes, as for [ADR-0009](0009-refresh-token-rotation-with-family-reuse-detection.md)'s refresh tokens.
+Builds on [ADR-0003](0003-cross-module-writes-commit-in-one-transaction.md) (which commits this row with the hold transition and the booking) and [ADR-0021](0021-availability-is-part-of-bookings.md) (which puts the hold in Bookings). Bearer credentials are stored only as hashes, as for [ADR-0009](0009-refresh-token-rotation-with-family-reuse-detection.md)'s refresh tokens.
 
 ## Context
 
@@ -20,7 +20,7 @@ So a connection dropped after the commit is not a partial failure - it is a tota
 
 The booking then sits until `ExpireUnpaidBookingsJob` cancels it at the payment deadline. Inventory recovers; the guest's checkout does not. Nobody is charged today, and that is precisely the property that stops holding the moment payment is wired up: the same dropped connection would then take money for a booking its payer cannot reach.
 
-The durable-intent machinery does not help here. It exists so the *system* can recover a half-finished cross-module write. This is the opposite problem: the write finished perfectly, and the *client* lost the answer.
+The execution strategy's recovery does not help here either. It recovers a lost acknowledgement *within* one request. This is a different problem: the request finished, and the *client* lost the answer.
 
 ## Decision
 
@@ -31,19 +31,15 @@ POST /api/bookings
 Idempotency-Key: 3f1a...   (16-128 chars; a UUID is ideal)
 ```
 
-A new table, `checkout_idempotency_records`, keyed by the pre-generated booking id - deliberately the same shape as `pending_booking_intents`, for the same reasons ([ADR-0017](0017-durable-intent-records-for-cross-module-writes.md)): a row written before the work, resolved by the transaction that finishes it.
+A new table, `checkout_idempotency_records`, keyed by the pre-generated booking id. It survives the checkout, because it carries the one thing that exists nowhere else once a response is lost.
 
-The endings differ, and that difference is the whole design. An intent is *deleted* on success, because it carries nothing `Booking` does not already record. This row *survives*, because it carries the one thing that exists nowhere else once a response is lost.
+### The record commits with the booking
 
-### The reservation is taken in the first transaction, not the last
+It is written in the confirmation's atomic scope, with the hold transition and the `Booking`, and `completed_at` is set on insert. Three properties follow:
 
-Written alongside the `PendingBookingIntent` and the hold transition, inside Transaction A. Three properties follow, and none of them hold if the record is written on the way out:
-
-- **Concurrent duplicates are separated before a hold moves.** Two requests with one key both miss the replay read - it happens before either writes - so what separates them is the unique index on `key_hash` failing for the loser, while the hold is still `'held'`. Written at the end, the loser would instead fail on the consumed hold and report 404 for a checkout that had succeeded.
+- **The record exists if and only if the booking does.** A committed booking whose replay record never landed would be a guest stranded by the mechanism meant to rescue them.
 - **A rollback frees the key.** A key burned by a failed attempt is worse than no key: the client's retry, the entire reason for sending one, would be refused.
-- **The record exists if and only if the confirmation began** - the same present-iff-committed property the intent gained in [ADR-0021](0021-availability-is-part-of-bookings.md).
-
-Completion - `completed_at` - is written in the same `SaveChangesAsync` as the `Booking` insert. Anything later would reintroduce the original bug one level up: a committed booking whose replay record never landed is a guest stranded by the mechanism meant to rescue them.
+- **Concurrent duplicates never commit two bookings.** Two requests with one key both miss the replay read - it happens before either writes. For the same hold, the second waits on the hold's row lock, matches nothing once the first commits, and replays its record. For different holds, the unique index on `key_hash` fails for the loser, and its scope rolls its hold transition back.
 
 ### Replay re-reads the booking and mints a new token
 
@@ -69,14 +65,14 @@ The key itself is never stored, only `SHA-256` of it, so a database reader canno
 
 - **Store the plaintext token and return it verbatim.** Rejected: a database read or leaked backup yields working credentials for every anonymous checkout inside the window, all at once.
 - **Encrypt the stored token.** Rejected: the same semantics as minting a new one, for the price of shared key storage and a rotation story across instances.
-- **Write the record on the way out, with the booking.** Rejected for the three reasons under "The reservation is taken in the first transaction".
+- **A reservation row written before the hold moves, completed at the end.** The previous shape, when the confirmation was several commits. With one commit it only adds an in-progress state that no reader can observe.
 
 ## Consequences
 
 - **The length rule lives in the handler, not `ConfirmBookingRequestValidator`.** FastEndpoints runs validators against the bound request *before* the endpoint body, and the key is assigned in `HandleAsync` (the `HoldAvailabilityRequest.ClientKey` pattern - header-only, non-bindable from body/query/route/form, so no second channel can contradict it). A rule in the validator passed on every request, including the ones it existed to reject. `[FromHeader]` binding was tried first, precisely to keep the rule in the validator and get the header into the OpenAPI document; it does not bind alongside `[JsonIgnore]` here, and the failure is silent - four tests went red with the key simply absent.
 - **The header is consequently not an OpenAPI parameter.** It is described in the endpoint's summary instead, and clients must set it explicitly. This is what most idempotency-key clients do anyway, but it is a real cost of the binding decision above rather than a preference.
-- **A retry of *our own* attempt is not a replay.** When Transaction A commits and its acknowledgement is lost, the retried hold transition finds no `held` row. The recovery looks for an intent under the request's own pre-generated booking id first, and finishes the confirmation from it; only a record under the key with a *different* booking id is replayed or refused. Treating the retry as a replay would answer it with "still in progress" and strand a confirmation until the reconcile job unwound it.
-- **`ReconcileOrphanedBookingIntentsJob` deletes the reservation with the intent**, in the same transaction, so an abandoned confirmation frees its key. Both that delete and the handler's own compensating delete filter on `completed_at IS NULL` - the handler's runs on the verify-before-compensate path where the booking *did* commit, and deleting a completed record there would destroy the replay for exactly the case this feature exists for.
+- **A retry of *our own* attempt is not a replay.** When the confirmation commits and its acknowledgement is lost, the retried attempt finds its own `Booking` by the pre-generated id before touching the hold, and returns it with the token it already stored. Only a request that finds the hold gone looks the key up and replays.
+- **`completed_at` is never null on a committed row**, and the column stays nullable; `PurgeReplayedCheckoutsJob` still filters on it. Tightening the column is a later migration ([extraction inventory](../extraction-inventory.md)).
 - **Not applied to the other write endpoints.** Cancel is already idempotent by state (a re-cancel is a no-op success), and the hold endpoint is cheap to repeat and self-expiring. Checkout is the one place where a lost response destroys information that exists nowhere else.
 - **This does not deduplicate distinct requests.** Two different keys against one hold are two checkouts as far as this table is concerned; the second still fails on the consumed hold, which is the hold's own guarantee and not idempotency's. The failure mode being fixed is not a double booking - the exclusion constraint and the single-use hold already prevent that - it is a guest locked out of a real one.
 - **Several management tokens can exist per booking.** Each replay adds a row, so `booking_management_tokens.booking_id` has a plain index, not a unique one. Tokens accumulate: replay is rare, bounded to the window per key, and the rows are small. A cap would have to choose between refusing a legitimate retry and evicting a token the guest holds; a sweep is the remedy if replay becomes routine.

@@ -36,8 +36,8 @@ public class SignUpHandler(
         // One transaction. All three writes - the user, the role assignment, the
         // refresh token - land in AppIdentityDbContext on the connection this
         // transaction owns, so a failure anywhere rolls back all of them.
-        // BecomeHostHandler compensates instead because its first write goes to
-        // another module's database (docs/adr/0003); nothing here does.
+        // BecomeHostHandler also writes Hosts, so it runs in an atomic scope
+        // (docs/adr/0003); nothing here does.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
         // Chosen once, outside the retry, like the account's own id above

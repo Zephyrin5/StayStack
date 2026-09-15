@@ -10,7 +10,7 @@ The codebase uses both EF Core and Dapper. Without a stated rule the failure mod
 
 Three tiers, in order of preference. Drop to the next only when the one above cannot do the job.
 
-**Tier 1 - EF Core LINQ and change tracking (`SaveChangesAsync`).** The default: CRUD on an aggregate and any read expressible as LINQ. Covers `Property`, `Unit`, `Booking`, `Transaction`, `ApplicationUser`, `RefreshToken` issuance, reviews, `PricingRule`, `Promotion` outside its redemption counter, `BookingManagementToken`, the intent and obligation rows. Concurrency safety on this tier still comes from a database constraint, matched by name ([ADR-0025](0025-retried-work-is-built-inside-the-retry.md)): `InitiateTransactionHandler`'s pre-check gives a friendly error, and `ix_transactions_booking_id_active` is the authority.
+**Tier 1 - EF Core LINQ and change tracking (`SaveChangesAsync`).** The default: CRUD on an aggregate and any read expressible as LINQ. Covers `Property`, `Unit`, `Booking`, `Transaction`, `ApplicationUser`, `RefreshToken` issuance, reviews, `PricingRule`, `Promotion` outside its redemption counter, `BookingManagementToken`, the idempotency and obligation rows. Concurrency safety on this tier still comes from a database constraint, matched by name ([ADR-0025](0025-retried-work-is-built-inside-the-retry.md)): `InitiateTransactionHandler`'s pre-check gives a friendly error, and `ix_transactions_booking_id_active` is the authority.
 
 **Tier 2 - `ExecuteUpdateAsync` / `ExecuteDeleteAsync`.** A single-statement operation LINQ can express, used when tracking is pure overhead or when a conditional mutation needs atomicity a load-then-save cannot give. `AuthTokenProvider`'s consume-once `UPDATE ... WHERE !IsRevoked` and `RevokeFamilyAsync` are here for atomicity; `ExpiredRefreshTokensSweepJob` because there is nothing to load.
 
@@ -24,7 +24,7 @@ Three tiers, in order of preference. Drop to the next only when the one above ca
 
 Dapper statements inside an EF transaction are handed that transaction explicitly; Dapper does not discover it ([ADR-0021](0021-availability-is-part-of-bookings.md)).
 
-**`FromSqlRaw` is used only to claim a row as a tracked entity** - `SELECT * ... FOR UPDATE SKIP LOCKED` in `OutboxDispatcherBase` and the reconcile jobs - where the claimed entity is then modified and saved. Where EF cannot materialise the raw row (`Booking`, whose `Money` complex property makes EF ask for a column the snake_case convention never produces), the id is claimed through Dapper and the entity loaded through LINQ.
+**A row is claimed through Dapper and then loaded through LINQ** - `SELECT id ... FOR UPDATE` (or `SKIP LOCKED`), then the entity by id - rather than through `FromSqlRaw`. For `Booking`, `FromSqlRaw` over `SELECT *` fails outright: its `Money` complex property makes EF ask for a column the snake_case convention never produces.
 
 **The split is per operation, not per table.** `PromotionRedemption.RedeemAsync` reads the promotion through LINQ and drops to Dapper only for its atomic increment-and-insert. A `DbSet<T>` shows which module owns a table's schema, not which tier its operations use.
 

@@ -59,11 +59,10 @@ internal class UnitAvailabilityLookup(AppBookingsDbContext dbContext) : IUnitAva
         // impossible to archive; booked stays belong to IUnitArchivalGuard (see
         // this method's contract).
         //
-        // 'pending_payment' is kept: it is a checkout in flight, bounded by the
-        // payment window, and during confirmation it is the only record of one -
-        // the hold commits before the Booking row exists (the window
-        // docs/adr/0017's intents cover), so Bookings' guard cannot see it yet.
-        // Dropping it would let archival land mid-checkout.
+        // 'pending_payment' is kept: it is a checkout awaiting payment, bounded by
+        // the payment window. It commits with its Booking, which the booking guard
+        // also sees; counting it here keeps this guard complete on its own rather
+        // than dependent on that one.
         //
         // Null HoldExpiresAt reads as active, matching the two range queries
         // above - an absent expiry is not an elapsed one.
