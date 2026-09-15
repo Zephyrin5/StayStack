@@ -2,7 +2,7 @@ using System.Diagnostics.Metrics;
 namespace Bookings;
 
 /// <summary>
-///     Mirrors CommandTelemetry/OutboxTelemetry's shape - one Meter,
+///     Mirrors CommandTelemetry's shape - one Meter,
 ///     registered once with the OTel SDK, picked up automatically.
 /// </summary>
 public static class BookingsTelemetry

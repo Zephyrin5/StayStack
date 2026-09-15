@@ -7,7 +7,6 @@
     <Folder Name="/src/Infrastructure/">
         <Project Path="src/Infrastructure/Jobs/Jobs.csproj" />
         <Project Path="src/Infrastructure/Observability/Observability.csproj" />
-        <Project Path="src/Infrastructure/Outbox/Outbox.csproj" />
         <Project Path="src/Infrastructure/Persistence/Persistence.csproj" />
     </Folder>
     <Folder Name="/src/Modules/">

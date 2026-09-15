@@ -30,7 +30,6 @@
         <ProjectReference Include="..\..\Core\SeedWork\SeedWork.csproj"/>
         <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
         <ProjectReference Include="..\..\Infrastructure\Persistence\Persistence.csproj"/>
-        <ProjectReference Include="..\..\Infrastructure\Outbox\Outbox.csproj"/>
         <ProjectReference Include="..\Catalog\Catalog.Contracts\Catalog.Contracts.csproj"/>
         <ProjectReference Include="..\Hosts\Hosts.Contracts\Hosts.Contracts.csproj"/>
         <ProjectReference Include="..\Promotions\Promotions.Contracts\Promotions.Contracts.csproj"/>

@@ -15,7 +15,6 @@ using Microsoft.Extensions.Time.Testing;
 using NpgsqlTypes;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
-using Bookings.Outbox;
 using Promotions.Contracts;
 using Transactions;
 using Transactions.Contracts;

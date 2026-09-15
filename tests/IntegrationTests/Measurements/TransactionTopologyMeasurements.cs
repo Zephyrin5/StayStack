@@ -4,8 +4,6 @@ using Bookings.Features.CancelBooking;
 using Bookings.Features.ConfirmBooking;
 using Bookings.Features.HoldAvailability;
 using Bookings.Jobs;
-using Bookings.Outbox;
-using Bookings.Serialization;
 using Catalog;
 using Catalog.Enums;
 using Catalog.Features.CreateProperty;
@@ -21,6 +19,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 using Npgsql;
 using Promotions;
 using Promotions.Enums;
@@ -36,14 +35,11 @@ using System.Text;
 using Transactions;
 using Transactions.Entities;
 using Transactions.Features.InitiateTransaction;
-using Transactions.Outbox;
-using Transactions.Serialization;
 namespace IntegrationTests.Measurements;
 
-// Stage 0 of the transaction ownership refactor: measurements, not assertions
-// about correctness. Skipped unless STAYSTACK_MEASURE names an output directory,
-// so they never run in the ordinary suite. Each writes its numbers to a file
-// there.
+// Measurements for the transaction ownership refactor, not assertions about
+// correctness. Skipped unless STAYSTACK_MEASURE names an output directory, so
+// they never run in the ordinary suite. Each writes its numbers to a file there.
 [Collection("Integration Tests")]
 public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactory factory)
 {
@@ -154,6 +150,13 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
 
     private async Task<(string HostToken, Guid UnitId)> SeedHostWithUnitAsync(WebApplicationFactory<Program> host, HttpClient client)
     {
+        (string hostToken, _, Guid unitId) = await SeedHostWithPropertyAndUnitAsync(host, client);
+        return (hostToken, unitId);
+    }
+
+    private async Task<(string HostToken, Guid PropertyId, Guid UnitId)> SeedHostWithPropertyAndUnitAsync(
+        WebApplicationFactory<Program> host, HttpClient client)
+    {
         string userToken = await SeedUserAsync(host, client);
         BecomeHostResponse becameHost = await ReadOkAsync<BecomeHostResponse>(await client.SendAsync(
             Request(HttpMethod.Post, "/api/hosts/become", userToken,
@@ -179,7 +182,13 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
                 Currency = Currency.KWD
             }), Ct));
 
-        return (hostToken, unit.UnitId);
+        return (hostToken, property.PropertyId, unit.UnitId);
+    }
+
+    private static async Task SucceedAsync(HttpResponseMessage response)
+    {
+        string body = await response.Content.ReadAsStringAsync(Ct);
+        Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {body}");
     }
 
     private async Task<string> CreatePromotionAsync(HttpClient client, string hostToken, int? maxRedemptions = null)
@@ -251,14 +260,14 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
         results.Add(await MeasureAsync("POST /api/bookings (promo)", async () =>
             promo = await ReadOkAsync<ConfirmBookingResponse>(await client.SendAsync(ConfirmRequest(hold2, customerToken, code), Ct))));
 
-        // Payment success, including its inline ConfirmBookingPayment dispatch.
+        // Payment success: the transaction, the booking's confirmation and the hold.
         InitiateTransactionResponse initiated = await ReadOkAsync<InitiateTransactionResponse>(
             await client.SendAsync(InitiateRequest(promo!.BookingId, customerToken), Ct));
         results.Add(await MeasureAsync("POST /api/transactions/{id}/succeed", async () =>
             await ReadOkAsync<object>(await client.SendAsync(SucceedRequest(initiated.TransactionId, adminToken), Ct))));
 
-        // Cancel a paid booking that redeemed a code: obligation, refund and
-        // redemption reversal, with their inline dispatches.
+        // Cancel a paid booking that redeemed a code: obligation, hold release,
+        // redemption reversal and refund decision.
         results.Add(await MeasureAsync("POST /api/bookings/{id}/cancel (paid, promo)", async () =>
             await ReadOkAsync<object>(await client.SendAsync(CancelRequest(promo.BookingId, customerToken), Ct))));
 
@@ -266,46 +275,58 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
         results.Add(await MeasureAsync("POST /api/bookings/{id}/cancel (unpaid)", async () =>
             await ReadOkAsync<object>(await client.SendAsync(CancelRequest(plain!.BookingId, customerToken), Ct))));
 
-        // One Bookings relay tick over pending rows: a redemption reversal and a
-        // refund resolution for a real cancelled-and-paid booking.
+        // Payment initiation: BookingPaymentLock, then Bookings' re-read under it.
         Guid hold3 = await HoldAsync(client, unitId, 80);
         ConfirmBookingResponse third = await ReadOkAsync<ConfirmBookingResponse>(
-            await client.SendAsync(ConfirmRequest(hold3, customerToken, await CreatePromotionAsync(client, hostToken)), Ct));
+            await client.SendAsync(ConfirmRequest(hold3, customerToken, null), Ct));
+        results.Add(await MeasureAsync("POST /api/transactions (initiate)", async () =>
+            await ReadOkAsync<InitiateTransactionResponse>(await client.SendAsync(InitiateRequest(third.BookingId, customerToken), Ct))));
+
+        // A hold: its own Serializable transaction, with the unit re-read through
+        // Catalog nested inside it (the D4 residual).
+        results.Add(await MeasureAsync("POST /api/availability/holds", async () => await HoldAsync(client, unitId, 95)));
+
+        // Expiry of one overdue booking, and a refund sweep over its obligation.
+        Guid hold4 = await HoldAsync(client, unitId, 110);
+        ConfirmBookingResponse overdue = await ReadOkAsync<ConfirmBookingResponse>(
+            await client.SendAsync(ConfirmRequest(hold4, customerToken, await CreatePromotionAsync(client, hostToken)), Ct));
         using (IServiceScope scope = host.Services.CreateScope())
         {
-            BookingsOutboxDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>();
-            dispatcher.Enqueue(new ReverseRedemptionOutboxMessage(third.BookingId), BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
-            dispatcher.Enqueue(new ReverseTransactionOutboxMessage(third.BookingId), BookingsJsonSerializerContext.Default.ReverseTransactionOutboxMessage);
-            await scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().SaveChangesAsync(Ct);
+            await scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Bookings
+                .Where(b => b.Id == overdue.BookingId)
+                .ExecuteUpdateAsync(set => set.SetProperty(b => b.PaymentDueAt, DateTimeOffset.UtcNow.AddMinutes(-1)), Ct);
         }
 
-        results.Add(await MeasureAsync("Bookings OutboxRelayJob tick (2 pending rows)", async () =>
+        results.Add(await MeasureAsync("ExpireUnpaidBookingsJob tick (1 overdue, promo)", async () =>
         {
             using IServiceScope scope = host.Services.CreateScope();
-            await ActivatorUtilities.CreateInstance<OutboxRelayJob>(scope.ServiceProvider).RelayAsync(null!, Ct);
+            await ActivatorUtilities.CreateInstance<ExpireUnpaidBookingsJob>(scope.ServiceProvider).ExpireAsync(null!, Ct);
         }));
 
-        // One Transactions relay tick over a pending payment confirmation.
-        Guid hold4 = await HoldAsync(client, unitId, 90);
-        ConfirmBookingResponse fourth = await ReadOkAsync<ConfirmBookingResponse>(
-            await client.SendAsync(ConfirmRequest(hold4, customerToken, null), Ct));
-        using (IServiceScope scope = host.Services.CreateScope())
-        {
-            AppTransactionsDbContext transactions = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
-            Transaction transaction = Transaction.Create(Guid.CreateVersion7(), fourth.BookingId, SeedWork.ValueObjects.Money.Of(fourth.TotalPrice, Currency.KWD));
-            transaction.MarkSucceeded(DateTimeOffset.UtcNow);
-            transactions.Transactions.Add(transaction);
-            TransactionsOutboxDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<TransactionsOutboxDispatcher>();
-            dispatcher.Enqueue(new ConfirmBookingPaymentOutboxMessage(transaction.Id, fourth.BookingId),
-                TransactionsJsonSerializerContext.Default.ConfirmBookingPaymentOutboxMessage);
-            await transactions.SaveChangesAsync(Ct);
-        }
-
-        results.Add(await MeasureAsync("Transactions OutboxRelayJob tick (1 pending row)", async () =>
+        results.Add(await MeasureAsync("ResolveOutstandingRefundsJob tick", async () =>
         {
             using IServiceScope scope = host.Services.CreateScope();
-            await ActivatorUtilities.CreateInstance<Transactions.Jobs.OutboxRelayJob>(scope.ServiceProvider).RelayAsync(null!, Ct);
+            FakeTimeProvider clock = new FakeTimeProvider();
+            clock.SetUtcNow(DateTimeOffset.UtcNow.AddMinutes(10));
+            await ActivatorUtilities.CreateInstance<ResolveOutstandingRefundsJob>(scope.ServiceProvider, clock).ResolveAsync(null!, Ct);
         }));
+
+        // Archival: the unit guard's Bookings reads under the unit lock.
+        CreateUnitResponse spare = await ReadOkAsync<CreateUnitResponse>(await client.SendAsync(
+            Request(HttpMethod.Post, "/api/catalog/units", hostToken, new CreateUnitRequest
+            {
+                PropertyId = (await SeedPropertyIdOfAsync(host, unitId)),
+                Name = new Dictionary<string, string> { { "en", "Spare Unit" } },
+                MaxOccupancy = 2,
+                BasePrice = 100m,
+                Currency = Currency.KWD
+            }), Ct));
+        results.Add(await MeasureAsync("DELETE /api/catalog/units/{id}", async () =>
+            await SucceedAsync(await client.SendAsync(Request(HttpMethod.Delete, $"/api/catalog/units/{spare.UnitId}", hostToken), Ct))));
+
+        (string otherHost, Guid otherProperty, _) = await SeedHostWithPropertyAndUnitAsync(host, client);
+        results.Add(await MeasureAsync("DELETE /api/catalog/properties/{id} (1 unit)", async () =>
+            await SucceedAsync(await client.SendAsync(Request(HttpMethod.Delete, $"/api/catalog/properties/{otherProperty}", otherHost), Ct))));
 
         StringBuilder report = new StringBuilder();
         foreach (ConnectionMeter.Operation operation in results)
@@ -317,6 +338,13 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
         await File.WriteAllTextAsync(Path.Combine(OutputDirectory!, "0.2-connection-peaks.txt"), report.ToString(), Ct);
     }
 
+    private static async Task<Guid> SeedPropertyIdOfAsync(WebApplicationFactory<Program> host, Guid unitId)
+    {
+        using IServiceScope scope = host.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>().Units
+            .Where(u => u.Id == unitId).Select(u => u.PropertyId).SingleAsync(Ct);
+    }
+
     // ---- 0.4 -----------------------------------------------------------------
 
     private sealed record Outcome(string Label, int Status, double Ms, string Detail);
@@ -325,7 +353,7 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
         new NpgsqlConnectionStringBuilder(connectionString) { MaxPoolSize = size }.ConnectionString;
 
     [Fact]
-    public async Task ConcurrentConfirmsDuringRelay_AtMaxPoolSize5()
+    public async Task ConcurrentConfirms_AtMaxPoolSize5()
     {
         RequireMeasurementRun();
 
@@ -342,30 +370,15 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
             holds.Add(await HoldAsync(seedClient, unitId, 100 + i * 3));
         }
 
-        // Relay load: rows whose handlers open a second module's context while
-        // the claim transaction is held. Booking ids that do not exist, so each
-        // handler does its lookup and finds nothing to change.
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            BookingsOutboxDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<BookingsOutboxDispatcher>();
-            for (int i = 0; i < 1000; i++)
-            {
-                dispatcher.Enqueue(new ReverseRedemptionOutboxMessage(Guid.CreateVersion7()), BookingsJsonSerializerContext.Default.ReverseRedemptionOutboxMessage);
-                dispatcher.Enqueue(new ReverseTransactionOutboxMessage(Guid.CreateVersion7()), BookingsJsonSerializerContext.Default.ReverseTransactionOutboxMessage);
-            }
-
-            await scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().SaveChangesAsync(Ct);
-        }
-
         string report = await RunBurstAsync(
-            "20 concurrent confirms (half with a promo code) + Bookings and Transactions relay loops, MaxPoolSize=5",
+            "20 concurrent confirms (half with a promo code), MaxPoolSize=5",
             holds.Select((holdId, i) => (Func<HttpClient, HttpRequestMessage>)(_ => ConfirmRequest(holdId, null, i % 2 == 0 ? code : null))).ToList());
 
         await File.WriteAllTextAsync(Path.Combine(OutputDirectory!, "0.4-confirms-pool5.txt"), report, Ct);
     }
 
     [Fact]
-    public async Task ConcurrentPaymentSuccessesDuringRelay_AtMaxPoolSize5()
+    public async Task ConcurrentPaymentSuccesses_AtMaxPoolSize5()
     {
         RequireMeasurementRun();
 
@@ -387,7 +400,7 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
         }
 
         string report = await RunBurstAsync(
-            "20 concurrent payment successes (each dispatches ConfirmBookingPayment inline) + relay loops, MaxPoolSize=5",
+            "20 concurrent payment successes, MaxPoolSize=5",
             transactionIds.Select(id => (Func<HttpClient, HttpRequestMessage>)(_ => SucceedRequest(id, adminToken))).ToList());
 
         await File.WriteAllTextAsync(Path.Combine(OutputDirectory!, "0.4-payments-pool5.txt"), report, Ct);
@@ -403,26 +416,7 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
         // Warm the host before timing anything.
         await client.GetAsync("/api/localization/languages", Ct);
 
-        using CancellationTokenSource stopRelay = new CancellationTokenSource();
-        ConcurrentBag<string> relayErrors = [];
-        int relayTicks = 0;
-
-        async Task RelayLoopAsync<TJob>(Func<TJob, Task> tick) where TJob : notnull
-        {
-            while (!stopRelay.IsCancellationRequested)
-            {
-                try
-                {
-                    using IServiceScope scope = host.Services.CreateScope();
-                    await tick(ActivatorUtilities.CreateInstance<TJob>(scope.ServiceProvider));
-                    Interlocked.Increment(ref relayTicks);
-                }
-                catch (Exception ex)
-                {
-                    relayErrors.Add($"{typeof(TJob).FullName}: {ex.GetType().Name}: {ex.Message}");
-                }
-            }
-        }
+        using CancellationTokenSource stopSampling = new CancellationTokenSource();
 
         // Peak total and idle-in-transaction backends, sampled on a separate
         // connection outside the pool under test.
@@ -431,7 +425,7 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
         {
             await using NpgsqlConnection connection = new NpgsqlConnection(factory.ConnectionString);
             await connection.OpenAsync(CancellationToken.None);
-            while (!stopRelay.IsCancellationRequested)
+            while (!stopSampling.IsCancellationRequested)
             {
                 await using NpgsqlCommand command = new NpgsqlCommand(
                     "SELECT count(*), count(*) FILTER (WHERE state = 'idle in transaction') FROM pg_stat_activity " +
@@ -445,16 +439,6 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
             }
         }, CancellationToken.None);
 
-        Task bookingsRelay = Task.Run(() => RelayLoopAsync<OutboxRelayJob>(job => job.RelayAsync(null!, CancellationToken.None)), CancellationToken.None);
-        Task transactionsRelay = Task.Run(() => RelayLoopAsync<Transactions.Jobs.OutboxRelayJob>(job => job.RelayAsync(null!, CancellationToken.None)), CancellationToken.None);
-
-        // The burst starts only once both relays are dispatching.
-        while (relayTicks < 2 && relayErrors.IsEmpty)
-        {
-            await Task.Delay(10, CancellationToken.None);
-        }
-
-        long pendingBefore = await PendingBookingsRowsAsync();
         ConcurrentBag<Outcome> outcomes = [];
         Stopwatch wall = Stopwatch.StartNew();
         List<Task> burst = requests.Select((build, i) => Task.Run(async () =>
@@ -478,16 +462,13 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
         Task all = Task.WhenAll(burst);
         bool completed = await Task.WhenAny(all, Task.Delay(hangThreshold, CancellationToken.None)) == all;
         double wallMs = wall.Elapsed.TotalMilliseconds;
-        long pendingAfter = await PendingBookingsRowsAsync();
 
-        await stopRelay.CancelAsync();
-        Task relays = Task.WhenAll(bookingsRelay, transactionsRelay, sampler);
-        bool relaysStopped = await Task.WhenAny(relays, Task.Delay(TimeSpan.FromMinutes(2), CancellationToken.None)) == relays;
+        await stopSampling.CancelAsync();
+        await sampler;
 
         StringBuilder report = new StringBuilder();
         report.AppendLine(title);
-        report.AppendLine($"completed={completed} (threshold {hangThreshold.TotalSeconds:F0}s)  wall_ms={wallMs:F0}  relays_stopped={relaysStopped}  relay_ticks={relayTicks}");
-        report.AppendLine($"bookings_outbox_pending: before_burst={pendingBefore} after_burst={pendingAfter}");
+        report.AppendLine($"completed={completed} (threshold {hangThreshold.TotalSeconds:F0}s)  wall_ms={wallMs:F0}");
         report.AppendLine($"peak_client_backends={peakBackends}  peak_idle_in_transaction={peakIdleInTransaction}");
         report.AppendLine($"requests: finished={outcomes.Count}/{requests.Count}  ok={outcomes.Count(o => o.Status == 200)}  " +
                           $"p50_ms={Percentile(outcomes, 0.5):F0}  p95_ms={Percentile(outcomes, 0.95):F0}  max_ms={(outcomes.IsEmpty ? 0 : outcomes.Max(o => o.Ms)):F0}");
@@ -500,36 +481,7 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
             }
         }
 
-        report.AppendLine($"outbox rows whose dispatch failed on pool exhaustion: {await PoolExhaustedDispatchesAsync()}  " +
-                          $"transactions_outbox still pending: {await ScalarAsync("SELECT count(*) FROM transactions_outbox_messages WHERE processed_at IS NULL")}");
-        report.AppendLine($"relay errors: {relayErrors.Count}");
-        foreach (string error in relayErrors.Distinct().Take(5))
-        {
-            report.AppendLine($"  {error}");
-        }
-
         return report.ToString();
-    }
-
-    private Task<long> PoolExhaustedDispatchesAsync() => ScalarAsync(
-        "SELECT (SELECT count(*) FROM bookings_outbox_messages WHERE last_error ILIKE '%pool has been exhausted%') + " +
-        "(SELECT count(*) FROM transactions_outbox_messages WHERE last_error ILIKE '%pool has been exhausted%')");
-
-    private async Task<long> ScalarAsync(string sql)
-    {
-        await using NpgsqlConnection connection = new NpgsqlConnection(factory.ConnectionString);
-        await connection.OpenAsync(CancellationToken.None);
-        await using NpgsqlCommand command = new NpgsqlCommand(sql, connection);
-        return (long)(await command.ExecuteScalarAsync(CancellationToken.None))!;
-    }
-
-    private async Task<long> PendingBookingsRowsAsync()
-    {
-        await using NpgsqlConnection connection = new NpgsqlConnection(factory.ConnectionString);
-        await connection.OpenAsync(CancellationToken.None);
-        await using NpgsqlCommand command = new NpgsqlCommand(
-            "SELECT count(*) FROM bookings_outbox_messages WHERE processed_at IS NULL AND dead_lettered_at IS NULL", connection);
-        return (long)(await command.ExecuteScalarAsync(CancellationToken.None))!;
     }
 
     private static double Percentile(IEnumerable<Outcome> outcomes, double p)

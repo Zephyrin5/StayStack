@@ -110,7 +110,7 @@ public class MemoryCacheSizeRuleTests(IntegrationTestWebApplicationFactory facto
     {
         string[] ours =
         [
-            "Api", "BuildingBlocks", "SeedWork", "Persistence", "Outbox", "Jobs",
+            "Api", "BuildingBlocks", "SeedWork", "Persistence", "Jobs",
             "Identity", "Catalog", "Hosts", "Promotions", "Bookings", "Reviews", "Transactions"
         ];
 

@@ -6,15 +6,11 @@ using Bookings.Features.GetBookingForManagement;
 using Bookings.Features.GetBookingsForHost;
 using Bookings.Features.GetHostBookings;
 using Bookings.Features.GetMyBookings;
-using Bookings.Outbox;
 using BuildingBlocks.Pagination;
 using System.Text.Json.Serialization;
 namespace Bookings.Serialization;
 
 [JsonSourceGenerationOptions(UseStringEnumConverter = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-[JsonSerializable(typeof(ReleaseHoldOutboxMessage))]
-[JsonSerializable(typeof(ReverseTransactionOutboxMessage))]
-[JsonSerializable(typeof(ReverseRedemptionOutboxMessage))]
 [JsonSerializable(typeof(HoldAvailabilityRequest))]
 [JsonSerializable(typeof(HoldAvailabilityResponse))]
 [JsonSerializable(typeof(ConfirmBookingRequest))]

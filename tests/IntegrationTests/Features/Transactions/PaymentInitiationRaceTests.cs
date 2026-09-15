@@ -9,7 +9,6 @@ using Bookings.Features.ConfirmBooking;
 using Bookings.Features.CreateBookingSession;
 using Bookings.Features.HoldAvailability;
 using Bookings.Jobs;
-using Bookings.Outbox;
 using Catalog;
 using Catalog.Entities;
 using Microsoft.AspNetCore.Hosting;

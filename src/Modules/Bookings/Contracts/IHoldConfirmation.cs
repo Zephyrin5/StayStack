@@ -5,8 +5,8 @@ namespace Bookings.Contracts;
 ///     The hold's write side.
 ///     <para>
 ///         An interface because the unit tests mock it. Public although only
-///         this module uses it: internal would force ConfirmBookingHandler, three
-///         jobs and BookingsOutboxDispatcher internal with it, types that
+///         this module uses it: internal would force ConfirmBookingHandler and
+///         the jobs internal with it, types that
 ///         Mediator, TickerQ and DI discover.
 ///     </para>
 /// </summary>

@@ -2,7 +2,6 @@ using BuildingBlocks.Persistence;
 using Bookings.Contracts;
 using BuildingBlocks.Configuration;
 using Bookings.Features.HoldAvailability;
-using Bookings.Outbox;
 using Catalog.Contracts;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -47,7 +46,6 @@ public static class BookingsServicesRegistration
 
         services.AddScoped<IBookingLookup, BookingLookup>();
         services.AddScoped<IBookingPaymentConfirmation, BookingPaymentConfirmation>();
-        services.AddScoped<BookingsOutboxDispatcher>();
 
         // Implements a Catalog-defined interface, not one of Bookings' own -
         // see IUnitArchivalGuard's own doc comment for why the interface
