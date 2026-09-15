@@ -46,7 +46,6 @@ public class AppIdentityDbContext(DbContextOptions<AppIdentityDbContext> options
 
         builder.ApplyConfiguration(new RoleConfiguration());
         builder.ApplyConfiguration(new UserConfiguration());
-        builder.ApplyConfiguration(new UserRoleConfiguration());
 
         builder.Entity<ApplicationUser>().ToTable("users");
         builder.Entity<IdentityRole<Guid>>().ToTable("roles");

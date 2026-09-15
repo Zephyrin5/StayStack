@@ -8,26 +8,12 @@ namespace Transactions.Contracts;
 public interface ITransactionReversal
 {
     /// <summary>
-    ///     The Amount of this booking's Succeeded transaction, if any. Null when
-    ///     there is no transaction, it is still Pending, or it has already moved
-    ///     past Succeeded.
-    /// </summary>
-    Task<Money?> GetSucceededTransactionAmountAsync(Guid bookingId, CancellationToken cancellationToken);
-
-    /// <summary>
-    ///     The most recent refund recorded against this booking, if any. Null
-    ///     when no transaction reached the refund sub-lifecycle - nothing to
-    ///     refund, not a lookup failure.
-    /// </summary>
-    Task<TransactionRefundSnapshot?> GetRefundSnapshotAsync(Guid bookingId, CancellationToken cancellationToken);
-
-    /// <summary>
     ///     Everything a caller needs to describe this booking's payment, read
     ///     once.
     ///     <para>
     ///         One read because the state moves: a dispatcher or the sweep can take
-    ///         a payment Succeeded -> RefundPending between two reads, and then a
-    ///         refund lookup followed by a succeeded-amount lookup sees neither.
+    ///         a payment Succeeded -> RefundPending between two reads, and a refund
+    ///         lookup followed by a succeeded-amount lookup would see neither.
     ///         Null means nothing succeeded and nothing was refunded.
     ///     </para>
     /// </summary>
@@ -117,29 +103,4 @@ public record PaymentStateSnapshot
     ///     will come to, rather than recomputing it by another rule.
     /// </summary>
     public DateTimeOffset? SucceededAt { get; init; }
-}
-
-public record TransactionRefundSnapshot
-{
-    public required Money Amount { get; init; }
-    public required Money RefundAmount { get; init; }
-
-    /// <summary>
-    ///     Whether that refund is still outstanding.
-    ///     <para>
-    ///         RefundAmount records what was <em>requested</em>: MarkRefundPending
-    ///         sets it, and it stays through Refunded and RefundFailed alike, so
-    ///         its presence cannot say a refund settled.
-    ///     </para>
-    ///     <para>
-    ///         A bool rather than the TransactionStatus enum, for the same
-    ///         reason BookingSummary.IsPending is one: that type lives in
-    ///         Transactions.Entities and this contract stays dependency-free,
-    ///         and callers only need this one fact. Refunded and RefundFailed
-    ///         are both false here - the first because it settled, the second
-    ///         because it is a resolved failure needing intervention rather
-    ///         than something still in flight.
-    ///     </para>
-    /// </summary>
-    public required bool RefundPending { get; init; }
 }

@@ -222,45 +222,4 @@ internal class TransactionReversal(
                 SucceededAt = transaction.SucceededAt
             };
     }
-
-    public async Task<Money?> GetSucceededTransactionAmountAsync(Guid bookingId, CancellationToken cancellationToken)
-    {
-        // FirstOrDefault, ordered: the active-transaction index keeps at most one
-        // Succeeded row per booking, but nothing here should depend on that.
-        Transaction? transaction = await dbContext.Transactions.AsNoTracking()
-            .Where(t => t.BookingId == bookingId && t.TransactionStatus == TransactionStatus.Succeeded)
-            .OrderByDescending(t => t.Id)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        return transaction?.Amount;
-    }
-
-    public async Task<TransactionRefundSnapshot?> GetRefundSnapshotAsync(Guid bookingId, CancellationToken cancellationToken)
-    {
-        // Most recent refund, not "the" refund: a booking can accumulate several
-        // transactions, and the active-transaction index constrains only Pending
-        // and Succeeded, so two refunded attempts are a state the schema permits.
-        // Ordered by Id so the answer is deterministic.
-        Transaction? transaction = await dbContext.Transactions.AsNoTracking()
-            .Where(
-                // EF.Property: RefundAmount is computed from the backing field
-                // and Amount's currency, and has no SQL translation.
-                t => t.BookingId == bookingId
-                     && EF.Property<decimal?>(t, Transaction.RefundAmountField) != null)
-            .OrderByDescending(t => t.Id)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        return transaction is null
-            ? null
-            : new TransactionRefundSnapshot
-            {
-                Amount = transaction.Amount,
-                RefundAmount = transaction.RefundAmount!.Value,
-                // The outcome, read from the status rather than inferred from
-                // the amount's presence. The amount survives into Refunded
-                // and RefundFailed unchanged, so it can only ever say a
-                // refund was requested.
-                RefundPending = transaction.TransactionStatus == TransactionStatus.RefundPending
-            };
-    }
 }

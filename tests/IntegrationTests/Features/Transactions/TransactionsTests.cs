@@ -584,26 +584,13 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
     }
 
     [Fact]
-    public async Task RefundLookups_StaySingleValued_OnceATransactionEntersTheRefundLifecycle()
+    public async Task Initiate_OnceTheOnlyPaymentEntersRefund_IsRefusedByTheBookingNotTheIndex()
     {
-        // Pins the invariant that makes TransactionReversal's two
-        // SingleOrDefaultAsync lookups safe, because nothing else did and it
-        // spans three separate facts across two modules:
-        //
-        //   1. ix_transactions_booking_id_active is unique but filtered to
-        //      ('Pending','Succeeded'), so a transaction entering the refund
-        //      sub-lifecycle leaves it and stops blocking new inserts.
-        //   2. RefundAmount is only ever written by MarkRefundPending, which
-        //      requires Succeeded - so a second non-null RefundAmount needs a
-        //      second transaction to reach Succeeded.
-        //   3. That second transaction can never be created, because
-        //      initiating one requires BookingSummary.IsPending, and a
-        //      booking only reaches the refund path by being Cancelled -
-        //      with no transition back to Pending.
-        //
-        // Break (3) - say, by adding a reinstate-booking feature - and
-        // GetRefundSnapshotAsync starts throwing InvalidOperationException,
-        // surfacing as a 500 on cancellation. This test fails first.
+        // ix_transactions_booking_id_active is filtered to ('Pending','Succeeded'),
+        // so a transaction entering the refund sub-lifecycle stops blocking new
+        // inserts. What refuses a second payment is the booking's own state:
+        // initiating requires a Pending booking, and a booking reaches the
+        // refund path only by being Cancelled, with no transition back.
         string adminToken = await SignInAsAdministratorAsync();
         (Guid bookingId, Guid transactionId, string managementToken) = await CreateSucceededTransactionAsync(adminToken);
 
@@ -621,21 +608,8 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         }
 
         // The transaction has left the unique index's filter, so the index
-        // alone would now permit a second one. The booking's own state is
-        // what actually refuses it.
+        // alone would permit a second one.
         HttpResponseMessage secondInitiate = await PostWithSessionAsync("/api/transactions", new InitiateTransactionRequest { BookingId = bookingId }, await OpenSessionAsync(bookingId, managementToken));
         Assert.Equal(HttpStatusCode.Conflict, secondInitiate.StatusCode);
-
-        // And both lookups still resolve rather than throwing on a second row.
-        using IServiceScope scope = factory.Services.CreateScope();
-        ITransactionReversal transactionReversal = scope.ServiceProvider.GetRequiredService<ITransactionReversal>();
-
-        TransactionRefundSnapshot? snapshot =
-            await transactionReversal.GetRefundSnapshotAsync(bookingId, TestContext.Current.CancellationToken);
-        Assert.NotNull(snapshot);
-
-        // Null, not a throw: the one Succeeded transaction moved on to
-        // RefundPending, so nothing matches that filter.
-        Assert.Null(await transactionReversal.GetSucceededTransactionAmountAsync(bookingId, TestContext.Current.CancellationToken));
     }
 }

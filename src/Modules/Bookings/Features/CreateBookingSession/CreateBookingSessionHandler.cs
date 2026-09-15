@@ -2,7 +2,6 @@ using Bookings.Contracts;
 using Bookings.Entities;
 using Bookings.Features.Common;
 using BuildingBlocks.Exceptions;
-using BuildingBlocks.Identity;
 using Mediator;
 using Microsoft.Extensions.Options;
 namespace Bookings.Features.CreateBookingSession;
@@ -19,7 +18,6 @@ namespace Bookings.Features.CreateBookingSession;
 /// </summary>
 public class CreateBookingSessionHandler(
     AppBookingsDbContext dbContext,
-    ICurrentUserProvider currentUserProvider,
     IBookingSessions bookingSessions,
     TimeProvider timeProvider,
     IOptions<BookingLifecyclePolicyOptions> policy)
