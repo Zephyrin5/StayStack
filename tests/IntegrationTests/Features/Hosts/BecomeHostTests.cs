@@ -4,10 +4,10 @@ using Microsoft.AspNetCore.Hosting;
 using Bogus;
 using Hosts;
 using Hosts.Contracts;
-using Identity.Jobs;
 using Identity;
 using Identity.Entities;
 using Identity.Features.BecomeHost;
+using Identity.Features.RefreshToken;
 using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -24,105 +24,20 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     private readonly Faker _faker = new Faker();
 
     [Fact]
-    public async Task BecomeHost_WhenTheReconcileJobReclaimsTheIntentMidRequest_SaysSoRatherThanBlamingTheRole()
-    {
-        // A request still in flight past the ten-minute grace period can have
-        // its intent claimed by ReconcileOrphanedHostLinkIntentsJob. The staged
-        // intent delete then matches zero rows inside AddToRoleAsync's save,
-        // and UserStore reports that as a plain ConcurrencyFailure on
-        // roleResult - indistinguishable, by code alone, from the role genuinely
-        // failing to assign.
-        //
-        // The compensations are correct either way; this pins the message.
-        // Reporting a role-assignment error here would send someone hunting
-        // through seed data for what is really a timeout.
-        //
-        // Driven through a real seam rather than simulated: RegisterHostAsync
-        // runs after the intent is opened and before the delete is staged,
-        // which is exactly where the job's claim lands.
-        (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
-
-        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
-            builder.ConfigureServices(services =>
-            {
-                ServiceDescriptor original = services.Single(d => d.ServiceType == typeof(IHostRegistrar));
-                services.Remove(original);
-                services.Add(new ServiceDescriptor(
-                    typeof(IHostRegistrar),
-                    sp => new ReclaimIntentOnRegister(
-                        (IHostRegistrar)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!),
-                        () => DeleteIntentForAsync(userId)),
-                    original.Lifetime));
-            }));
-
-        using HttpClient client = host.CreateClient();
-        HttpResponseMessage response = await client.SendAsync(
-            CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken);
-
-        // 409, not the 400 a role validation failure produces.
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-
-        string body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        Assert.Contains("recovery window", body);
-
-        // And specifically NOT the two wrong answers: a role problem, or
-        // "you are already a host" when they plainly are not.
-        Assert.DoesNotContain("already linked to a host", body);
-
-        using IServiceScope scope = factory.Services.CreateScope();
-        AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
-        ApplicationUser user = await identity.Users.AsNoTracking()
-            .SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
-
-        // Compensation still ran: the caller is left exactly as they started.
-        Assert.Null(user.HostId);
-    }
-
-    private async Task DeleteIntentForAsync(Guid userId)
-    {
-        using IServiceScope scope = factory.Services.CreateScope();
-        AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
-        await identity.PendingHostLinkIntents
-            .Where(i => i.UserId == userId)
-            .ExecuteDeleteAsync();
-    }
-
-    // Stands in for the reconcile job claiming the intent, at the one point in
-    // the production call order where that claim actually lands.
-    private sealed class ReclaimIntentOnRegister(IHostRegistrar inner, Func<Task> onRegister) : IHostRegistrar
-    {
-        public async Task RegisterHostAsync(
-            Guid hostId, string businessName, string contactEmail, string? contactPhone, CancellationToken cancellationToken)
-        {
-            await inner.RegisterHostAsync(hostId, businessName, contactEmail, contactPhone, cancellationToken);
-            await onRegister();
-        }
-
-        public Task DeleteAsync(Guid hostId, CancellationToken cancellationToken) =>
-            inner.DeleteAsync(hostId, cancellationToken);
-    }
-
-    [Fact]
     public async Task BecomeHost_ConcurrentRequestsFromTheSameUser_ProduceOneHostAndNoServerError()
     {
-        // A double-click, or a client retrying a request still in flight.
-        // OpenIntentAsync reads-then-inserts against a unique index on UserId,
-        // so both attempts can see no intent and both insert. The loser adopts
-        // the committed intent rather than failing with a 500.
-        //
-        // Adopting has a hazard: hostId is the intent's id, so both attempts
-        // share one Host, and a losing attempt that deleted "its" Host would
-        // delete the one the winner just linked - a user pointing at a missing
-        // row, locked out permanently by a double-click. Hence the assertions
-        // below check the Host survives, not merely that nothing returned 500.
+        // A double-click, or a client retrying a request still in flight. Each
+        // attempt registers its own Host and links it; the loser's link fails the
+        // user row's concurrency check, and its scope rolls its Host back with it.
         (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
+        string businessName = UniqueBusinessName();
 
         // Separate clients so these genuinely overlap rather than queueing on
         // one connection - same reasoning as the other concurrency tests here.
         Task<HttpResponseMessage>[] attempts =
         [
-            factory.CreateClient().SendAsync(CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken),
-            factory.CreateClient().SendAsync(CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken)
+            factory.CreateClient().SendAsync(CreateBecomeHostRequest(accessToken, businessName), TestContext.Current.CancellationToken),
+            factory.CreateClient().SendAsync(CreateBecomeHostRequest(accessToken, businessName), TestContext.Current.CancellationToken)
         ];
 
         HttpResponseMessage[] responses = await Task.WhenAll(attempts);
@@ -131,8 +46,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
         Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
 
-        // The invariant that actually matters: the user is linked, and linked
-        // to a Host that exists.
+        // The user is linked to a Host that exists, and the loser left no second Host.
         using IServiceScope scope = factory.Services.CreateScope();
         AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
         ApplicationUser user = await identity.Users.AsNoTracking()
@@ -140,319 +54,130 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
 
         Assert.NotNull(user.HostId);
         Assert.True(await HostExistsAsync(user.HostId!.Value));
+        Assert.Equal(1, await HostCountAsync(businessName));
     }
 
     [Fact]
-    public async Task BecomeHost_WhenTheProcessDiesAfterRegisteringTheHost_TheReconcileJobDeletesTheOrphan()
+    public async Task BecomeHost_WhenLinkingFailsAfterTheHostIsRegistered_LeavesNoHostBehind()
     {
-        // The window BecomeHost had no cover for at all. RegisterHostAsync
-        // commits a Host in Hosts' database before Identity writes anything;
-        // the failed-update branches compensate through the outbox, but a hard
-        // process death between the two wrote nothing anywhere - no intent, no
-        // outbox row, no job - and the orphaned Host was permanent.
-        //
-        // Simulated the honest way: write the intent and register the Host
-        // exactly as the handler does, then simply stop, which is what a
-        // process death looks like from the database. Backdated past the grace
-        // period so the job treats it as abandoned.
-        (Guid userId, _) = await SeedAndSignInUserAsync();
-        Guid hostId = Guid.CreateVersion7();
-
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
-            identity.PendingHostLinkIntents.Add(new PendingHostLinkIntent
-            {
-                Id = hostId,
-                UserId = userId,
-                CreatedAt = DateTimeOffset.UtcNow - PendingHostLinkIntent.ReconcileGrace.Add(TimeSpan.FromMinutes(1))
-            });
-            await identity.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-            await scope.ServiceProvider.GetRequiredService<IHostRegistrar>().RegisterHostAsync(
-                hostId, "Orphaned Co", "orphan@example.com", null, TestContext.Current.CancellationToken);
-        }
-
-        Assert.True(await HostExistsAsync(hostId));
-
-        using (IServiceScope jobScope = factory.Services.CreateScope())
-        {
-            ReconcileOrphanedHostLinkIntentsJob job = ActivatorUtilities
-                .CreateInstance<ReconcileOrphanedHostLinkIntentsJob>(jobScope.ServiceProvider);
-            await job.ReconcileAsync(default!, TestContext.Current.CancellationToken);
-        }
-
-        Assert.False(await HostExistsAsync(hostId));
-        Assert.False(await IntentExistsAsync(hostId));
-    }
-
-    [Fact]
-    public async Task BecomeHost_WhenTheProcessDiesAfterLinkingButBeforeTheRole_TheJobUnlinksTheUserAndTheyCanRetry()
-    {
-        // The lockout state: a crash between linking the Host and adding the
-        // role leaves a user linked to a real Host, holding no Host role, with
-        // AlreadyAHostException firing on every attempt. The intent spans the
-        // whole operation, so it is still there to recover from.
-        //
-        // Seeded as that exact state: intent alive, Host registered, user
-        // linked, no role.
+        // A failed host link must not leave an orphaned Host row. The failure lands
+        // after RegisterHostAsync has written the Host, inside the same transaction
+        // as the link that never happens.
         (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
-        Guid hostId = Guid.CreateVersion7();
+        string businessName = UniqueBusinessName();
 
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
-            identity.PendingHostLinkIntents.Add(new PendingHostLinkIntent
-            {
-                Id = hostId,
-                UserId = userId,
-                CreatedAt = DateTimeOffset.UtcNow - PendingHostLinkIntent.ReconcileGrace.Add(TimeSpan.FromMinutes(1))
-            });
+        using WebApplicationFactory<Program> host = HostWithRegistrarFailingAfterRegister(failures: 1);
+        HttpResponseMessage response = await host.CreateClient().SendAsync(
+            CreateBecomeHostRequest(accessToken, businessName), TestContext.Current.CancellationToken);
 
-            await scope.ServiceProvider.GetRequiredService<IHostRegistrar>().RegisterHostAsync(
-                hostId, "Half Linked Co", "half@example.com", null, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(0, await HostCountAsync(businessName));
 
-            ApplicationUser user = await identity.Users.SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
-            user.HostId = hostId;
-            await identity.SaveChangesAsync(TestContext.Current.CancellationToken);
-        }
+        using IServiceScope scope = factory.Services.CreateScope();
+        ApplicationUser user = await scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>().Users.AsNoTracking()
+            .SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
+        Assert.Null(user.HostId);
+    }
 
-        using (IServiceScope jobScope = factory.Services.CreateScope())
-        {
-            ReconcileOrphanedHostLinkIntentsJob job = ActivatorUtilities
-                .CreateInstance<ReconcileOrphanedHostLinkIntentsJob>(jobScope.ServiceProvider);
-            await job.ReconcileAsync(default!, TestContext.Current.CancellationToken);
-        }
+    [Fact]
+    public async Task BecomeHost_AfterAFailedAttempt_CanBeRetried()
+    {
+        // A failed attempt must not lock the user out: nothing it wrote survives,
+        // so AlreadyAHostException has nothing to fire on.
+        (_, string accessToken) = await SeedAndSignInUserAsync();
 
-        // Both halves undone, not just the Host - unlinking is what makes the
-        // difference between recovery and a user pointing at a deleted row.
-        Assert.False(await HostExistsAsync(hostId));
-        Assert.False(await IntentExistsAsync(hostId));
+        using WebApplicationFactory<Program> host = HostWithRegistrarFailingAfterRegister(failures: 1);
+        HttpClient client = host.CreateClient();
 
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
-            ApplicationUser user = await identity.Users.AsNoTracking()
-                .SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
-            Assert.Null(user.HostId);
-        }
-
-        // The property that actually matters: the user is not stuck. Without
-        // recovery this returns 409 AlreadyAHostException forever.
-        HttpResponseMessage retry = await _client.SendAsync(
+        HttpResponseMessage failed = await client.SendAsync(
             CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
 
+        HttpResponseMessage retry = await client.SendAsync(
+            CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
     }
 
-    [Fact]
-    public async Task Reconcile_WhenTheUserIsLinkedToADifferentHost_LeavesThatLinkAlone()
+    private WebApplicationFactory<Program> HostWithRegistrarFailingAfterRegister(int failures)
     {
-        // The unlink is guarded on the id. If the user became a host some
-        // other way after this intent was abandoned, clearing their HostId
-        // would break a perfectly good link to undo an unrelated one.
-        (Guid userId, _) = await SeedAndSignInUserAsync();
-        Guid abandonedHostId = Guid.CreateVersion7();
-        Guid realHostId = Guid.CreateVersion7();
+        FailureBudget budget = new FailureBudget(failures);
 
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
-            identity.PendingHostLinkIntents.Add(new PendingHostLinkIntent
-            {
-                Id = abandonedHostId,
-                UserId = userId,
-                CreatedAt = DateTimeOffset.UtcNow - PendingHostLinkIntent.ReconcileGrace.Add(TimeSpan.FromMinutes(1))
-            });
-
-            IHostRegistrar registrar = scope.ServiceProvider.GetRequiredService<IHostRegistrar>();
-            await registrar.RegisterHostAsync(
-                abandonedHostId, "Abandoned Co", "abandoned@example.com", null, TestContext.Current.CancellationToken);
-            await registrar.RegisterHostAsync(
-                realHostId, "Real Co", "real@example.com", null, TestContext.Current.CancellationToken);
-
-            ApplicationUser user = await identity.Users.SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
-            user.HostId = realHostId;
-            await identity.SaveChangesAsync(TestContext.Current.CancellationToken);
-        }
-
-        using (IServiceScope jobScope = factory.Services.CreateScope())
-        {
-            ReconcileOrphanedHostLinkIntentsJob job = ActivatorUtilities
-                .CreateInstance<ReconcileOrphanedHostLinkIntentsJob>(jobScope.ServiceProvider);
-            await job.ReconcileAsync(default!, TestContext.Current.CancellationToken);
-        }
-
-        Assert.False(await HostExistsAsync(abandonedHostId));
-        Assert.True(await HostExistsAsync(realHostId));
-
-        using IServiceScope assertScope = factory.Services.CreateScope();
-        AppIdentityDbContext assertIdentity = assertScope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
-        ApplicationUser linked = await assertIdentity.Users.AsNoTracking()
-            .SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
-
-        Assert.Equal(realHostId, linked.HostId);
-    }
-
-    [Fact]
-    public async Task Reconcile_WhenOneIntentThrows_StillProcessesTheRest()
-    {
-        // One failing host deletion must not starve the queue. Deleting the Host
-        // is an outbox row (docs/adr/0025), committed with the unlink and
-        // dispatched after, so a failing registrar cannot fail a reconcile -
-        // TryDispatchAsync absorbs it and the relay retries. This asserts that
-        // BOTH intents resolve locally, even the one whose host deletion will
-        // fail.
-        (Guid poisonUserId, _) = await SeedAndSignInUserAsync();
-        (Guid healthyUserId, _) = await SeedAndSignInUserAsync();
-
-        Guid poisonHostId = Guid.CreateVersion7();
-        Guid healthyHostId = Guid.CreateVersion7();
-
-        await SeedAbandonedIntentAsync(poisonUserId, poisonHostId);
-        await SeedAbandonedIntentAsync(healthyUserId, healthyHostId);
-
-        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
+        return factory.WithWebHostBuilder(builder =>
             builder.ConfigureServices(services =>
             {
                 ServiceDescriptor original = services.Single(d => d.ServiceType == typeof(IHostRegistrar));
                 services.Remove(original);
                 services.Add(new ServiceDescriptor(
                     typeof(IHostRegistrar),
-                    sp => new ThrowForOneHost(
-                        (IHostRegistrar)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!),
-                        poisonHostId),
+                    sp => new FailAfterRegister(
+                        (IHostRegistrar)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!), budget),
                     original.Lifetime));
             }));
+    }
 
-        using (IServiceScope jobScope = host.Services.CreateScope())
+    private sealed class FailureBudget(int failures)
+    {
+        private int _remaining = failures;
+
+        public bool Take() => Interlocked.Decrement(ref _remaining) >= 0;
+    }
+
+    // Registers for real, then fails - the Host row exists in the transaction when
+    // the request fails.
+    private sealed class FailAfterRegister(IHostRegistrar inner, FailureBudget budget) : IHostRegistrar
+    {
+        public async Task RegisterHostAsync(
+            Guid hostId, string businessName, string contactEmail, string? contactPhone, CancellationToken cancellationToken)
         {
-            ReconcileOrphanedHostLinkIntentsJob job = ActivatorUtilities
-                .CreateInstance<ReconcileOrphanedHostLinkIntentsJob>(jobScope.ServiceProvider);
-
-            // The run itself must not throw.
-            await job.ReconcileAsync(default!, TestContext.Current.CancellationToken);
+            await inner.RegisterHostAsync(hostId, businessName, contactEmail, contactPhone, cancellationToken);
+            if (budget.Take())
+            {
+                throw new InvalidOperationException("Injected failure after the Host was registered.");
+            }
         }
-
-        // Both intents are resolved. The local decision - unlink the user,
-        // delete the intent - does not depend on a cross-module call
-        // succeeding, so one row cannot block the others.
-        Assert.False(await IntentExistsAsync(poisonHostId));
-        Assert.False(await IntentExistsAsync(healthyHostId));
-
-        // The healthy host is gone, dispatched inline after its commit.
-        Assert.False(await HostExistsAsync(healthyHostId));
-
-        // The poisoned one survives its failed dispatch, and that is a
-        // durable outbox row's problem rather than a lost write: the relay
-        // will keep trying. Nothing about it held up the row behind it.
-        Assert.True(await HostExistsAsync(poisonHostId));
-    }
-
-    private async Task SeedAbandonedIntentAsync(Guid userId, Guid hostId)
-    {
-        using IServiceScope scope = factory.Services.CreateScope();
-        AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
-        identity.PendingHostLinkIntents.Add(new PendingHostLinkIntent
-        {
-            Id = hostId,
-            UserId = userId,
-            CreatedAt = DateTimeOffset.UtcNow - PendingHostLinkIntent.ReconcileGrace.Add(TimeSpan.FromMinutes(1))
-        });
-        await identity.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        await scope.ServiceProvider.GetRequiredService<IHostRegistrar>().RegisterHostAsync(
-            hostId, "Abandoned Co", "abandoned@example.com", null, TestContext.Current.CancellationToken);
-    }
-
-    // Fails one host id and passes everything else through, so the batch has a
-    // genuine mix rather than an all-or-nothing outcome.
-    private sealed class ThrowForOneHost(IHostRegistrar inner, Guid poisonHostId) : IHostRegistrar
-    {
-        public Task RegisterHostAsync(
-            Guid hostId, string businessName, string contactEmail, string? contactPhone, CancellationToken cancellationToken) =>
-            inner.RegisterHostAsync(hostId, businessName, contactEmail, contactPhone, cancellationToken);
 
         public Task DeleteAsync(Guid hostId, CancellationToken cancellationToken) =>
-            hostId == poisonHostId
-                ? throw new InvalidOperationException("Hosts is unreachable for this row.")
-                : inner.DeleteAsync(hostId, cancellationToken);
+            inner.DeleteAsync(hostId, cancellationToken);
     }
 
     [Fact]
-    public async Task BecomeHost_WhenTheIntentIsStillInsideTheGracePeriod_TheJobLeavesItAlone()
+    public async Task BecomeHost_WhoseCommitLosesItsAcknowledgement_ReturnsTheHostItMade_WithAUsableRefreshToken()
     {
-        // The other half: a slow-but-healthy request must not have its Host
-        // deleted out from under it.
-        (Guid userId, _) = await SeedAndSignInUserAsync();
-        Guid hostId = Guid.CreateVersion7();
+        // The scope's commit lands and its acknowledgement is lost, so the whole
+        // scope runs again. The retry must recognise its own link rather than answer
+        // "already a host", create no second Host, and return the refresh token whose
+        // hash the first attempt stored.
+        (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
+        string businessName = UniqueBusinessName();
 
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
-            identity.PendingHostLinkIntents.Add(new PendingHostLinkIntent
-            {
-                Id = hostId,
-                UserId = userId,
-                CreatedAt = DateTimeOffset.UtcNow
-            });
-            await identity.SaveChangesAsync(TestContext.Current.CancellationToken);
+        CommitFault<AppIdentityDbContext> lostAck = CommitFaults.FailAfterCommit<AppIdentityDbContext>((context, ct) =>
+            CommitFaults.CommittedRowExistsAsync(context,
+                "SELECT 1 FROM users WHERE id = @userId AND host_id IS NOT NULL", "userId", userId, ct));
+        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
+        HttpClient client = host.CreateClient();
 
-            await scope.ServiceProvider.GetRequiredService<IHostRegistrar>().RegisterHostAsync(
-                hostId, "In Flight Co", "inflight@example.com", null, TestContext.Current.CancellationToken);
-        }
+        HttpResponseMessage response = await client.SendAsync(
+            CreateBecomeHostRequest(accessToken, businessName), TestContext.Current.CancellationToken);
 
-        using (IServiceScope jobScope = factory.Services.CreateScope())
-        {
-            ReconcileOrphanedHostLinkIntentsJob job = ActivatorUtilities
-                .CreateInstance<ReconcileOrphanedHostLinkIntentsJob>(jobScope.ServiceProvider);
-            await job.ReconcileAsync(default!, TestContext.Current.CancellationToken);
-        }
+        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the scope's commit.");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        BecomeHostResponse? result = await response.Content.ReadFromJsonAsync<BecomeHostResponse>(
+            TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result?.RefreshToken);
 
-        Assert.True(await HostExistsAsync(hostId));
-        Assert.True(await IntentExistsAsync(hostId));
-    }
+        Assert.Equal(1, await HostCountAsync(businessName));
 
-    [Fact]
-    public async Task DeleteHost_ForAnArchivedHost_StillRemovesIt()
-    {
-        // Both registrar operations ignore the soft-delete filter. If deletion
-        // honoured it, an archived Host adopted by registration would be
-        // invisible to the compensation meant to undo it: the reconcile job's
-        // delete would no-op, and the user would stay linked to a Host nothing
-        // could remove.
-        //
-        // Latent, since nothing archives a Host today; the first feature that
-        // does would otherwise discover this by way of an unremovable link.
-        Guid hostId = Guid.CreateVersion7();
-
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            await scope.ServiceProvider.GetRequiredService<IHostRegistrar>().RegisterHostAsync(
-                hostId, "Archived Co", "archived@example.com", null, TestContext.Current.CancellationToken);
-
-            AppHostsDbContext hosts = scope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
-            Host host = await hosts.Hosts.SingleAsync(h => h.Id == hostId, TestContext.Current.CancellationToken);
-            host.Archive(DateTimeOffset.UtcNow, null);
-            await hosts.SaveChangesAsync(TestContext.Current.CancellationToken);
-        }
-
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            await scope.ServiceProvider.GetRequiredService<IHostRegistrar>()
-                .DeleteAsync(hostId, TestContext.Current.CancellationToken);
-        }
-
-        Assert.False(await HostExistsAsync(hostId));
+        HttpResponseMessage refreshed = await client.PostAsJsonAsync("/api/auth/refresh-token",
+            new RefreshTokenRequest { RefreshToken = result.RefreshToken }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
     }
 
     [Fact]
     public async Task RegisterHost_WhenAnArchivedHostOccupiesTheId_DoesNotCreateASecond()
     {
-        // The other half of the symmetry: an archived Host still occupies the
-        // primary key. Registration has to see it, or the insert collides and
-        // the unique-violation catch adopts it anyway - implicitly, through an
-        // exception, instead of by an explicit check.
+        // An archived Host still occupies the primary key. Registration has to see
+        // it, or the insert collides and the unique-violation catch adopts it
+        // anyway - implicitly, through an exception, instead of by an explicit check.
         Guid hostId = Guid.CreateVersion7();
 
         using (IServiceScope scope = factory.Services.CreateScope())
@@ -484,10 +209,8 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     [Fact]
     public async Task RegisterHost_CalledRepeatedlyWithTheSameId_CreatesExactlyOneHost()
     {
-        // The id is supplied by the caller and recorded in the intent first, so
-        // every retry after a timeout re-registers the same Host. A registrar
-        // minting its own id would let each retry past the "already a host"
-        // guard (HostId still null) create another orphan.
+        // The id is supplied by the caller, so calling again with it is a no-op
+        // rather than a second Host.
         Guid hostId = Guid.CreateVersion7();
 
         for (int attempt = 0; attempt < 3; attempt++)
@@ -506,55 +229,6 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(1, count);
     }
 
-    [Fact]
-    public async Task BecomeHost_WhoseIntentInsertLosesItsAcknowledgement_StillMakesTheUserAHost()
-    {
-        // The intent is a single-row save, retried by the execution strategy.
-        // After a lost acknowledgement the retry re-inserts the same intent and
-        // Postgres reports its primary key - so the adopt-the-committed-intent
-        // catch has to match the primary key as well as the user index.
-        (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
-
-        CommitFault<AppIdentityDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppIdentityDbContext>(context =>
-            context.ChangeTracker.Entries<PendingHostLinkIntent>().Any(e => e.Entity.UserId == userId));
-        using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
-
-        HttpResponseMessage response = await host.CreateClient().SendAsync(
-            CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken);
-
-        Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the intent insert.");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        using IServiceScope scope = factory.Services.CreateScope();
-        ApplicationUser user = await scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>().Users.AsNoTracking()
-            .SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
-
-        Assert.NotNull(user.HostId);
-        Assert.True(await HostExistsAsync(user.HostId!.Value));
-    }
-
-    [Fact]
-    public async Task BecomeHost_OnSuccess_LeavesNoIntentBehind()
-    {
-        // The success path deletes the intent in the same SaveChanges that
-        // sets HostId, which is what makes it impossible for the reconcile job
-        // to delete a live Host. If this ever regressed to a separate delete,
-        // a crash in between would leave a linked user with a surviving
-        // intent - and the job would collect their real Host.
-        (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
-
-        HttpResponseMessage response = await _client.SendAsync(
-            CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        using IServiceScope scope = factory.Services.CreateScope();
-        AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
-
-        Assert.False(await identity.PendingHostLinkIntents
-            .AsNoTracking()
-            .AnyAsync(i => i.UserId == userId, TestContext.Current.CancellationToken));
-    }
-
     private async Task<bool> HostExistsAsync(Guid hostId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
@@ -564,14 +238,16 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
             .AnyAsync(h => h.Id == hostId, TestContext.Current.CancellationToken);
     }
 
-    private async Task<bool> IntentExistsAsync(Guid intentId)
+    private async Task<int> HostCountAsync(string businessName)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
-        return await identity.PendingHostLinkIntents
-            .AsNoTracking()
-            .AnyAsync(i => i.Id == intentId, TestContext.Current.CancellationToken);
+        AppHostsDbContext hosts = scope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+        return await hosts.Hosts
+            .IgnoreQueryFilters()
+            .CountAsync(h => h.BusinessName == businessName, TestContext.Current.CancellationToken);
     }
+
+    private string UniqueBusinessName() => $"{_faker.Company.CompanyName()} {Guid.NewGuid():N}";
 
     private async Task<(Guid UserId, string AccessToken)> SeedAndSignInUserAsync()
     {
@@ -603,20 +279,20 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
         return (user.Id, signInResult.AccessToken);
     }
 
-    private static BecomeHostRequest CreateValidRequest()
+    private static BecomeHostRequest CreateValidRequest(string businessName = "Test Business")
     {
         return new BecomeHostRequest
         {
-            BusinessName = "Test Business",
+            BusinessName = businessName,
             ContactEmail = "contact@test-business.com"
         };
     }
 
-    private static HttpRequestMessage CreateBecomeHostRequest(string accessToken)
+    private static HttpRequestMessage CreateBecomeHostRequest(string accessToken, string businessName = "Test Business")
     {
         HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/api/hosts/become")
         {
-            Content = JsonContent.Create(CreateValidRequest())
+            Content = JsonContent.Create(CreateValidRequest(businessName))
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return request;
@@ -692,10 +368,8 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
 
         // Force the AddToRoleAsync step inside BecomeHostHandler to fail by
         // removing the "Host" role it depends on, rather than mocking
-        // UserManager - this exercises the handler's actual compensating
-        // rollback (undo the HostId link, delete the Host record it had
-        // just created) against a real database, instead of just trusting
-        // the code comment that describes it.
+        // UserManager - this exercises the rollback of the link and the Host it
+        // had just created against a real database.
         using (IServiceScope seedScope = factory.Services.CreateScope())
         {
             AppIdentityDbContext identityDb = seedScope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
