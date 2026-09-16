@@ -6,19 +6,11 @@ namespace Transactions.Entities;
 
 public sealed class Transaction : Entity
 {
-    // EF Core's constructor-binding convention can't bind a parameter typed
-    // as a ComplexProperty (Money) back to the entity's own mapped complex
-    // property - see Booking's identical constructor pair for the full
-    // explanation and docs/adr/0015. EF's materialization fallback only;
-    // Create() below still goes through the full validated constructor for
-    // every write. No reference-type properties here need a placeholder -
-    // FailureReason/RefundAmount are both nullable already.
+    // EF materialization only: its constructor binding cannot bind a complex property (docs/adr/0015).
     private Transaction()
     {
     }
 
-    // See Property.cs (Catalog) for why materialization goes through a
-    // real constructor rather than a parameterless one + `required`/`null!`.
     private Transaction(
         Guid id,
         Guid bookingId,
@@ -31,71 +23,35 @@ public sealed class Transaction : Entity
         TransactionStatus = transactionStatus;
     }
 
-    // Cross-module reference, plain Guid rather than a real FK - same
-    // pattern as Booking.UnitId (Bookings referencing Catalog). Resolved
-    // through Bookings.Contracts, never through a direct reference to
-    // Bookings' own entities.
+    // Cross-module reference, so a plain Guid rather than an FK (docs/adr/0004).
     public Guid BookingId { get; private set; }
 
-    // Snapshotted from the booking at initiation time, not a live read -
-    // what was actually charged shouldn't drift if the booking's total
-    // changes later. This is where the transaction's one currency lives;
-    // RefundAmount below derives from it.
+    // Snapshotted at initiation: what was charged does not drift with the booking's total.
     public Money Amount { get; private set; }
 
-    // Named TransactionStatus, not Status - Status is already claimed by
-    // the inherited Entity.Status (EntityStatus: soft-delete state), same
-    // reasoning as Booking.BookingStatus.
+    // Not Status: Entity.Status is the soft-delete state.
     public TransactionStatus TransactionStatus { get; private set; }
     public string? FailureReason { get; private set; }
 
     /// <summary>
-    ///     When this payment succeeded, as this system observed it.
-    ///     <para>
-    ///         Orders a payment against a cancellation, which decides which of
-    ///         two refund amounts is owed (RefundDecision, docs/adr/0027).
-    ///     </para>
-    ///     <para>
-    ///         Local observation time, not provider event time; nothing supplies
-    ///         the latter. The cancellation instant it is compared with is also
-    ///         this system's own clock.
-    ///     </para>
-    ///     <para>
-    ///         Null on rows written before this column existed.
-    ///     </para>
+    ///     When this system observed the payment succeed, which orders it against a cancellation and so
+    ///     decides the refund amount (docs/adr/0027). Local observation time; no provider event time exists.
     /// </summary>
     public DateTimeOffset? SucceededAt { get; private set; }
 
-    /// <summary>
-    ///     Which path started the refund. Null until one does.
-    /// </summary>
+    /// <summary>Which path started the refund. Null until one does.</summary>
     public RefundCause? RefundCause { get; private set; }
 
-    // Persisted as one nullable decimal column (the backing field, mapped in
-    // TransactionConfiguration) but exposed as Money?, paired with the one
-    // currency this transaction has, so no caller pairs a currency by hand. A
-    // second currency column could only ever agree with Amount's.
-    //
-    // Set by MarkRefundPending to the amount TransactionReversal decided
-    // (RefundDecision), not necessarily Amount. Transactions has no notion of
-    // a cancellation policy; it records the amount it is told.
+    // One decimal column, exposed as Money? paired with Amount's currency, so no caller pairs one by
+    // hand. Set by MarkRefundPending to the amount the resolver decided, not necessarily Amount.
     private decimal? _refundAmount;
 
-    /// <summary>
-    ///     The name of the backing field above, for the EF.Property lookups
-    ///     TransactionReversal needs - a computed property is not translatable
-    ///     to SQL, and a bare string there would drift silently if the field
-    ///     were ever renamed.
-    /// </summary>
+    /// <summary>The backing field's name, for the EF.Property lookups TransactionReversal needs.</summary>
     public const string RefundAmountField = nameof(_refundAmount);
 
     public Money? RefundAmount => _refundAmount is { } amount ? Money.Of(amount, Amount.Currency) : null;
 
-    // The id is the caller's, never minted here. A factory that generates its
-    // own identity hands a retried caller a different one on every attempt, and
-    // a caller whose commit lost its acknowledgement can then never find the row
-    // it already wrote (docs/adr/0025). ConfirmBookingHandler's booking id is
-    // pre-generated for the same reason.
+    // The id is the caller's: a retry must be able to find the row it already wrote (docs/adr/0025).
     public static Transaction Create(Guid id, Guid bookingId, Money amount)
     {
         Guard.Against.Default(id);
@@ -105,11 +61,8 @@ public sealed class Transaction : Entity
         return new Transaction(id, bookingId, amount, TransactionStatus.Pending);
     }
 
-    // Both transitions guard "only from Pending" - a transaction is a
-    // one-shot ledger entry, not something that flips back and forth.
-    // Unlike Cancel()'s idempotent no-op, re-finalizing is always a
-    // genuine conflict worth surfacing - a retried webhook for an
-    // already-succeeded transaction shouldn't be silently swallowed.
+    // Both terminal transitions require Pending: a transaction is a one-shot ledger entry, and
+    // re-finalizing is a conflict worth surfacing rather than swallowing.
     public void MarkSucceeded(DateTimeOffset succeededAt)
     {
         if (TransactionStatus != TransactionStatus.Pending)
@@ -132,16 +85,10 @@ public sealed class Transaction : Entity
         FailureReason = reason;
     }
 
-    // The refund sub-lifecycle, only reachable from Succeeded. Resolved by the
-    // admin stand-in endpoints MarkTransactionSucceeded/MarkTransactionFailed
-    // use in place of a gateway webhook.
+    // The refund sub-lifecycle, reachable only from Succeeded.
     public void MarkRefundPending(Money refundAmount, RefundCause cause)
     {
-        // First writer wins, and a second attempt is a no-op rather than an
-        // overwrite. The resolver decides once, so reaching here twice is a bug
-        // somewhere - but silently replacing a recorded refund amount must not
-        // be possible, because nothing downstream would show that it happened.
-
+        // First writer wins: silently replacing a recorded amount would leave no trace downstream.
         if (_refundAmount is not null)
         {
             return;
@@ -152,13 +99,8 @@ public sealed class Transaction : Entity
             throw new TransactionAlreadyFinalizedException(Id);
         }
 
-        // This guard STAYS, and typing RefundAmount as Money? is exactly why
-        // it has to. Only the decimal is stored; the currency on the way back
-        // out is derived from Amount. So a mismatched refund would not be
-        // rejected by the type - it would be silently relabelled as this
-        // transaction's currency, which is worse than the reattachment the
-        // typing removed. The guard is what licenses discarding the incoming
-        // currency in the first place.
+        // Only the decimal is stored, so without this a mismatched currency would be silently
+        // relabelled as this transaction's.
         if (refundAmount.Currency != Amount.Currency)
         {
             throw new CurrencyMismatchException(refundAmount.Currency, Amount.Currency);

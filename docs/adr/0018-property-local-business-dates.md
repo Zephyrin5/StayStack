@@ -23,8 +23,6 @@ Either way someone is paid the wrong amount, silently.
 
 `BuildingBlocks.Time.PropertyTimeZone.Today` throws rather than falling back. There is no `?? "UTC"` anywhere in the request path: a wrong zone is the error this decision exists to prevent, and under a UTC+3 market it loses money. A 500 with a precise message is the honest signal; a quietly mis-computed refund is not. The tradeoff is accepted deliberately: an unresolvable zone blocks a cancellation rather than mispricing it.
 
-The one-time migration backfill is the sole exception. Setting existing rows to `Asia/Kuwait` *is* a guess, and wrong for any property elsewhere - it stands because no better information exists in the data and the column must be populated to become `NOT NULL`. That is a data-migration decision; hosts with properties elsewhere have to correct theirs. Nothing at read time gets the same latitude.
-
 ### Coupled sites resolve the same way
 
 `GetBookingForManagementHandler` computes `CanReview = CheckOut <= today` and the three Reviews handlers reject on `CheckOut > today` - the same predicate inverted. Resolving them differently would have the UI offer a review button the API then rejects. `CancelBookingHandler` uses the same `today` for eligibility and the refund tier.
@@ -41,7 +39,7 @@ Chosen per site by what that site already has in hand:
 
 The snapshot is what lets the booking-scoped sites resolve a date at all. `BookingLookup.VerifyBookingAccessAsync`, `GetBookingForManagementHandler` and `CancelBookingHandler` inject no `IUnitLookup`; the snapshot gives them the zone with zero cross-module calls. `ListMyReviewableBookingsHandler` filters a list spanning many properties before loading any units, so it resolves each booking's date from its own snapshot against one clock reading (`PropertyTimeZone.ToLocalDate`); a single `today` would be wrong there in any zone.
 
-`Booking.TimeZoneId` is **non-nullable**, deliberately departing from `CancellationPolicy`'s nullable-snapshot precedent beside it. A null policy falls back to `CreateDefault()`, a defensible business default; a null zone would fall back to a guess, which is the defect. Same pattern, different stakes, so different nullability; older rows were backfilled by migration rather than left to a runtime fallback.
+`Booking.TimeZoneId` is **non-nullable**, deliberately departing from `CancellationPolicy`'s nullable-snapshot precedent beside it. A null policy falls back to `CreateDefault()`, a defensible business default; a null zone would fall back to a guess, which is the defect. Same pattern, different stakes, so different nullability.
 
 ### `BookingAccessChecker` resolves its own date
 

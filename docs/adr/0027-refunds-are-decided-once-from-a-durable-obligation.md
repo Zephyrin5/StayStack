@@ -38,7 +38,7 @@ Initiation takes `BookingPaymentLock` ([ADR-0028](0028-advisory-locks-and-lock-o
 
 ### Reporting reads one observation
 
-`CancelBookingHandler` describes the payment from one `GetPaymentStateAsync` read, which returns amount, refund amount, `SucceededAt` and `RefundStatus` together. Two separate reads can straddle a `Succeeded → RefundPending` transition and describe a state that never existed. The response carries `RefundStatus` (`None`, `Pending`, `Refunded`, `Failed`); `RefundPending` is derived from it for existing clients.
+`CancelBookingHandler` describes the payment from one `GetPaymentStateAsync` read, which returns amount, refund amount, `SucceededAt` and `RefundStatus` together. Two separate reads can straddle a `Succeeded → RefundPending` transition and describe a state that never existed. The response carries `RefundStatus` (`None`, `Pending`, `Refunded`, `Failed`).
 
 ## Alternatives considered
 

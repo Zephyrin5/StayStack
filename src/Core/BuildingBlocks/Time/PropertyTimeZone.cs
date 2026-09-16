@@ -10,54 +10,25 @@ namespace BuildingBlocks.Time;
 ///     </para>
 ///     <para>
     ///     <para>
-    ///         <b>At read time an unusable timezone is an error, never a guess.</b>
-    ///         Nothing here falls back to UTC: under a UTC+3 market that skew is
-    ///         permissive and loses money, so a wrong answer is worse than no
-    ///         answer. The one exception is the migration that backfilled
-    ///         existing rows, a data decision rather than a runtime one.
+    ///         An unusable zone is an error, never a guess: nothing falls back to UTC, because under a
+    ///         UTC+3 market that skew is permissive and loses money.
     ///     </para>
 /// </summary>
 public static class PropertyTimeZone
 {
-    /// <summary>
-    ///     True if the id resolves on this machine. TryFindSystemTimeZoneById
-    ///     rather than FindSystemTimeZoneById, so a validator or guard gets a
-    ///     boolean instead of a TimeZoneNotFoundException, which would surface
-    ///     as a 500.
-    /// </summary>
+    /// <summary>True if the id resolves on this machine, for validators and guards.</summary>
     public static bool IsValid(string? timeZoneId) =>
         !string.IsNullOrWhiteSpace(timeZoneId)
         && TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId, out _);
 
-    /// <summary>
-    ///     The current date at the given timezone. Converting an instant to a
-    ///     local date is always unambiguous - unlike the reverse direction,
-    ///     DST never makes this ill-defined (a wall-clock time can occur twice
-    ///     or never; an instant maps to exactly one local date).
-    /// </summary>
-    /// <exception cref="InvalidOperationException">
-    ///     The id is missing or does not resolve. Both are effectively
-    ///     unreachable given a required, write-validated column - a null is a
-    ///     programming error, and an id that validated at write and later
-    ///     vanished from tzdata is an ops error of the same family. Failing
-    ///     loudly is the point; see the class remarks.
-    /// </exception>
+    /// <summary>The current date at the given timezone. An instant maps to exactly one local date.</summary>
+    /// <exception cref="InvalidOperationException">The id is missing or does not resolve.</exception>
     public static DateOnly Today(TimeProvider timeProvider, string timeZoneId) =>
         ToLocalDate(timeProvider.GetUtcNow(), timeZoneId);
 
     /// <summary>
-    ///     The local date a given instant fell on at that timezone. Used where
-    ///     the anchor is a recorded moment rather than now, or where one clock
-    ///     reading is shared across many bookings.
-    ///     <para>
-    ///         Resolves per call rather than caching: TryFindSystemTimeZoneById
-    ///         hits the BCL's own cache, about 0.12-0.14 microseconds per call
-    ///         including the conversion. A per-request memo would save about
-    ///         0.13 milliseconds across 2000 bookings, less than any of the
-    ///         database round trips beside the one caller that loops
-    ///         (ListMyReviewableBookingsHandler). Worth re-measuring only for a
-    ///         hot path with no database work beside it.
-    ///     </para>
+    ///     The local date an instant fell on, for a recorded moment or one clock reading shared across
+    ///     many bookings. Resolved per call; the BCL caches the lookup.
     /// </summary>
     /// <exception cref="InvalidOperationException">See <see cref="Today" />.</exception>
     public static DateOnly ToLocalDate(DateTimeOffset instant, string timeZoneId)

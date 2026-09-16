@@ -66,7 +66,7 @@ ASP.NET Core / FastEndpoints, Mediator, EF Core (Npgsql) + Dapper.AOT for hot-pa
    ```
    dotnet run --project src/Web/Api/Api.csproj
    ```
-   API docs (Scalar) at `/api/docs`. Health probes at `/health/live` (process is up; runs no dependency checks, so a database outage never triggers a container restart) and `/health/ready` (Postgres is reachable; a failure should stop traffic being routed here, not restart the node). `/health` still answers and means readiness. Runs at `http://localhost:5277` by default (see `src/Web/Api/Properties/launchSettings.json`).
+   API docs (Scalar) at `/api/docs`. Health probes at `/health/live` (process is up; runs no dependency checks, so a database outage never triggers a container restart) and `/health/ready` (Postgres is reachable; a failure should stop traffic being routed here, not restart the node). Runs at `http://localhost:5277` by default (see `src/Web/Api/Properties/launchSettings.json`).
 
 A seeded admin account is available for local testing: `admin@staystack.com` / `1234` (seed-only - see [Status](#status)).
 

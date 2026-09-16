@@ -32,30 +32,15 @@ using Transactions;
 WebApplicationBuilder builder = WebApplication.CreateSlimBuilder(args);
 builder.WebHost.UseKestrelHttpsConfiguration();
 
-// CreateSlimBuilder, unlike CreateBuilder, doesn't wire up user-secrets by
-// default - added explicitly so local connection strings/keys can live in
-// the Secret Manager instead of appsettings.json.
+// CreateSlimBuilder does not add user secrets.
 if (builder.Environment.IsDevelopment())
 {
     builder.Configuration.AddUserSecrets<Program>(true);
 }
 
 builder.Services.ConfigureIdentityServices(builder.Configuration, builder.Environment);
-// TODO: Disabled until Grafana is configured.
-//
-// Before uncommenting: invert PayloadRedactor to an allow-list. It is a
-// deny-list today, so every public property of every request and response is
-// serialised verbatim into an Activity tag and into Information/Warning logs
-// unless somebody remembered [Sensitive]. Nothing leaks while this line is
-// commented out, which is exactly why the cost of a missing annotation is
-// invisible until the day it is paid - all at once, retroactively, across
-// whatever the log sink retains.
-//
-// A deny-list also cannot be audited. Reviewing what *is* annotated tells you
-// nothing; you would have to review every property that is not, in every
-// module, forever. An allow-list makes the same review finite and makes the
-// default outcome of forgetting "this field is missing from the trace" rather
-// than "this field is in the logs".
+// TODO: disabled until Grafana is configured. Invert PayloadRedactor to an allow-list first: as a
+// deny-list it logs every property not marked [Sensitive].
 //builder.Services.ConfigureObservabilityServices(builder.Configuration);
 builder.Services.ConfigurePersistenceServices();
 builder.Services.ConfigureApiServices(builder.Configuration);
@@ -66,45 +51,20 @@ builder.Services.ConfigureBookingsServices(builder.Configuration, builder.Enviro
 builder.Services.ConfigureReviewsServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureTransactionsServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureJobsServices(builder.Configuration, builder.Environment);
-// Post-stay deadlines: how long a stay stays reviewable, and how long a
-// guest-checkout management link stays usable. Two settings rather than one
-// because they answer different questions - see
-// BookingLifecyclePolicyOptions, and the consistency check after Build().
 builder.Services.AddOptions<BookingLifecyclePolicyOptions>()
     .Bind(builder.Configuration.AppSection(BookingLifecyclePolicyOptions.SectionName))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<BookingLifecyclePolicyOptions>, BookingLifecyclePolicyOptionsValidator>();
-// How far ahead a stay can start and how long it can run - read by the search
-// path (Catalog) and the hold path (Availability) alike, so the two cannot
-// disagree about what is bookable. No consistency check after Build() to pair
-// with this one: there is a single value per bound rather than two that have
-// to be kept in step. See StaySearchPolicyOptions.
 builder.Services.AddOptions<StaySearchPolicyOptions>()
     .Bind(builder.Configuration.AppSection(StaySearchPolicyOptions.SectionName))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<StaySearchPolicyOptions>, StaySearchPolicyOptionsValidator>();
 
 builder.Services.AddSingleton(TimeProvider.System);
-// A bare AddHealthChecks() registers nothing, and an endpoint with no checks
-// reports Healthy unconditionally - so /health answered "yes" with the
-// database unreachable, which is worse than having no probe at all: an
-// orchestrator keeps routing traffic to a node that cannot serve a single
-// request, and a deploy that cannot reach its database rolls out green.
+// Without a registered check, a health endpoint reports Healthy with the database unreachable.
 builder.Services.AddHealthChecks()
     .AddCheck<PostgresHealthCheck>("postgres", tags: [HealthCheckTags.Ready]);
 
-// Fixed-window, keyed by caller IP - auth and payment-initiation endpoints
-// are the obvious credential-stuffing/abuse targets and had no
-// application-level limiting at all. RequireRateLimiting("auth") is
-// applied per-endpoint via Options() in Configure() (SignInEndpoint,
-// RegisterEndpoint, RefreshTokenEndpoint, InitiateTransactionEndpoint).
-//
-// Limit/window resolved per partition from IOptions<AuthRateLimitOptions>,
-// not captured once at startup, so tests can override it via the
-// standard Configure<AuthRateLimitOptions> DI-replacement pattern:
-// appsettings.Testing.json sets a high limit so the shared integration-
-// test factory doesn't trip it on ordinary traffic; RateLimitingTests
-// overrides it back down to actually exercise a 429.
 builder.Services.AddOptions<CookieSecurityOptions>()
     .Bind(builder.Configuration.AppSection(CookieSecurityOptions.SectionName))
     .ValidateOnStart();
@@ -112,9 +72,6 @@ builder.Services.AddOptions<AuthRateLimitOptions>()
     .Bind(builder.Configuration.AppSection(AuthRateLimitOptions.SectionName))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<AuthRateLimitOptions>, AuthRateLimitOptionsValidator>();
-// Each policy binds its own nested section under RateLimiting rather than
-// sharing one and prefixing property names to stay out of each other's way -
-// see AuthRateLimitOptions.SectionName.
 builder.Services.AddOptions<HoldRateLimitOptions>()
     .Bind(builder.Configuration.AppSection(HoldRateLimitOptions.SectionName))
     .ValidateOnStart();
@@ -124,6 +81,7 @@ builder.Services.AddOptions<ReadRateLimitOptions>()
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<ReadRateLimitOptions>, ReadRateLimitOptionsValidator>();
 
+// Fixed-window limiters keyed by caller address; limits are read per partition so tests can override them.
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -142,13 +100,7 @@ builder.Services.AddRateLimiter(options =>
             });
     });
 
-    // HoldAvailabilityEndpoint is anonymous and DB-write - the caps in
-    // HoldAvailabilityRequestValidator/HoldAvailabilityHandler bound how
-    // much damage one hold can do, this bounds how many a caller can fire.
-    // Partitioned by RemoteIpAddress, same as "auth", not by the
-    // hold-session cookie - a scripted caller can drop and regenerate
-    // that per request, so it would be no partition at all as a
-    // rate-limit key.
+    // Not keyed by anything the client supplies, which a scripted caller could regenerate per request.
     options.AddPolicy(ApiServicesRegistration.HoldRateLimitPolicy, httpContext =>
     {
         HoldRateLimitOptions limits = httpContext.RequestServices.GetRequiredService<IOptions<HoldRateLimitOptions>>().Value;
@@ -163,18 +115,7 @@ builder.Services.AddRateLimiter(options =>
             });
     });
 
-    // The anonymous read endpoints - GetProperties, GetPropertyById,
-    // GetPriceCalendar, GetPropertyReviews - which had no limiter at all.
-    // Their per-request cost is bounded (the stay-window caps, the price
-    // calendar's date bounds, MaxOffset, the HybridCache limits); nothing
-    // bounded how many of them a caller could issue.
-    //
-    // Same IP partition as the other two. The limit is deliberately loose
-    // because everyone behind one NAT shares a budget and tripping it breaks
-    // browsing for people who have done nothing wrong - not, any longer,
-    // because the partition might have collapsed to a single bucket: the
-    // startup check further down refuses that configuration. See
-    // ReadRateLimitOptions.
+    // Anonymous reads. Deliberately loose: everyone behind one NAT shares the budget.
     options.AddPolicy(ApiServicesRegistration.ReadRateLimitPolicy, httpContext =>
     {
         ReadRateLimitOptions limits = httpContext.RequestServices.GetRequiredService<IOptions<ReadRateLimitOptions>>().Value;
@@ -199,18 +140,7 @@ builder.Services.OpenApiDocument(o =>
     o.Version = "v1";
     o.AutoTagPathSegmentIndex = 0;
 
-    // x-tagGroups is a Scalar/ReDoc vendor extension, not a FastEndpoints
-    // concept - added via the document-transformer hook instead. Nests
-    // Catalog's per-family tags (CatalogGroup.cs, each endpoint's own
-    // Description(b => b.WithTags(...))) under one collapsible "Catalog"
-    // heading rather than a flat list of a dozen-plus tagged operations.
-    //
-    // IMPORTANT: once x-tagGroups is present, Scalar stops showing any tag
-    // not listed in SOME group - it doesn't fall back to a flat top-level
-    // section, it silently disappears from the sidebar (confirmed by
-    // diffing the rendered sidebar against the raw document's tag list).
-    // A new module/tag added later needs a line added here too, or its
-    // docs go dark with no other symptom.
+    // Scalar hides any tag not listed in a group, so a new tag needs a line here.
     o.ConfigureOpenApi = openApiOptions =>
     {
         openApiOptions.AddDocumentTransformer((document, _, _) =>
@@ -237,7 +167,6 @@ builder.Services.OpenApiDocument(o =>
 
 WebApplication app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -252,30 +181,14 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-// Populated from config, never hardcoded, so each deployment lists its
-// actual proxy addresses. Registered before anything else reads
-// Request.IsHttps or Connection.RemoteIpAddress.
-//
-// ForwardedHeadersOptions ships with KnownProxies = { ::1 } and
-// KnownNetworks = { 127.0.0.0/8 }, and the loop below only adds to them: with
-// the shipped empty config, a loopback caller is trusted and nothing else is.
-//
-// So ForwardedHeaders:KnownProxies must be populated in any proxied
-// deployment. Otherwise a TLS-terminating proxy at a non-loopback address has
-// its headers dropped, RemoteIpAddress becomes the proxy's own address, and
-// the "holds"/"auth" rate-limit partitions and HoldAvailabilityHandler's
-// concurrent-hold cap collapse into one bucket for every caller. The cookie
-// Secure flag is configured (CookieSecurityOptions) so it does not depend on
-// this. The startup check below makes the misconfiguration loud.
+// Only loopback is trusted by default. Behind any other proxy, unlisted, every caller shares one
+// rate-limit partition and one hold cap.
 ForwardedHeadersOptions forwardedHeadersOptions = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
 };
 
-// Counted from configuration, not from the options object. ForwardedHeaders-
-// Options seeds KnownProxies with ::1 and KnownIPNetworks with 127.0.0.0/8, so
-// `KnownProxies.Count == 0` is false on a completely unconfigured app - the
-// case worth catching.
+// Counted from configuration: the options object is pre-seeded with loopback entries.
 string[] configuredProxies = app.Configuration.AppSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [];
 string[] configuredNetworks = app.Configuration.AppSection("ForwardedHeaders:KnownNetworks").Get<string[]>() ?? [];
 
@@ -284,23 +197,13 @@ foreach (string proxy in configuredProxies)
     forwardedHeadersOptions.KnownProxies.Add(IPAddress.Parse(proxy));
 }
 
-// Networks as well as addresses, because a managed load balancer does not
-// have a listable address. AWS/GCP front ends move within a published CIDR,
-// so a deployment there can only ever answer this question with a range - and
-// without somewhere to put one, the check below would push every cloud
-// deployment straight to the escape hatch and prove nothing.
+// CIDR ranges, for managed load balancers with no listable address.
 foreach (string network in configuredNetworks)
 {
-    // Fully qualified: Microsoft.AspNetCore.HttpOverrides also defines an
-    // obsolete IPNetwork.
     forwardedHeadersOptions.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network));
 }
-// A throw for the same reason as the SameSite check below: this misconfiguration
-// produces a silently wrong product rule rather than a visible failure. A
-// management token that dies before the review window closes puts guest
-// checkout back exactly where it started - able to review in principle, locked
-// out of its own booking in practice - and the only symptom is guests quietly
-// not reviewing.
+
+// A guest's management token must outlive the review window, or guests cannot reach their booking to review.
 BookingLifecyclePolicyOptions bookingLifecycle =
     app.Services.GetRequiredService<IOptions<BookingLifecyclePolicyOptions>>().Value;
 if (bookingLifecycle.ManagementTokenLifetimeDaysAfterCheckOut < bookingLifecycle.ReviewWindowDaysAfterCheckOut)
@@ -314,11 +217,7 @@ if (bookingLifecycle.ManagementTokenLifetimeDaysAfterCheckOut < bookingLifecycle
         "to remove. Raise the token lifetime to at least the review window.");
 }
 
-// A throw, not a warning, unlike the proxy check below: SameSite=None
-// without Secure is refused by every modern browser, so the cookie is never
-// stored and cookie-mode auth cannot work at all. There is no deployment
-// where this combination is what someone meant, which makes starting up and
-// serving broken sessions strictly worse than refusing to start.
+// Browsers reject SameSite=None cookies that are not Secure, so cookie auth could never work.
 CookieSecurityOptions cookieSecurity =
     app.Services.GetRequiredService<IOptions<CookieSecurityOptions>>().Value;
 if (cookieSecurity.SameSite == SameSiteMode.None && !cookieSecurity.RequireSecure)
@@ -329,26 +228,13 @@ if (cookieSecurity.SameSite == SameSiteMode.None && !cookieSecurity.RequireSecur
         "SPA needs both; a same-site one should leave SameSite at Lax.");
 }
 
-// The other half of the SameSite/CORS pair, and the half that fails quietly.
-// The check above catches a combination browsers reject outright; this one
-// catches a combination they accept and then ignore - CORS allows the origin,
-// the preflight passes, and the cookie is simply never attached, so cookie-mode
-// auth 401s with nothing wrong in any log.
-//
-// A throw outside Development, matching the checks above: a deployment that
-// listed a cross-site origin *and* left SameSite at Lax has asked for two
-// things that cannot both be true, and serving sessions that silently do not
-// work is worse than refusing to start. Development is exempt because the
-// localhost:3000 -> localhost:5277 split is same-site anyway and would never
-// trip this.
+// A cross-site CORS origin with SameSite=Lax: the browser never attaches the cookie, and auth fails silently.
 string[] corsOrigins = app.Configuration.AppSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 
 if (corsOrigins.Length > 0 && cookieSecurity.SameSite == SameSiteMode.Lax)
 {
     if (string.IsNullOrWhiteSpace(cookieSecurity.ApiOrigin))
     {
-        // Cannot verify rather than verified-fine, and said out loud once.
-        // Staying silent here would read as "checked, all good".
         app.Logger.LogWarning(
             "{Section}:ApiOrigin is not set, so the CORS/SameSite consistency check cannot run. If any origin in " +
             "{CorsSection}:AllowedOrigins is on a different registrable domain or scheme than this API, the " +
@@ -378,18 +264,7 @@ if (corsOrigins.Length > 0 && cookieSecurity.SameSite == SameSiteMode.Lax)
     }
 }
 
-// A throw, because of blast radius. Four anonymous read endpoints -
-// GetProperties, GetPropertyById, GetPriceCalendar, GetPropertyReviews - are
-// rate-limited per caller address alongside the auth/hold limiters and the
-// concurrent-hold cap. Collapsed into one partition, every visitor shares one
-// 300-per-minute budget, so the deployment serves 429s to everyone and reads as
-// an outage with nothing wrong in any log.
-//
-// ExposedDirectly is the escape hatch, and it is the reason this can be a
-// throw at all. An app terminating its own TLS has no proxy to list, which is
-// a legitimate deployment that must still be able to start. What the pair of
-// settings buys is that somebody chose - either these are the proxies, or
-// there are none.
+// Outside Development, someone must list the proxies or declare there are none (ExposedDirectly).
 bool exposedDirectly = app.Configuration.AppSection("ForwardedHeaders:ExposedDirectly").Get<bool>();
 
 if (!app.Environment.IsDevelopment()
@@ -412,15 +287,11 @@ app.UseRequestLocalization();
 
 app.UseHttpsRedirection();
 
-// Before the /api exception-handler branch, so CORS headers are applied to
-// responses the exception handler generates; otherwise a 4xx/5xx from /api
-// looks like a CORS failure to a cross-origin frontend.
+// Before the /api exception handling, so error responses carry CORS headers.
 app.UseCors(ApiServicesRegistration.ClientAppCorsPolicy);
 
-// Scope global error and status code handling strictly to /api routes
 app.UseWhen(context => context.Request.Path.StartsWithSegments("/api"), apiApp =>
 {
-    // 1. Handles unmapped 404/405 routes under /api
     apiApp.UseStatusCodePages(async statusCodeContext =>
     {
         HttpResponse response = statusCodeContext.HttpContext.Response;
@@ -438,14 +309,10 @@ app.UseWhen(context => context.Request.Path.StartsWithSegments("/api"), apiApp =
         }
     });
 
-    // 2. Handles exceptions thrown inside /api request pipelines
     apiApp.UseExceptionHandler(_ => { });
 });
 
-// Explicit rather than relying on WebApplication's implicit
-// auto-insertion (which only fires right before the first
-// endpoint-routing-aware middleware) - UseTickerQ below maps the
-// dashboard's own endpoints and needs HttpContext.User already populated.
+// Explicit: the TickerQ dashboard endpoints need HttpContext.User populated.
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -453,48 +320,19 @@ app.UseRateLimiter();
 
 app.UseTickerQ();
 
-// Outside the /api scoping above and unauthenticated on purpose - these are
-// for a load balancer/orchestrator to poll, not an API consumer, so they
-// shouldn't inherit either the ProblemDetails error shaping or any auth
-// requirement those routes carry.
-//
-// Split in two because the two questions have opposite remedies. Liveness
-// asks "is this process wedged", and the answer to no is to restart the
-// container. Readiness asks "can this node serve a request", and the answer
-// to no is to stop routing to it until it can. Pointing a liveness probe at a
-// dependency check is the classic way to turn a database blip into a
-// cluster-wide restart storm, so liveness deliberately runs no checks at all:
-// reaching this handler is itself the proof that the process is up and
-// serving.
+// Liveness runs no checks, so a database blip never restarts the process; readiness checks dependencies.
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
 app.MapHealthChecks("/health/ready",
     new HealthCheckOptions { Predicate = check => check.Tags.Contains(HealthCheckTags.Ready) });
 
-// Kept, and mapped to readiness rather than removed. It is the address in the
-// README and in whatever external monitor someone has already pointed at it,
-// and "can it serve" is the question a human typing /health means. Nothing in
-// this repo polls it as a liveness probe - if something outside does, it
-// wants /health/live now.
-app.MapHealthChecks("/health",
-    new HealthCheckOptions { Predicate = check => check.Tags.Contains(HealthCheckTags.Ready) });
-
 app.UseFastEndpoints(options =>
 {
-    // See ApiJsonTypeInfoResolver - the same combined resolver is also
-    // wired onto ASP.NET Core's native Http.Json.JsonOptions in
-    // ApiServicesRegistration, so GlobalExceptionHandler's WriteAsJsonAsync
-    // and the 404 page's Results.Problem (neither goes through
-    // FastEndpoints) get the same source-generated coverage instead of
-    // falling back to reflection.
+    // Also set on Http.Json.JsonOptions (ApiServicesRegistration) for responses outside FastEndpoints.
     options.Serializer.Options.TypeInfoResolver = ApiJsonTypeInfoResolver.Combined;
 
     options.Errors.StatusCode = StatusCodes.Status400BadRequest;
 
-    // FastEndpoints' own FluentValidation failures never throw, so
-    // GlobalExceptionHandler never sees them - built here instead.
-    // Reshaping into the same ValidationProblemDetails shape means a bad
-    // DTO and a thrown ValidationException deep in a handler come back
-    // looking identical on the wire.
+    // Same shape as a thrown ValidationException, which GlobalExceptionHandler writes.
     options.Errors.ResponseBuilder = (failures, ctx, statusCode) =>
     {
         var errors = failures

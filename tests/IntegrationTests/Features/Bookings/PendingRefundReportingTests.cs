@@ -146,7 +146,7 @@ public class PendingRefundReportingTests(IntegrationTestWebApplicationFactory fa
 
     private static void AssertReportsTheRecordedRefund(CancelBookingResponse pending, Money recorded)
     {
-        Assert.True(pending.RefundPending);
+        Assert.Equal(RefundStatus.Pending, pending.RefundStatus);
         Assert.Equal(recorded.Amount, pending.RefundAmount);
         Assert.Equal(recorded.Currency, pending.Currency);
     }

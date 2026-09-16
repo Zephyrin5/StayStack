@@ -73,25 +73,6 @@ public class HealthCheckTests(IntegrationTestWebApplicationFactory factory)
     }
 
     [Fact]
-    public async Task TheOriginalHealthAddress_StillAnswersAndMeansReadiness()
-    {
-        // It is the address in the README and in whatever external monitor is
-        // already pointed at it. Silently changing what it means, or removing
-        // it, is a worse outcome than either probe being slightly wrong.
-        using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
-            builder.ConfigureServices(services =>
-                services.AddHealthChecks()
-                    .AddCheck("stub-dependency", () => HealthCheckResult.Unhealthy(), tags: [HealthCheckTags.Ready])));
-
-        using HttpClient client = host.CreateClient();
-
-        HttpResponseMessage legacy = await client.GetAsync("/health", TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, legacy.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/health", TestContext.Current.CancellationToken)).StatusCode);
-    }
-
-    [Fact]
     public async Task ProbesSayNothingAboutWhatFailed()
     {
         // Health endpoints are anonymous by design, so the response must not

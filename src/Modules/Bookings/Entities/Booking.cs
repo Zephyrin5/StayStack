@@ -6,16 +6,8 @@ namespace Bookings.Entities;
 
 public sealed class Booking : Entity
 {
-    // EF can't bind a ComplexProperty (Money) parameter back to the
-    // entity's own mapped complex property - it only matches parameters
-    // against directly-mapped scalar/converted properties by name, and
-    // TotalPrice spans two columns. See Property.cs's identical
-    // constructor pair and docs/adr/0015. This parameterless constructor
-    // is EF's materialization fallback only; Create() below still goes
-    // through the real constructor for every write. GuestName/GuestEmail
-    // get real empty-string defaults only to satisfy the
-    // non-nullable-reference-type check - EF overwrites them immediately
-    // after construction.
+    // EF materialization only: its constructor binding cannot bind a complex property (docs/adr/0015).
+    // The string defaults satisfy nullability and are overwritten immediately.
     private Booking()
     {
         GuestName = string.Empty;
@@ -59,17 +51,11 @@ public sealed class Booking : Entity
         PaymentDueAt = paymentDueAt;
     }
 
-    // Cross-module references, plain Guid rather than a real FK - same
-    // pattern as Property.HostId (Catalog referencing Hosts). UnitId/HoldId
-    // both come from Catalog, resolved through Catalog.Contracts, never
-    // through a direct reference to Catalog's own entities.
+    // Cross-module references, so plain Guids rather than FKs (docs/adr/0004).
     public Guid UnitId { get; private set; }
     public Guid HoldId { get; private set; }
 
-    // Null for guest checkout - always present regardless: GuestName/Email/
-    // Phone are a snapshot taken at booking time, not a live read of the
-    // customer's account, so the booking's contact details don't shift if
-    // the account's own email later changes.
+    // Null for guest checkout. The contact details are a snapshot, so they do not shift with the account.
     public Guid? CustomerId { get; private set; }
     public string GuestName { get; private set; }
     public string GuestEmail { get; private set; }
@@ -79,76 +65,42 @@ public sealed class Booking : Entity
     public DateOnly CheckOut { get; private set; }
     public int GuestCount { get; private set; }
 
-    // A booking carries exactly one currency, and TotalPrice is where it is
-    // stored - see Subtotal below.
+    // A booking carries one currency, and it lives here.
     public Money TotalPrice { get; private set; }
 
-    // Persisted as one decimal column (the backing field, mapped in
-    // BookingConfiguration) but exposed as Money, paired with this booking's
-    // currency, so no consumer pairs a currency by hand. A second currency
-    // column could only ever agree with TotalPrice's.
-    //
-    // Snapshotted from the hold's own Subtotal at confirm time, never
-    // reconstructed from total plus discount (docs/adr/0015).
+    // One decimal column, exposed as Money paired with TotalPrice's currency. Snapshotted from the
+    // hold, never reconstructed from total plus discount (docs/adr/0015).
     private decimal _subtotal;
 
     public Money Subtotal => Money.Of(_subtotal, TotalPrice.Currency);
 
-    // Named BookingStatus, not Status - Status is already claimed by the
-    // inherited Entity.Status (EntityStatus: soft-delete state), a
-    // different axis entirely from this business lifecycle state.
+    // Not Status: Entity.Status is the soft-delete state.
     public BookingStatus BookingStatus { get; private set; }
 
     /// <summary>
-    ///     When this booking's claim on its unit lapses if nobody pays.
-    ///     <para>
-    ///         Confirming a checkout takes real inventory: the hold moves to
-    ///         'pending_payment' and keeps blocking its range. The deadline makes
-    ///         that claim finite; ExpireUnpaidBookingsJob cancels the booking and
-    ///         releases the hold together once it passes (docs/adr/0020).
-    ///     </para>
-    ///     <para>
-    ///         Null once a booking is no longer awaiting payment, and null
-    ///         for bookings that predate this field - the sweep only
-    ///         looks at Pending rows, so neither is a candidate.
-    ///     </para>
+    ///     When this booking's claim on its unit lapses if nobody pays; ExpireUnpaidBookingsJob cancels
+    ///     the booking and releases the hold together once it passes (docs/adr/0020). Null once the
+    ///     booking is no longer awaiting payment.
     /// </summary>
     public DateTimeOffset? PaymentDueAt { get; private set; }
 
     /// <summary>
-    ///     When this booking was cancelled. Null while it is not.
-    ///     <para>
-    ///         Entity.ModifiedAt cannot serve: every later write overwrites it.
-    ///         Set by Cancel() and never cleared, since nothing un-cancels a
-    ///         booking. Null on rows cancelled before this column existed. The
-    ///         refund decision orders against the obligation's cancellation
-    ///         instant, not this (docs/adr/0027).
-    ///     </para>
+    ///     When this booking was cancelled; null while it is not. Entity.ModifiedAt cannot serve, since
+    ///     every later write overwrites it. The refund decision orders against the obligation's
+    ///     cancellation instant, not this one (docs/adr/0027).
     /// </summary>
     public DateTimeOffset? CancelledAt { get; private set; }
 
-    // Snapshotted from the unit's policy at confirm time: a host tightening
-    // their policy afterward cannot worsen a confirmed guest's terms. Nullable
-    // only for bookings confirmed before policies existed; never null through
-    // Create(). CancelBookingHandler falls back to
-    // CancellationPolicy.CreateDefault() for those.
+    // Snapshotted at confirm: a host tightening their policy cannot worsen a confirmed guest's terms.
+    // Null only on rows written without one, where CancelBookingHandler falls back to CreateDefault().
     public CancellationPolicy? CancellationPolicy { get; private set; }
 
-    // The property's IANA zone at confirm time, snapshotted for the same
-    // reason CancellationPolicy is: a host correcting a mis-entered zone must
-    // not move an existing guest's refund boundary or review window
-    // (docs/adr/0018).
-    //
-    // Non-nullable, unlike CancellationPolicy: a null policy has a defensible
-    // default, while a null zone would fall back to UTC, the error ADR-0018
-    // removes. Older rows were backfilled by migration.
+    // Snapshotted for the same reason, and non-nullable: a null zone would fall back to UTC, the error
+    // ADR-0018 exists to remove.
     public string TimeZoneId { get; private set; }
 
-    // Takes its id rather than generating one internally - a redeemed promo
-    // code needs the booking's id up front, to write the PromotionRedemption
-    // row before the Booking itself is ever saved (see ConfirmBookingHandler),
-    // so the caller decides the id and this stays a plain assignment rather
-    // than the two disagreeing.
+    // The id is the caller's: a redeemed promo code needs it before the booking is saved, and a retry
+    // must be able to find the row it already wrote (docs/adr/0025).
     public static Booking Create(
         Guid id,
         Guid unitId,
@@ -177,26 +129,14 @@ public sealed class Booking : Entity
             c => c > checkIn, "Check-out must be after check-in.");
         Guard.Against.NegativeOrZero(guestCount);
 
-        // NegativeOrZero, not Negative: a booking has to be payable. A zero
-        // total is refused by Transaction.Create's own guard, so allowing one
-        // here produced a booking the guest could never pay for - stuck
-        // Pending forever, failing every payment attempt. Reachable via a
-        // 100% promo code, or any FixedAmount code at least as large as the
-        // subtotal (ComputeDiscountAmount caps the discount there).
-        //
-        // This is the invariant, not the user-facing check -
-        // ConfirmBookingHandler rejects the same case with a proper
-        // validation message before it ever reaches here. Supporting genuinely
-        // free stays would mean a confirm-without-payment path, not relaxing
-        // this.
+        // Zero is refused, not merely negative: Transaction.Create rejects a zero amount, so a free
+        // booking could never be paid for. ConfirmBookingHandler rejects the same case with a message.
         Guard.Against.NegativeOrZero(totalPrice.Amount);
         Guard.Against.Negative(subtotal.Amount);
         Guard.Against.Null(cancellationPolicy);
         Guard.Against.NullOrWhiteSpace(timeZoneId);
 
-        // Required, not optional: a booking created without a deadline is
-        // an unbounded claim on a unit's calendar, which is the state this
-        // field exists to make unrepresentable.
+        // Required: a booking with no deadline is an unbounded claim on a unit's calendar.
         Guard.Against.Default(paymentDueAt);
 
         return new Booking(
@@ -206,55 +146,18 @@ public sealed class Booking : Entity
     }
 
     /// <summary>
-    ///     Whether a guest may cancel this booking themselves, as of the
-    ///     given property-local date.
-    ///     <para>
-    ///         Being <em>allowed to reach</em> a booking and being allowed to
-    ///         <em>cancel</em> it are different questions, and conflating them
-    ///         is what left this open. BookingAccessChecker answers the first:
-    ///         a management link stays usable until CheckOut + 90 days so a
-    ///         guest can still view a finished stay, and an authenticated
-    ///         customer's own booking has no time limit at all. Nothing then
-    ///         asked the second question, so a guest could cancel a stay they
-    ///         were in the middle of - handing the remaining nights back to
-    ///         inventory - or turn a stay that ended months ago into a
-    ///         Cancelled one, taking its reviewability with it and pushing a
-    ///         long-settled payment into a refund workflow.
-    ///     </para>
-    ///     <para>
-    ///         The only trace of the date was ComputeRefund's
-    ///         Math.Max(daysBeforeCheckIn, 0), which clamped the refund tier
-    ///         for a date already past instead of refusing the request.
-    ///     </para>
-    ///     <para>
-    ///         Cancellation ends at check-in, not at checkout: once a stay has
-    ///         started there is nothing left to cancel, only to cut short.
-    ///         Leaving early is a different transaction with different money
-    ///         attached, and if it becomes a product requirement it wants its
-    ///         own operation rather than this one relaxed.
-    ///     </para>
+    ///     Whether a guest may cancel this booking themselves, as of the given property-local date.
+    ///     Reaching a booking and cancelling it are different questions: a management link stays usable
+    ///     after checkout so a finished stay can still be viewed. Cancellation ends at check-in, because
+    ///     cutting a stay short is a different transaction with different money attached.
     /// </summary>
     public bool CanBeCancelledOn(DateOnly today)
     {
         return BookingStatus != BookingStatus.Cancelled && today < CheckIn;
     }
 
-    // Idempotent - a repeated cancel (retried request, double-click) is a
-    // no-op, not an error.
-    //
-    // No date guard here, deliberately: this is the state transition, and
-    // CanBeCancelledOn above is the self-service policy over it. The two
-    // callers need different answers - ExpireUnpaidBookingsJob cancels an
-    // unpaid booking on the system's behalf and must not be subject to a
-    // rule written for guests, even though in practice its bookings are
-    // always still before check-in.
-    //
-    // Deliberately no "already run its course" check:
-    // whether a booking is still reachable for cancellation is
-    // BookingAccessChecker's call (the guest-checkout management token
-    // stays valid through CheckOut + 90 days so a stay can still be
-    // cancelled shortly after checkout) - Cancel() being invoked already
-    // means that check passed.
+    // Idempotent, and deliberately without a date guard: CanBeCancelledOn is the self-service policy
+    // over this transition, and ExpireUnpaidBookingsJob cancels on the system's behalf.
     public void Cancel(DateTimeOffset cancelledAt)
     {
         if (BookingStatus == BookingStatus.Cancelled)
@@ -267,12 +170,8 @@ public sealed class Booking : Entity
         PaymentDueAt = null;
     }
 
-    // Called by IBookingPaymentConfirmation once a Transaction succeeds -
-    // idempotent the same way Cancel() is (a retried webhook/handler call
-    // shouldn't fail just because the first call already landed), but
-    // throws rather than silently no-op-ing from Cancelled: a payment
-    // succeeding for a booking that was cancelled out from under it is a
-    // real inconsistency worth surfacing, not swallowing.
+    // Idempotent, but throws from Cancelled: a payment succeeding against a booking cancelled out from
+    // under it is a real inconsistency, and the caller answers it with a refund.
     public void Confirm()
     {
         if (BookingStatus == BookingStatus.Confirmed)
@@ -287,9 +186,7 @@ public sealed class Booking : Entity
 
         BookingStatus = BookingStatus.Confirmed;
 
-        // Cleared on payment: the deadline described a claim awaiting one,
-        // and leaving it set would misreport a paid booking as overdue to
-        // anything reading the field rather than the status.
+        // Cleared, or a paid booking reads as overdue to anything watching the field.
         PaymentDueAt = null;
     }
 }
