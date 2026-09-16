@@ -406,6 +406,60 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
         await File.WriteAllTextAsync(Path.Combine(OutputDirectory!, "0.4-payments-pool5.txt"), report, Ct);
     }
 
+    // ---- hold contention ------------------------------------------------
+
+    // The hold path runs Serializable, so contention on one unit shows up as 40001 rollbacks the
+    // execution strategy retries. Postgres counts rolled-back transactions per database; with the
+    // suite otherwise idle, the delta over a burst is the retry signal.
+    [Fact]
+    public async Task ConcurrentHoldsForOneUnit()
+    {
+        RequireMeasurementRun();
+
+        HttpClient seedClient = factory.CreateClient();
+        (_, Guid unitId) = await SeedHostWithUnitAsync(factory, seedClient);
+        DateOnly checkIn = CatalogSeeding.Today().AddDays(300);
+
+        const int holds = 20;
+        long rollbacksBefore = await ScalarAsync(
+            "SELECT xact_rollback FROM pg_stat_database WHERE datname = current_database()");
+
+        ConcurrentBag<Outcome> outcomes = [];
+        Stopwatch wall = Stopwatch.StartNew();
+
+        // Every request asks for the same range, so all but one must lose - to the exclusion
+        // constraint, the serialization check, or the cap.
+        await Task.WhenAll(Enumerable.Range(0, holds).Select(i => Task.Run(async () =>
+        {
+            Stopwatch one = Stopwatch.StartNew();
+            using HttpResponseMessage response = await factory.CreateClient().PostAsJsonAsync(
+                "/api/availability/holds",
+                new HoldAvailabilityRequest { UnitId = unitId, CheckIn = checkIn, CheckOut = checkIn.AddDays(2), GuestCount = 2 },
+                CancellationToken.None);
+
+            outcomes.Add(new Outcome($"#{i}", (int)response.StatusCode, one.Elapsed.TotalMilliseconds, ""));
+        }, CancellationToken.None)));
+
+        double wallMs = wall.Elapsed.TotalMilliseconds;
+
+        // Stats are flushed per backend, so give them a moment to land before reading.
+        await Task.Delay(TimeSpan.FromSeconds(2), Ct);
+        long rollbacksAfter = await ScalarAsync(
+            "SELECT xact_rollback FROM pg_stat_database WHERE datname = current_database()");
+
+        StringBuilder report = new StringBuilder();
+        report.AppendLine($"{holds} concurrent holds for one unit and range");
+        report.AppendLine($"wall_ms={wallMs:F0}  ok={outcomes.Count(o => o.Status == 200)}  " +
+                          $"p50_ms={Percentile(outcomes, 0.5):F0}  max_ms={outcomes.Max(o => o.Ms):F0}");
+        report.AppendLine($"xact_rollback delta={rollbacksAfter - rollbacksBefore}");
+        foreach (IGrouping<int, Outcome> byStatus in outcomes.GroupBy(o => o.Status).OrderBy(g => g.Key))
+        {
+            report.AppendLine($"  status {byStatus.Key}: {byStatus.Count()}");
+        }
+
+        await File.WriteAllTextAsync(Path.Combine(OutputDirectory!, "hold-contention.txt"), report.ToString(), Ct);
+    }
+
     private async Task<string> RunBurstAsync(string title, List<Func<HttpClient, HttpRequestMessage>> requests)
     {
         string smallPool = SmallPool(factory.ConnectionString, 5);
@@ -482,6 +536,14 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
         }
 
         return report.ToString();
+    }
+
+    private async Task<long> ScalarAsync(string sql)
+    {
+        await using NpgsqlConnection connection = new NpgsqlConnection(factory.ConnectionString);
+        await connection.OpenAsync(CancellationToken.None);
+        await using NpgsqlCommand command = new NpgsqlCommand(sql, connection);
+        return (long)(await command.ExecuteScalarAsync(CancellationToken.None))!;
     }
 
     private static double Percentile(IEnumerable<Outcome> outcomes, double p)
