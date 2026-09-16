@@ -64,10 +64,8 @@ public class AuthTokenProvider(
 
         SecurityTokenDescriptor tokenDescriptor = new SecurityTokenDescriptor
         {
-            // No Sub and no roles, by construction rather than by omission: a
-            // caller cannot add them, because it supplies only the claims it
-            // is handed here and the audience below is what stops this token
-            // being accepted where a user identity is expected.
+            // The claims are the caller's, so this may carry anything they pass. The audience below is
+            // what stops the token being accepted where a user identity is expected.
             Subject = new ClaimsIdentity([.. claims, new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())]),
             Expires = timeProvider.GetUtcNow().UtcDateTime.Add(lifetime),
             SigningCredentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256),

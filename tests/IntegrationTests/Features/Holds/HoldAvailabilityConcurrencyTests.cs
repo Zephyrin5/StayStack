@@ -280,24 +280,16 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
     }
 
     [Fact]
-    public async Task Hold_DiscardingTheHoldSessionCookie_DoesNotGrantAFreshBudget()
+    public async Task Hold_FromFreshClientsOnOneNetwork_SharesOneBudget()
     {
-        // A key the caller controls is not a cap: a caller discarding a
-        // session cookie would get a fresh budget per request, while holds
-        // block real inventory through the exclusion constraint.
-        //
-        // A brand new HttpClient per request is exactly that attack: each has
-        // its own cookie jar. They share a client network, so the cap applies
-        // across all of them.
+        // The cap counts by client network, not by anything the caller holds, so a new client per
+        // request does not reset it.
         Unit[] units = await Task.WhenAll(Enumerable.Range(0, Cap + 1).Select(_ => SeedUnitAsync()));
         DateOnly today = CatalogSeeding.Today();
 
         using WebApplicationFactory<Program> cappedFactory = CappedFactoryFor("198.51.100.20");
 
-        // Sequential, not concurrent - concurrency is the test above's job.
-        // Here each request must be able to see every previous one's hold, so
-        // the only thing being measured is whether a fresh cookie resets the
-        // budget.
+        // Sequential, so each request sees every previous hold; concurrency is the test above's job.
         List<HttpStatusCode> statuses = [];
         foreach (Unit unit in units)
         {

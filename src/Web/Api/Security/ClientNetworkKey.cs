@@ -4,26 +4,20 @@ using System.Net.Sockets;
 namespace Api.Security;
 
 /// <summary>
-///     Derives the partition key that <c>HoldAvailabilityHandler</c>'s
-///     concurrent-hold cap counts by. Unlike the hold-session cookie
-///     (<see cref="HoldSessionCookie"/>), this is not client-supplied, so a
-///     caller cannot mint themselves a fresh budget by discarding state -
-///     which is the whole reason the cap moved onto it. See docs/adr/0016.
+///     The partition key <c>HoldAvailabilityHandler</c>'s concurrent-hold cap counts by. Derived from
+///     the peer address, never client-supplied, so a caller cannot mint a fresh budget by discarding
+///     state (docs/adr/0016).
 /// </summary>
 public static class ClientNetworkKey
 {
     /// <summary>
-    ///     Sentinel for a request whose peer address the server couldn't
-    ///     determine. Every such caller shares one budget, deliberately: an
-    ///     unattributable request should not get a private allowance. Matches
-    ///     what the "auth"/"holds" rate-limit partitions already do with a
-    ///     null address.
+    ///     A request with no determinable peer address. All of them share one budget: an unattributable
+    ///     request should not get a private allowance.
     /// </summary>
     public const string Unknown = "unknown";
 
-    /// <summary>
-    ///     Longest value this returns is a full-form IPv6 /64
-    ///     ("xxxx:xxxx:xxxx:xxxx::/64", 42 chars), which is what
+/// <summary>
+    ///     Longest value is a full-form IPv6 /64 (42 characters), which
     ///     <see cref="UnitAvailabilityHold.ClientKeyMaxLength"/> is sized for.
     /// </summary>
     public static string Resolve(IPAddress? address)
@@ -33,9 +27,7 @@ public static class ClientNetworkKey
             return Unknown;
         }
 
-        // ::ffff:203.0.113.7 and 203.0.113.7 are the same peer reached over
-        // different stacks. Normalised so one client can't hold two budgets
-        // by which listener it happened to land on.
+        // The same peer over different stacks, so one client cannot hold two budgets.
         if (address.IsIPv4MappedToIPv6)
         {
             address = address.MapToIPv4();

@@ -11,13 +11,10 @@ using TickerQ.EntityFrameworkCore.DependencyInjection;
 namespace Jobs;
 
 /// <summary>
-///     Wires up TickerQ as this app's background job scheduler - see
-///     docs/adr/0002 for why TickerQ over Hangfire/Quartz, and
-///     docs/adr/0001 for the Native AOT constraint that decision follows
-///     from. Jobs themselves (Catalog's ExpiredHoldsSweepJob, Identity's
-///     ExpiredRefreshTokensSweepJob) live in their owning module, not here -
-///     this project only owns scheduler registration, the operational
-///     store, and the dashboard.
+///     Wires up TickerQ as the background job scheduler (docs/adr/0002, and docs/adr/0001 for the AOT
+///     constraint behind it). The jobs themselves live in their owning module - Bookings'
+///     ExpiredHoldsSweepJob, Identity's ExpiredRefreshTokensSweepJob; this project owns only the
+///     scheduler registration, its store and the dashboard.
 /// </summary>
 public static class JobsServicesRegistration
 {
