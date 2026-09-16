@@ -299,7 +299,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
 
         DbConnection expiryConnection = expiryContext.Database.GetDbConnection();
         await expiryConnection.ExecuteAsync(new CommandDefinition(
-            """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE""",
+            """SELECT id FROM bookings.bookings WHERE id = @BookingId FOR UPDATE""",
             new { BookingId = bookingId },
             expiryTransaction.GetDbTransaction(),
             cancellationToken: TestContext.Current.CancellationToken));
@@ -336,7 +336,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         // write exactly, which is all this needs.
         await expiryConnection.ExecuteAsync(new CommandDefinition(
             """
-            UPDATE "bookings" SET booking_status = 'Cancelled', payment_due_at = NULL
+            UPDATE bookings.bookings SET booking_status = 'Cancelled', payment_due_at = NULL
             WHERE id = @BookingId
             """,
             new { BookingId = bookingId },

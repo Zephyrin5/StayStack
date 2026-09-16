@@ -96,8 +96,8 @@ internal class PromotionRedemption(
         // omission: Promotion.HostId is set in the constructor and has no
         // mutator, so the value the snapshot read saw is the value this
         // row will always have. There is nothing to race.
-        const string capSql = """
-                              UPDATE promotions
+        const string capSql = $"""
+                              UPDATE {PromotionsModel.Schema}.promotions
                               SET redemption_count = redemption_count + 1
                               WHERE id = @PromotionId
                                 AND status <> 2
@@ -118,10 +118,10 @@ internal class PromotionRedemption(
             // touch.
             PromotionStateRow? state = await connection.QuerySingleOrDefaultAsync<PromotionStateRow>(
                 new CommandDefinition(
-                    """
+                    $"""
                     SELECT status AS "Status", expires_at AS "ExpiresAt",
                            redemption_count AS "RedemptionCount", max_redemptions AS "MaxRedemptions"
-                    FROM promotions WHERE id = @PromotionId;
+                    FROM {PromotionsModel.Schema}.promotions WHERE id = @PromotionId;
                     """,
                     new { PromotionId = promotion.Id }, transaction,
                     cancellationToken: cancellationToken));
@@ -129,8 +129,8 @@ internal class PromotionRedemption(
             throw new PromotionInvalidException(DescribeRejection(code, state));
         }
 
-        const string insertSql = """
-                                 INSERT INTO promotion_redemptions (id, promotion_id, booking_id, guest_email, discount_amount, currency, redeemed_at)
+        const string insertSql = $"""
+                                 INSERT INTO {PromotionsModel.Schema}.promotion_redemptions (id, promotion_id, booking_id, guest_email, discount_amount, currency, redeemed_at)
                                  VALUES (@Id, @PromotionId, @BookingId, @GuestEmail, @DiscountAmount, @Currency, @RedeemedAt);
                                  """;
 
@@ -180,8 +180,8 @@ internal class PromotionRedemption(
         // "already reversed" guard (reversed_at IS NULL) makes this
         // idempotent: calling it twice for the same booking only ever affects
         // the row once.
-        const string reverseSql = """
-                                  UPDATE promotion_redemptions
+        const string reverseSql = $"""
+                                  UPDATE {PromotionsModel.Schema}.promotion_redemptions
                                   SET reversed_at = @Now
                                   WHERE booking_id = @BookingId AND reversed_at IS NULL
                                   RETURNING promotion_id AS "PromotionId";
@@ -199,8 +199,8 @@ internal class PromotionRedemption(
             return;
         }
 
-        const string decrementSql = """
-                                    UPDATE promotions
+        const string decrementSql = $"""
+                                    UPDATE {PromotionsModel.Schema}.promotions
                                     SET redemption_count = redemption_count - 1
                                     WHERE id = @PromotionId;
                                     """;

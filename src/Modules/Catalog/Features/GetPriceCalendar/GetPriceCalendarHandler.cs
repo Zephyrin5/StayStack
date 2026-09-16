@@ -102,13 +102,13 @@ public class GetPriceCalendarHandler(
         // EntityStatus.Status is stored as a raw integer ordinal, so
         // ArchivedStatus is passed as a parameter derived from the enum rather
         // than a hardcoded `2` literal.
-        const string sql = """
+        const string sql = $"""
                            SELECT
                                d::date AS "Date",
                                u.base_price AS "BasePrice",
                                u.currency AS "Currency"
                            FROM generate_series(@From::date, @To::date - interval '1 day', interval '1 day') AS d
-                           CROSS JOIN units u
+                           CROSS JOIN {CatalogModel.Schema}.units u
                            WHERE u.id = @UnitId AND u.status <> @ArchivedStatus
                            ORDER BY d;
                            """;

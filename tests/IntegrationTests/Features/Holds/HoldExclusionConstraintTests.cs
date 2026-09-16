@@ -62,7 +62,7 @@ public class HoldExclusionConstraintTests(IntegrationTestWebApplicationFactory f
             }
 
             await using NpgsqlCommand insert = new NpgsqlCommand("""
-                INSERT INTO unit_availability_holds
+                INSERT INTO bookings.unit_availability_holds
                     (id, unit_id, stay_range, status, hold_expires_at, created_at, guest_count, total_price, subtotal, currency)
                 VALUES (@Id, @UnitId, @StayRange, 'held', now() + interval '15 minutes', now(), 2, 200, 200, 'KWD')
                 """, connection, transaction);
@@ -87,7 +87,7 @@ public class HoldExclusionConstraintTests(IntegrationTestWebApplicationFactory f
     private static async Task<long> HoldsForAsync(NpgsqlDataSource dataSource, Guid unitId)
     {
         await using NpgsqlCommand count = dataSource.CreateCommand(
-            "SELECT count(*) FROM unit_availability_holds WHERE unit_id = @UnitId");
+            "SELECT count(*) FROM bookings.unit_availability_holds WHERE unit_id = @UnitId");
         count.Parameters.AddWithValue("UnitId", unitId);
         return (long)(await count.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
     }

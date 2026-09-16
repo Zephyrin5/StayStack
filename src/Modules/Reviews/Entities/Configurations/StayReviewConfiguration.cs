@@ -9,7 +9,7 @@ public class StayReviewConfiguration : IEntityTypeConfiguration<StayReview>
 
     public void Configure(EntityTypeBuilder<StayReview> builder)
     {
-        builder.ToTable("stay_reviews");
+        builder.ToTable("stay_reviews", ReviewsModel.Schema);
 
         builder.HasKey(r => r.Id);
 

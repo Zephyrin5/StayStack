@@ -6,7 +6,7 @@ public class HostConfiguration : IEntityTypeConfiguration<Host>
 {
     public void Configure(EntityTypeBuilder<Host> builder)
     {
-        builder.ToTable("hosts");
+        builder.ToTable("hosts", HostsModel.Schema);
 
         builder.HasKey(o => o.Id);
 

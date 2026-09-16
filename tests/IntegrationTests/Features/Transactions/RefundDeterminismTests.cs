@@ -244,7 +244,7 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
             await using NpgsqlCommand command = new NpgsqlCommand(
                 """
                 SELECT pid FROM pg_stat_activity
-                WHERE wait_event_type = 'Lock' AND query LIKE '%FROM "bookings" WHERE id = % FOR UPDATE%'
+                WHERE wait_event_type = 'Lock' AND query LIKE '%FROM bookings.bookings WHERE id = % FOR UPDATE%'
                 LIMIT 1
                 """, connection);
 

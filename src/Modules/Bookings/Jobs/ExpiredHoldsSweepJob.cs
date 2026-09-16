@@ -16,8 +16,8 @@ namespace Bookings.Jobs;
 /// </summary>
 public class ExpiredHoldsSweepJob(BookingsDb dbContext, TimeProvider timeProvider)
 {
-    private const string CleanupSql = """
-                                       DELETE FROM unit_availability_holds
+    private const string CleanupSql = $"""
+                                       DELETE FROM {BookingsModel.Schema}.unit_availability_holds
                                        WHERE status = 'held' AND hold_expires_at <= @Now;
                                        """;
 

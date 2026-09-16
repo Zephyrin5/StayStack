@@ -1,4 +1,4 @@
-using Ardalis.GuardClauses;
+﻿using Ardalis.GuardClauses;
 using Bookings.Contracts;
 using SeedWork.Abstractions;
 using SeedWork.ValueObjects;
@@ -7,12 +7,13 @@ namespace Bookings.Entities;
 public sealed class Booking : Entity
 {
     // EF materialization only: its constructor binding cannot bind a complex property (docs/adr/0015).
-    // The string defaults satisfy nullability and are overwritten immediately.
+    // The defaults satisfy nullability and are overwritten immediately.
     private Booking()
     {
         GuestName = string.Empty;
         GuestEmail = string.Empty;
         TimeZoneId = string.Empty;
+        CancellationPolicy = null!;
     }
 
     private Booking(
@@ -92,8 +93,7 @@ public sealed class Booking : Entity
     public DateTimeOffset? CancelledAt { get; private set; }
 
     // Snapshotted at confirm: a host tightening their policy cannot worsen a confirmed guest's terms.
-    // Null only on rows written without one, where CancelBookingHandler falls back to CreateDefault().
-    public CancellationPolicy? CancellationPolicy { get; private set; }
+    public CancellationPolicy CancellationPolicy { get; private set; }
 
     // Snapshotted for the same reason, and non-nullable: a null zone would fall back to UTC, the error
     // ADR-0018 exists to remove.

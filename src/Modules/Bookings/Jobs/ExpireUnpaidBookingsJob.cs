@@ -87,7 +87,7 @@ public partial class ExpireUnpaidBookingsJob(
                 }
 
                 Guid? claimedId = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
-                    """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE SKIP LOCKED""",
+                    $"""SELECT id FROM {BookingsModel.Schema}.bookings WHERE id = @BookingId FOR UPDATE SKIP LOCKED""",
                     new { BookingId = bookingId },
                     transaction,
                     cancellationToken: token));

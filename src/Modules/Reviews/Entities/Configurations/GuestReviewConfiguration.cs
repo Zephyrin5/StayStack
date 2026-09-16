@@ -9,7 +9,7 @@ public class GuestReviewConfiguration : IEntityTypeConfiguration<GuestReview>
 
     public void Configure(EntityTypeBuilder<GuestReview> builder)
     {
-        builder.ToTable("guest_reviews");
+        builder.ToTable("guest_reviews", ReviewsModel.Schema);
 
         builder.HasKey(r => r.Id);
 

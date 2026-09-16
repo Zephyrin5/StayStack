@@ -150,7 +150,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
 
         CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterCommit<AppDbContext>((context, ct) =>
             CommitFaults.CommittedRowExistsAsync(context,
-                "SELECT 1 FROM users WHERE id = @userId AND host_id IS NOT NULL", "userId", userId, ct));
+                "SELECT 1 FROM identity.users WHERE id = @userId AND host_id IS NOT NULL", "userId", userId, ct));
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
         HttpClient client = host.CreateClient();
 

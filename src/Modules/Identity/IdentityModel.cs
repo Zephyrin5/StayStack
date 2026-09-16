@@ -11,11 +11,14 @@ namespace Identity;
 /// </summary>
 public sealed class IdentityModel : IModuleModel
 {
+    /// <summary>This module's Postgres schema. Its tables and its raw SQL name it (docs/adr/0004).</summary>
+    public const string Schema = "identity";
+
     public void Configure(ModelBuilder builder)
     {
         builder.Entity<ApplicationUser>(user =>
         {
-            user.ToTable("users");
+            user.ToTable("users", Schema);
             user.HasKey(u => u.Id);
             user.HasIndex(u => u.NormalizedUserName).IsUnique().HasDatabaseName("UserNameIndex");
             user.HasIndex(u => u.NormalizedEmail).HasDatabaseName("EmailIndex");
@@ -28,7 +31,7 @@ public sealed class IdentityModel : IModuleModel
 
         builder.Entity<IdentityRole<Guid>>(role =>
         {
-            role.ToTable("roles");
+            role.ToTable("roles", Schema);
             role.HasKey(r => r.Id);
             role.HasIndex(r => r.NormalizedName).IsUnique().HasDatabaseName("RoleNameIndex");
             role.Property(r => r.ConcurrencyStamp).IsConcurrencyToken();
@@ -38,7 +41,7 @@ public sealed class IdentityModel : IModuleModel
 
         builder.Entity<IdentityUserRole<Guid>>(userRole =>
         {
-            userRole.ToTable("user_roles");
+            userRole.ToTable("user_roles", Schema);
             userRole.HasKey(r => new { r.UserId, r.RoleId });
 
             userRole.HasOne<ApplicationUser>().WithMany().HasForeignKey(r => r.UserId).IsRequired();
@@ -47,7 +50,7 @@ public sealed class IdentityModel : IModuleModel
 
         builder.Entity<IdentityUserLogin<Guid>>(login =>
         {
-            login.ToTable("user_logins");
+            login.ToTable("user_logins", Schema);
             login.HasKey(l => new { l.LoginProvider, l.ProviderKey });
 
             login.HasOne<ApplicationUser>().WithMany().HasForeignKey(l => l.UserId).IsRequired();
@@ -55,7 +58,7 @@ public sealed class IdentityModel : IModuleModel
 
         builder.Entity<IdentityUserToken<Guid>>(token =>
         {
-            token.ToTable("user_tokens");
+            token.ToTable("user_tokens", Schema);
             token.HasKey(t => new { t.UserId, t.LoginProvider, t.Name });
 
             token.HasOne<ApplicationUser>().WithMany().HasForeignKey(t => t.UserId).IsRequired();
@@ -63,7 +66,7 @@ public sealed class IdentityModel : IModuleModel
 
         builder.Entity<RefreshToken>(refreshToken =>
         {
-            refreshToken.ToTable("refresh_tokens");
+            refreshToken.ToTable("refresh_tokens", Schema);
 
             refreshToken.Property(t => t.TokenHash).IsRequired().HasMaxLength(64);
             refreshToken.HasIndex(t => t.TokenHash).IsUnique();

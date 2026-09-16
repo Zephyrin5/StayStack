@@ -43,7 +43,7 @@ public class TransactionRunnerTests(IntegrationTestWebApplicationFactory factory
 
         await bookings.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
             """
-            INSERT INTO refund_obligations (booking_id, attempts, cancelled_at, cause, currency, next_attempt_at, policy_refund_amount)
+            INSERT INTO bookings.refund_obligations (booking_id, attempts, cancelled_at, cause, currency, next_attempt_at, policy_refund_amount)
             VALUES (@Id, 0, now(), 'Expiry', 'KWD', now(), 1)
             """,
             new { Id = obligationId }, bookings.Database.CurrentTransaction!.GetDbTransaction(), cancellationToken: Ct));
@@ -60,9 +60,9 @@ public class TransactionRunnerTests(IntegrationTestWebApplicationFactory factory
     {
         await using NpgsqlConnection connection = new NpgsqlConnection(factory.ConnectionString);
         await connection.OpenAsync(Ct);
-        long hosts = await connection.ExecuteScalarAsync<long>("SELECT count(*) FROM hosts WHERE id = @hostId", new { hostId });
+        long hosts = await connection.ExecuteScalarAsync<long>("SELECT count(*) FROM hosts.hosts WHERE id = @hostId", new { hostId });
         long obligations = await connection.ExecuteScalarAsync<long>(
-            "SELECT count(*) FROM refund_obligations WHERE booking_id IN (@obligationId, @efId)",
+            "SELECT count(*) FROM bookings.refund_obligations WHERE booking_id IN (@obligationId, @efId)",
             new { obligationId, efId = EfObligationId(obligationId) });
         return (hosts, obligations);
     }

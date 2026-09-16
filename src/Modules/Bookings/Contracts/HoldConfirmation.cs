@@ -129,7 +129,7 @@ internal class HoldConfirmation(BookingsDb dbContext, TimeProvider timeProvider)
         // 'pending_payment' together, since a transition out of the cap's sight
         // would escape it. MarkHoldPaidAsync clears it (docs/adr/0016).
         const string sql = $"""
-                            UPDATE unit_availability_holds
+                            UPDATE {BookingsModel.Schema}.unit_availability_holds
                             SET status = '{HoldStatuses.PendingPayment}'
                             WHERE id = @HoldId AND status = '{HoldStatuses.Held}' AND hold_expires_at > @Now
                             RETURNING {HoldProjection};
@@ -194,7 +194,7 @@ internal class HoldConfirmation(BookingsDb dbContext, TimeProvider timeProvider)
         // released or expired under a late-landing payment is inventory this
         // platform no longer owns, and the caller must compensate.
         const string sql = $"""
-                            UPDATE unit_availability_holds
+                            UPDATE {BookingsModel.Schema}.unit_availability_holds
                             SET status = '{HoldStatuses.Booked}',
                                 booked_at = COALESCE(booked_at, @Now),
                                 client_key = NULL
@@ -242,7 +242,7 @@ internal class HoldConfirmation(BookingsDb dbContext, TimeProvider timeProvider)
         // silent zero-row no-op that strands the hold. 'held' is excluded: no booking stands behind a 'held' hold, so no
         // caller has a claim on one.
         const string sql = $"""
-                            UPDATE unit_availability_holds
+                            UPDATE {BookingsModel.Schema}.unit_availability_holds
                             SET status = '{HoldStatuses.Held}', hold_expires_at = @Now, booked_at = NULL
                             WHERE id = @HoldId AND status IN ('{HoldStatuses.PendingPayment}', '{HoldStatuses.Booked}');
                             """;

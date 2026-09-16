@@ -42,7 +42,7 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
     // left this test green with recovery disabled.
     private static CommitFault<AppDbContext> LoseTheAckOnTheHoldFor(Guid unitId) =>
         CommitFaults.FailAfterCommit<AppDbContext>((context, ct) => CommitFaults.CommittedRowExistsAsync(
-            context, "SELECT 1 FROM unit_availability_holds WHERE unit_id = @UnitId", "UnitId", unitId, ct));
+            context, "SELECT 1 FROM bookings.unit_availability_holds WHERE unit_id = @UnitId", "UnitId", unitId, ct));
 
     // After the commit carrying a payment for this booking - still tracked,
     // since SaveChangesAsync accepts it rather than detaching it.

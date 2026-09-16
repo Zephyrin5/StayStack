@@ -10,7 +10,7 @@ public class PromotionRedemptionConfiguration : IEntityTypeConfiguration<Promoti
 
     public void Configure(EntityTypeBuilder<PromotionRedemption> builder)
     {
-        builder.ToTable("promotion_redemptions");
+        builder.ToTable("promotion_redemptions", PromotionsModel.Schema);
 
         builder.HasKey(r => r.Id);
 

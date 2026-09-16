@@ -23,8 +23,8 @@ public class PurgeReplayedCheckoutsJob(
     TimeProvider timeProvider,
     IOptions<BookingLifecyclePolicyOptions> policy)
 {
-    private const string PurgeSql = """
-                                    DELETE FROM checkout_idempotency_records
+    private const string PurgeSql = $"""
+                                    DELETE FROM {BookingsModel.Schema}.checkout_idempotency_records
                                     WHERE created_at <= @Cutoff;
                                     """;
 

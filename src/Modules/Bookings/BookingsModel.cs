@@ -5,6 +5,9 @@ namespace Bookings;
 
 public sealed class BookingsModel : IModuleModel
 {
+    /// <summary>This module's Postgres schema. Its tables and its raw SQL name it (docs/adr/0004).</summary>
+    public const string Schema = "bookings";
+
     public void Configure(ModelBuilder builder)
     {
         builder.ApplyConfiguration(new BookingConfiguration());

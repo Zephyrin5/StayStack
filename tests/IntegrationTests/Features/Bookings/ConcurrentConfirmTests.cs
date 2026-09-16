@@ -271,7 +271,7 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
                 """
                 SELECT EXISTS (
                     SELECT 1 FROM pg_stat_activity
-                    WHERE wait_event_type = 'Lock' AND query LIKE '%UPDATE unit_availability_holds%')
+                    WHERE wait_event_type = 'Lock' AND query LIKE '%UPDATE bookings.unit_availability_holds%')
                 """, connection);
 
             if ((bool)(await command.ExecuteScalarAsync(timeout.Token))!)

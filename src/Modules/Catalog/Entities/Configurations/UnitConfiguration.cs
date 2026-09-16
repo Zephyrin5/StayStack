@@ -7,7 +7,7 @@ public class UnitConfiguration : IEntityTypeConfiguration<Unit>
 {
     public void Configure(EntityTypeBuilder<Unit> builder)
     {
-        builder.ToTable("units");
+        builder.ToTable("units", CatalogModel.Schema);
 
         builder.HasKey(u => u.Id);
 

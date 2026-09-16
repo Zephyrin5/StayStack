@@ -193,7 +193,7 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
 
         PostgresException postgres = await Assert.ThrowsAsync<PostgresException>(() =>
             context.Database.ExecuteSqlInterpolatedAsync($"""
-                INSERT INTO pricing_rules (id, unit_id, rule_type, days_of_week, multiplier, status, created_at)
+                INSERT INTO catalog.pricing_rules (id, unit_id, rule_type, days_of_week, multiplier, status, created_at)
                 VALUES ({Guid.CreateVersion7()}, {unitId}, 'DayOfWeekMultiplier', ARRAY[6, 7], 1.5, 0, now())
                 """, TestContext.Current.CancellationToken));
 

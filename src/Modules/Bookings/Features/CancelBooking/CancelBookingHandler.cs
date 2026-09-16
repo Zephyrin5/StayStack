@@ -39,7 +39,7 @@ public class CancelBookingHandler(
 
         // Refund tiers count days to a property-local check-in (docs/adr/0018).
         DateOnly today = PropertyTimeZone.Today(timeProvider, booking.TimeZoneId);
-        CancellationPolicy cancellationPolicy = booking.CancellationPolicy ?? CancellationPolicy.CreateDefault();
+        CancellationPolicy cancellationPolicy = booking.CancellationPolicy;
 
         // A re-cancel writes nothing and only reports.
         if (booking.BookingStatus != BookingStatus.Cancelled)
@@ -71,7 +71,7 @@ public class CancelBookingHandler(
 
                     // FOR UPDATE, not SKIP LOCKED: the caller waits for the committed outcome.
                     await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
-                        """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE""",
+                        $"""SELECT id FROM {BookingsModel.Schema}.bookings WHERE id = @BookingId FOR UPDATE""",
                         new { request.BookingId },
                         transaction,
                         cancellationToken: token));

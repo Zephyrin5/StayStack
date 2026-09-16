@@ -6,7 +6,7 @@ public class PropertyConfiguration : IEntityTypeConfiguration<Property>
 {
     public void Configure(EntityTypeBuilder<Property> builder)
     {
-        builder.ToTable("properties");
+        builder.ToTable("properties", CatalogModel.Schema);
 
         builder.HasKey(p => p.Id);
 

@@ -6,7 +6,7 @@ public class BookingManagementTokenConfiguration : IEntityTypeConfiguration<Book
 {
     public void Configure(EntityTypeBuilder<BookingManagementToken> builder)
     {
-        builder.ToTable("booking_management_tokens");
+        builder.ToTable("booking_management_tokens", BookingsModel.Schema);
 
         builder.HasKey(t => t.Id);
 

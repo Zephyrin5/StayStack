@@ -27,7 +27,7 @@ internal class UnitLookup(CatalogDb dbContext) : IUnitLookup
         // filter restated by hand; SoftDeleteFilterShapeTests fails if the filter grows past what this
         // copy matches.
         return await dbContext.Database.GetDbConnection().ExecuteScalarAsync<int?>(new CommandDefinition(
-            "SELECT 1 FROM units WHERE id = @UnitId AND status <> @ArchivedStatus FOR SHARE",
+            $"SELECT 1 FROM {CatalogModel.Schema}.units WHERE id = @UnitId AND status <> @ArchivedStatus FOR SHARE",
             new { UnitId = unitId, ArchivedStatus = (int)EntityStatus.Archived },
             transaction.GetDbTransaction(),
             cancellationToken: cancellationToken)) is not null;

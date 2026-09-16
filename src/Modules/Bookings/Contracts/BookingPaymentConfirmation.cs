@@ -26,7 +26,7 @@ internal class BookingPaymentConfirmation(
 
         // FOR UPDATE, not SKIP LOCKED: a payment waits to learn whether expiry or cancellation won (docs/adr/0028).
         await dbContext.Database.GetDbConnection().ExecuteScalarAsync<Guid?>(new CommandDefinition(
-            """SELECT id FROM "bookings" WHERE id = @BookingId FOR UPDATE""",
+            $"""SELECT id FROM {BookingsModel.Schema}.bookings WHERE id = @BookingId FOR UPDATE""",
             new { BookingId = bookingId },
             transaction,
             cancellationToken: cancellationToken));

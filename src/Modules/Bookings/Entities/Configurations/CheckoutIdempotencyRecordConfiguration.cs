@@ -9,7 +9,7 @@ public class CheckoutIdempotencyRecordConfiguration : IEntityTypeConfiguration<C
 
     public void Configure(EntityTypeBuilder<CheckoutIdempotencyRecord> builder)
     {
-        builder.ToTable("checkout_idempotency_records");
+        builder.ToTable("checkout_idempotency_records", BookingsModel.Schema);
 
         builder.HasKey(r => r.BookingId);
 

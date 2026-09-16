@@ -1,8 +1,9 @@
-using Bookings;
+﻿using Bookings;
 using Catalog;
 using Hosts;
 using Identity;
 using IntegrationTests.Measurements;
+using Database;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -88,16 +89,16 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
     /// </summary>
     private async Task MigrateAllModulesAsync()
     {
-        // moduleName must match what each module's own registration passes -
-        // it selects that module's migrations-history table, so a mismatch
-        // would silently re-run every migration into the wrong bookkeeping.
-        await MigrateAsync<AppIdentityDbContext>("identity");
-        await MigrateAsync<AppCatalogDbContext>("catalog");
-        await MigrateAsync<AppHostsDbContext>("hosts");
-        await MigrateAsync<AppPromotionsDbContext>("promotions");
-        await MigrateAsync<AppBookingsDbContext>("bookings");
-        await MigrateAsync<AppTransactionsDbContext>("transactions");
-        await MigrateAsync<AppReviewsDbContext>("reviews");
+        // "app" must match what AddAppDbContext passes: it selects the migrations-history table, so a
+        // mismatch would silently re-run every migration into the wrong bookkeeping.
+        DbContextOptionsBuilder<AppDbContext> builder = new DbContextOptionsBuilder<AppDbContext>();
+        builder.ConfigureStayStackDefaults(
+            _dbContainer.GetConnectionString(), "app", isDevelopment: false, migrationsAssembly: "Database");
+
+        await using (AppDbContext context = new AppDbContext(builder.Options, AppDbContextModels.All))
+        {
+            await context.Database.MigrateAsync();
+        }
 
         // TickerQ's migrations live in the Jobs assembly, not alongside its
         // context - same reason TickerQDbContextDesignTimeFactory spells this

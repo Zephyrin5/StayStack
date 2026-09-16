@@ -148,8 +148,8 @@ public class HoldAvailabilityHandler(
             // constraint below even though GetPriceCalendarHandler already
             // treats them as available. Scoped to this unit and run right
             // before the INSERT they'd actually block.
-            const string cleanupSql = """
-                                      DELETE FROM unit_availability_holds
+            const string cleanupSql = $"""
+                                      DELETE FROM {BookingsModel.Schema}.unit_availability_holds
                                       WHERE unit_id = @UnitId AND status = 'held' AND hold_expires_at <= @Now;
                                       """;
 
@@ -178,7 +178,7 @@ public class HoldAvailabilityHandler(
             // PaymentDueAt governs them - so testing it here would exclude every
             // one of them and reopen the escape.
             const string activeHoldCountSql = $"""
-                                               SELECT count(*) FROM unit_availability_holds
+                                               SELECT count(*) FROM {BookingsModel.Schema}.unit_availability_holds
                                                WHERE client_key = @ClientKey
                                                  AND (
                                                      (status = '{HoldStatuses.Held}' AND hold_expires_at > @Now)
@@ -226,8 +226,8 @@ public class HoldAvailabilityHandler(
 
             DateTimeOffset holdExpiresAt = now.Add(HoldDuration);
 
-            const string sql = """
-                               INSERT INTO unit_availability_holds (id, unit_id, stay_range, status, hold_expires_at, created_at, guest_count, total_price, subtotal, currency, length_of_stay_discount_amount, client_key)
+            const string sql = $"""
+                               INSERT INTO {BookingsModel.Schema}.unit_availability_holds (id, unit_id, stay_range, status, hold_expires_at, created_at, guest_count, total_price, subtotal, currency, length_of_stay_discount_amount, client_key)
                                VALUES (@Id, @UnitId, @StayRange, 'held', @HoldExpiresAt, @CreatedAt, @GuestCount, @TotalPrice, @Subtotal, @Currency, @LengthOfStayDiscountAmount, @ClientKey);
                                """;
 
@@ -323,6 +323,6 @@ public class HoldAvailabilityHandler(
     private static Task<(DateTimeOffset HoldExpiresAt, string Status)?> FindOwnHoldAsync(
         IDbConnection connection, Guid holdId, IDbTransaction? transaction, CancellationToken cancellationToken) =>
         connection.QuerySingleOrDefaultAsync<(DateTimeOffset, string)?>(new CommandDefinition(
-            """SELECT hold_expires_at, status FROM unit_availability_holds WHERE id = @Id""",
+            $"""SELECT hold_expires_at, status FROM {BookingsModel.Schema}.unit_availability_holds WHERE id = @Id""",
             new { Id = holdId }, transaction, cancellationToken: cancellationToken));
 }

@@ -13,7 +13,7 @@ public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAv
 
     public void Configure(EntityTypeBuilder<UnitAvailabilityHold> builder)
     {
-        builder.ToTable("unit_availability_holds");
+        builder.ToTable("unit_availability_holds", BookingsModel.Schema);
 
         builder.HasKey(h => h.Id);
 
