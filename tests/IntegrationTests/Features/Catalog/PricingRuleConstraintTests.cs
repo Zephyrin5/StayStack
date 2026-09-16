@@ -27,7 +27,7 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
         Unit unit = CatalogSeeding.CreateUnit(property);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         context.Add(property);
         context.Add(unit);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -39,7 +39,7 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
     private async Task AddRuleAsync(PricingRule rule)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         context.Add(rule);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
     }
@@ -189,7 +189,7 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
         Guid unitId = await SeedUnitAsync();
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
 
         PostgresException postgres = await Assert.ThrowsAsync<PostgresException>(() =>
             context.Database.ExecuteSqlInterpolatedAsync($"""
@@ -224,7 +224,7 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
         await AddRuleAsync(rule);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         PricingRule persisted = await context.PricingRules.AsNoTracking()
             .SingleAsync(r => r.Id == rule.Id, TestContext.Current.CancellationToken);
 

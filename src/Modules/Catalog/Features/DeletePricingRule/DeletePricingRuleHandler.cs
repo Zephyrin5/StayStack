@@ -9,7 +9,7 @@ using Unit = Catalog.Entities.Unit;
 namespace Catalog.Features.DeletePricingRule;
 
 public class DeletePricingRuleHandler(
-    AppCatalogDbContext dbContext,
+    CatalogDb dbContext,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization,
     TimeProvider timeProvider) : IRequestHandler<DeletePricingRuleRequest, DeletePricingRuleResponse>

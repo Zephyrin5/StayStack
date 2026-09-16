@@ -5,7 +5,7 @@ namespace Hosts.Contracts;
 
 // internal, same reasoning as HostLookup/HostAuthorization - Catalog/Identity
 // should only ever reach this through IHostRegistrar, resolved via DI.
-internal class HostRegistrar(AppHostsDbContext dbContext) : IHostRegistrar
+internal class HostRegistrar(HostsDb dbContext) : IHostRegistrar
 {
     public async Task RegisterHostAsync(
         Guid hostId,
@@ -34,7 +34,7 @@ internal class HostRegistrar(AppHostsDbContext dbContext) : IHostRegistrar
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf<Host>(dbContext))
+        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf(dbContext.Hosts))
         {
             // Two callers raced the check above with the same id, or this save's
             // own retry met its committed row. The row exists, which is all this

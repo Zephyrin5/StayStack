@@ -18,6 +18,7 @@ using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Data;
 namespace IntegrationTests.Features.Catalog;
 
 // Archiving checked "no active bookings or holds" and then archived, with
@@ -181,7 +182,7 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb catalog = scope.ServiceProvider.GetRequiredService<CatalogDb>();
             catalog.AddRange(_pendingProperties);
             catalog.Add(unit);
             await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -242,7 +243,7 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb catalog = scope.ServiceProvider.GetRequiredService<CatalogDb>();
             catalog.Add(property);
             catalog.AddRange(units);
             await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -306,7 +307,7 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb catalog = scope.ServiceProvider.GetRequiredService<CatalogDb>();
             catalog.Add(property);
             catalog.Add(existing);
             await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -335,7 +336,7 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
         bool archiveSucceeded = responses[1].StatusCode == HttpStatusCode.OK;
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppCatalogDbContext catalogDb = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb catalogDb = assertScope.ServiceProvider.GetRequiredService<CatalogDb>();
 
         // The soft-delete query filter is what "archived" means here: an
         // archived row is simply not found.
@@ -363,11 +364,11 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
 
         using IServiceScope assertScope = factory.Services.CreateScope();
 
-        bool unitIsArchived = !await assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>()
+        bool unitIsArchived = !await assertScope.ServiceProvider.GetRequiredService<CatalogDb>()
             .Units.AsNoTracking()
             .AnyAsync(u => u.Id == unitId, TestContext.Current.CancellationToken);
 
-        bool holdExists = await assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+        bool holdExists = await assertScope.ServiceProvider.GetRequiredService<BookingsDb>()
             .UnitAvailabilityHolds.AsNoTracking()
             .AnyAsync(h => h.UnitId == unitId && h.Status == "held", TestContext.Current.CancellationToken);
 
@@ -452,7 +453,7 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb catalog = scope.ServiceProvider.GetRequiredService<CatalogDb>();
             catalog.AddRange(_pendingProperties);
             catalog.Add(unit);
             await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -507,9 +508,8 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
         // hold check does see - a different and much easier case.
         using (IServiceScope paymentScope = factory.Services.CreateScope())
         {
-            Assert.True(await paymentScope.ServiceProvider.GetRequiredService<IAtomicScope>().ExecuteAsync(
-                AtomicParticipants.Bookings,
-                AtomicParticipants.Bookings,
+            Assert.True(await paymentScope.ServiceProvider.GetRequiredService<ITransactionRunner>().ExecuteAsync(
+                IsolationLevel.ReadCommitted,
                 token => paymentScope.ServiceProvider.GetRequiredService<IBookingPaymentConfirmation>()
                     .ConfirmPaymentAsync(booking.BookingId, token),
                 TestContext.Current.CancellationToken));
@@ -526,13 +526,13 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
         using IServiceScope assertScope = factory.Services.CreateScope();
 
         Assert.True(
-            await assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>()
+            await assertScope.ServiceProvider.GetRequiredService<CatalogDb>()
                 .Units.AsNoTracking().AnyAsync(u => u.Id == unit.Id, TestContext.Current.CancellationToken),
             "The unit was archived with a paid, confirmed booking against it.");
 
         // And the stay survived intact - the thing that would actually have
         // been lost.
-        AppBookingsDbContext bookings = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb bookings = assertScope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         Booking persisted = await bookings.Bookings.AsNoTracking()
             .SingleAsync(b => b.Id == booking.BookingId, TestContext.Current.CancellationToken);

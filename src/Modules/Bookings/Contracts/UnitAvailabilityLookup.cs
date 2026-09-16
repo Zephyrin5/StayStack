@@ -11,7 +11,7 @@ namespace Bookings.Contracts;
 // depends on Catalog.Contracts (for IUnitLookup.ResolveStayPricingAsync),
 // but Catalog must never depend back on Availability.Contracts. See
 // docs/adr/0004.
-internal class UnitAvailabilityLookup(AppBookingsDbContext dbContext) : IUnitAvailabilityLookup
+internal class UnitAvailabilityLookup(BookingsDb dbContext) : IUnitAvailabilityLookup
 {
     public async Task<IReadOnlyList<ActiveHoldRange>> GetActiveHoldRangesAsync(
         Guid unitId, DateOnly from, DateOnly to, DateTimeOffset now, CancellationToken cancellationToken)

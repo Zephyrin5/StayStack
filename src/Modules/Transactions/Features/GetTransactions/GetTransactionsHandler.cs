@@ -5,7 +5,7 @@ using Persistence;
 using Transactions.Entities;
 namespace Transactions.Features.GetTransactions;
 
-public class GetTransactionsHandler(AppTransactionsDbContext dbContext) : IRequestHandler<GetTransactionsRequest, PagedResponse<TransactionSummary>>
+public class GetTransactionsHandler(TransactionsDb dbContext) : IRequestHandler<GetTransactionsRequest, PagedResponse<TransactionSummary>>
 {
     public async ValueTask<PagedResponse<TransactionSummary>> Handle(GetTransactionsRequest request, CancellationToken cancellationToken)
     {

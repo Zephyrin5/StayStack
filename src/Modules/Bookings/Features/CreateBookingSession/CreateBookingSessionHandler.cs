@@ -17,7 +17,7 @@ namespace Bookings.Features.CreateBookingSession;
 ///     </para>
 /// </summary>
 public class CreateBookingSessionHandler(
-    AppBookingsDbContext dbContext,
+    BookingsDb dbContext,
     IBookingSessions bookingSessions,
     TimeProvider timeProvider,
     IOptions<BookingLifecyclePolicyOptions> policy)

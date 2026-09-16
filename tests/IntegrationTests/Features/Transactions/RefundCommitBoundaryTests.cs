@@ -16,6 +16,7 @@ using SeedWork.ValueObjects;
 using Transactions;
 using Transactions.Contracts;
 using Transactions.Entities;
+using System.Data;
 namespace IntegrationTests.Features.Transactions;
 
 // The refund decision writes two modules' rows: the amount lands on the
@@ -59,13 +60,13 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
 
         using IServiceScope scope = factory.Services.CreateScope();
 
-        AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb catalog = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         catalog.AddRange(_pendingProperties);
         _pendingProperties.Clear();
         catalog.Add(unit);
         await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb bookings = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         bookings.UnitAvailabilityHolds.Add(new UnitAvailabilityHold
         {
             Id = holdId,
@@ -100,8 +101,8 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
 
         await bookings.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        AppTransactionsDbContext transactions =
-            scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        TransactionsDb transactions =
+            scope.ServiceProvider.GetRequiredService<TransactionsDb>();
 
         Transaction payment = Transaction.Create(Guid.CreateVersion7(), bookingId, Money.Of(200m, Currency.KWD));
         payment.MarkSucceeded(succeededAt);
@@ -120,9 +121,8 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
     // The resolver runs only inside an atomic scope, as ResolveOutstandingRefundsJob
     // calls it.
     private static Task<decimal?> ResolveInScopeAsync(IServiceScope scope, Func<ITransactionReversal, Task<decimal?>> resolve) =>
-        scope.ServiceProvider.GetRequiredService<IAtomicScope>().ExecuteAsync(
-            AtomicParticipants.Bookings,
-            AtomicParticipants.Bookings | AtomicParticipants.Transactions,
+        scope.ServiceProvider.GetRequiredService<ITransactionRunner>().ExecuteAsync(
+            IsolationLevel.ReadCommitted,
             _ => resolve(scope.ServiceProvider.GetRequiredService<ITransactionReversal>()),
             TestContext.Current.CancellationToken);
 
@@ -131,11 +131,11 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
     {
         using IServiceScope scope = factory.Services.CreateScope();
 
-        Transaction payment = await scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>()
+        Transaction payment = await scope.ServiceProvider.GetRequiredService<TransactionsDb>()
             .Transactions.AsNoTracking()
             .SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
 
-        RefundObligation obligation = await scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+        RefundObligation obligation = await scope.ServiceProvider.GetRequiredService<BookingsDb>()
             .RefundObligations.AsNoTracking()
             .SingleAsync(o => o.BookingId == bookingId, TestContext.Current.CancellationToken);
 
@@ -185,8 +185,8 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppTransactionsDbContext transactions =
-                scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+            TransactionsDb transactions =
+                scope.ServiceProvider.GetRequiredService<TransactionsDb>();
 
             Transaction payment = await transactions.Transactions
                 .SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
@@ -227,8 +227,8 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
             if (Interlocked.Increment(ref _fired) == 1)
             {
                 using IServiceScope scope = scopes.CreateScope();
-                AppTransactionsDbContext transactions =
-                    scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+                TransactionsDb transactions =
+                    scope.ServiceProvider.GetRequiredService<TransactionsDb>();
 
                 Transaction payment = await transactions.Transactions
                     .SingleAsync(t => t.Id == transactionId, cancellationToken);
@@ -309,8 +309,8 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppTransactionsDbContext transactions =
-                scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+            TransactionsDb transactions =
+                scope.ServiceProvider.GetRequiredService<TransactionsDb>();
 
             // A is refunded already.
             Transaction refunded = await transactions.Transactions
@@ -324,8 +324,8 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppTransactionsDbContext transactions =
-                scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+            TransactionsDb transactions =
+                scope.ServiceProvider.GetRequiredService<TransactionsDb>();
 
             // B succeeded afterwards - the pair a SingleOrDefault query cannot read.
             Transaction second = Transaction.Create(Guid.CreateVersion7(), bookingId, Money.Of(200m, Currency.KWD));
@@ -343,7 +343,7 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
         }
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppTransactionsDbContext db = assertScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        TransactionsDb db = assertScope.ServiceProvider.GetRequiredService<TransactionsDb>();
 
         // B is refunded in full - it bought nothing, and the obligation was
         // already settled against A.
@@ -375,8 +375,8 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppTransactionsDbContext transactions =
-                scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+            TransactionsDb transactions =
+                scope.ServiceProvider.GetRequiredService<TransactionsDb>();
 
             Transaction payment = await transactions.Transactions
                 .SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);

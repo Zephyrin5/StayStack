@@ -1,4 +1,4 @@
-# 0029 - Atomic scopes for cross-module work
+﻿# 0029 - Atomic scopes for cross-module work
 
 **Status:** Accepted
 
@@ -46,7 +46,7 @@ No HTTP call, no payment-provider call, no message publish. Such an effect canno
 
 ### Scopes in use
 
-Listed, with what each participant does, in [docs/extraction-inventory.md](../extraction-inventory.md): become host, confirm, cancel, expiry, payment success, the refund sweep, and three read-only participations - initiation, unit archival and property archival - where the other module is only read under a lock, so the read uses the owner's connection instead of a second one.
+The call sites: become host, confirm, cancel, expiry, payment success, the refund sweep, and three read-only participations - initiation, unit archival and property archival - where the other module is only read under a lock, so the read uses the owner's connection instead of a second one.
 
 ### `HoldAvailabilityHandler` stays outside, deliberately
 
@@ -65,4 +65,4 @@ It runs a Serializable transaction and re-reads the unit through Catalog under t
 - `AtomicScopeTests` pins rollback across EF and Dapper participants, retry without duplicates or stale entities, the idle-entry and unsaved-changes refusals, restored connections, and that `CommitFaults` fire on the owner's commit and not a borrower's. The release step and each tracker-clearing step were verified by removing them from the implementation; the entry refusals were not.
 - **Failure injection targets the owner.** A borrower never commits, so a commit fault registered on a borrower's context never fires.
 - **Adding a scope, or a participant to one, is a documentation change too** - `ExtractionInventoryProtocolTests` fails until the inventory matches.
-- **Measured** (docs/design/transaction-ownership.md): peak connections per converted operation 2 → 1; 20 concurrent payment successes at `MaxPoolSize=5` from 15-46 s stalls with failed dispatches to ~0.3 s, all succeeding.
+- **Measured:** peak connections per converted operation 2 → 1; 20 concurrent payment successes at `MaxPoolSize=5` from 15-46 s stalls with failed dispatches to ~0.3 s, all succeeding.

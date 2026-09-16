@@ -8,7 +8,7 @@ using Promotions.Entities;
 namespace Promotions.Features.CreatePromotion;
 
 public class CreatePromotionHandler(
-    AppPromotionsDbContext dbContext,
+    PromotionsDb dbContext,
     IHostAuthorization hostAuthorization) : IRequestHandler<CreatePromotionRequest, CreatePromotionResponse>
 {
     public async ValueTask<CreatePromotionResponse> Handle(
@@ -38,11 +38,11 @@ public class CreatePromotionHandler(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf<Promotion>(dbContext))
+        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf(dbContext.Promotions))
         {
             // An earlier attempt committed and lost its acknowledgement - answer
             // with that row (Persistence.CommittedInsertRecovery).
-            Promotion committed = await dbContext.FindOwnCommittedInsertAsync<Promotion>(promotion.Id, cancellationToken);
+            Promotion committed = await dbContext.Promotions.FindOwnCommittedInsertAsync(promotion.Id, cancellationToken);
             return new CreatePromotionResponse { PromotionId = committed.Id };
         }
         catch (DbUpdateException ex) when (ex.IsViolationOf(PromotionConfiguration.CodeIndex))

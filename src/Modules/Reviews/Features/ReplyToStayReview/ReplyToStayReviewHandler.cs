@@ -7,7 +7,7 @@ using Reviews.Entities;
 namespace Reviews.Features.ReplyToStayReview;
 
 public class ReplyToStayReviewHandler(
-    AppReviewsDbContext dbContext,
+    ReviewsDb dbContext,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization,
     TimeProvider timeProvider) : IRequestHandler<ReplyToStayReviewRequest, ReplyToStayReviewResponse>

@@ -1,4 +1,4 @@
-using Bookings.Entities.Configurations;
+﻿using Bookings.Entities.Configurations;
 using Persistence;
 using Bookings.Contracts;
 using Bookings.Entities;
@@ -14,11 +14,12 @@ using System.Security.Cryptography;
 using Promotions.Contracts;
 using Microsoft.Extensions.Options;
 using SeedWork.ValueObjects;
+using System.Data;
 namespace Bookings.Features.ConfirmBooking;
 
 public class ConfirmBookingHandler(
-    AppBookingsDbContext dbContext,
-    IAtomicScope atomicScope,
+    BookingsDb dbContext,
+    ITransactionRunner transactionRunner,
     IHoldConfirmation holdConfirmation,
     IPromotionRedemption promotionRedemption,
     IUnitLookup unitLookup,
@@ -66,13 +67,10 @@ public class ConfirmBookingHandler(
 
         try
         {
-            // The hold transition, the redemption, the booking, its management token
-            // and the idempotency record commit together or not at all
-            // (docs/design/transaction-ownership.md). Catalog participates for the
-            // unit read, so it runs on this transaction's connection.
-            Booking booking = await atomicScope.ExecuteAsync(
-                AtomicParticipants.Bookings,
-                AtomicParticipants.Bookings | AtomicParticipants.Promotions | AtomicParticipants.Catalog,
+            // The hold transition, the redemption, the booking, its management token and the
+            // idempotency record commit together or not at all (docs/adr/0003).
+            Booking booking = await transactionRunner.ExecuteAsync(
+                IsolationLevel.ReadCommitted,
                 token => ConfirmAsync(request, bookingId, managementToken, managementTokenId, redemptionId, keyHash, requestFingerprint, token),
                 cancellationToken);
 

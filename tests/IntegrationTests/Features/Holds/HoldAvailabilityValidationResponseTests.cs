@@ -25,7 +25,7 @@ public class HoldAvailabilityValidationResponseTests(IntegrationTestWebApplicati
             100);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         context.Add(property);
         context.Add(unit);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);

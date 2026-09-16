@@ -4,6 +4,8 @@ using Promotions.Entities;
 using Promotions.Entities.Configurations;
 namespace Promotions;
 
+// Kept only so this module's existing migrations compile; nothing registers or uses it. The
+// model lives in the module's IModuleModel, and this class goes when the migrations are squashed.
 public class AppPromotionsDbContext(DbContextOptions<AppPromotionsDbContext> options) : StayStackDbContext(options)
 {
     // CRUD goes through EF change tracking normally - RedemptionCount's own

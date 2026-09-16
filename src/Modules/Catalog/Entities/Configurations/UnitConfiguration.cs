@@ -7,6 +7,8 @@ public class UnitConfiguration : IEntityTypeConfiguration<Unit>
 {
     public void Configure(EntityTypeBuilder<Unit> builder)
     {
+        builder.ToTable("units");
+
         builder.HasKey(u => u.Id);
 
         builder.ComplexProperty(u => u.BasePrice, money => money.ConfigureMoney("base_price"));

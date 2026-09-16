@@ -14,7 +14,7 @@ namespace Bookings.Jobs;
 ///     for that exact unit/range again), but still worth sweeping
 ///     periodically so the table doesn't accumulate dead rows indefinitely.
 /// </summary>
-public class ExpiredHoldsSweepJob(AppBookingsDbContext dbContext, TimeProvider timeProvider)
+public class ExpiredHoldsSweepJob(BookingsDb dbContext, TimeProvider timeProvider)
 {
     private const string CleanupSql = """
                                        DELETE FROM unit_availability_holds

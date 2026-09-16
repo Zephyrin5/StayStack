@@ -49,7 +49,7 @@ public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
     private async Task SeedCatalogAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
 
         // Owners first - a Unit without its Property does not resolve.
         context.AddRange(_pendingProperties);

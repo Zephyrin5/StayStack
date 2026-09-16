@@ -1,4 +1,4 @@
-using Bookings.Entities.Configurations;
+﻿using Bookings.Entities.Configurations;
 using Persistence;
 using Bookings.Entities;
 using Bookings.Exceptions;
@@ -18,7 +18,7 @@ using System.Data;
 namespace Bookings.Features.HoldAvailability;
 
 public class HoldAvailabilityHandler(
-    AppBookingsDbContext dbContext,
+    BookingsDb dbContext,
     IUnitLookup unitLookup,
     TimeProvider timeProvider,
     IOptions<HoldCapOptions> holdCapOptions,
@@ -133,11 +133,12 @@ public class HoldAvailabilityHandler(
                 transaction.GetDbTransaction(),
                 cancellationToken: cancellationToken));
 
-            // Re-read under the lock. The pricing lookup above ran before this
-            // transaction, so archival can take the lock, archive and commit in
-            // between; the lock only orders the two, and this read is what tells
-            // this handler that archival won.
-            if (await unitLookup.GetUnitAsync(request.UnitId, cancellationToken) is null)
+            // Re-read under the lock. The pricing lookup above ran before this transaction, so archival
+            // can take the lock, archive and commit in between; the lock only orders the two, and this
+            // read is what tells this handler that archival won. A locking read, because this
+            // transaction's Serializable snapshot predates the wait for the lock and would still show
+            // the unit live (docs/adr/0028).
+            if (!await unitLookup.IsUnitLiveForWriteAsync(request.UnitId, cancellationToken))
             {
                 throw new NotFoundException("Unit", request.UnitId);
             }
@@ -258,7 +259,7 @@ public class HoldAvailabilityHandler(
                     cancellationToken: cancellationToken));
             }
             catch (PostgresException ex) when (ex.IsViolationOf(UnitAvailabilityHoldConfiguration.OverlapExclusionConstraint)
-                                                   || ex.IsPrimaryKeyViolationOf<UnitAvailabilityHold>(dbContext))
+                                                   || ex.IsPrimaryKeyViolationOf(dbContext.UnitAvailabilityHolds))
             {
                 // The exclusion constraint means the range is already held or
                 // booked for this unit - the double-booking guarantee, a real

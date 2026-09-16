@@ -12,7 +12,7 @@ public class ExpiredRefreshTokensSweepJobTests(IntegrationTestWebApplicationFact
     private async Task SeedDatabaseAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppIdentityDbContext context = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+        IdentityDb context = scope.ServiceProvider.GetRequiredService<IdentityDb>();
 
         context.AddRange(entities);
         await context.SaveChangesAsync();
@@ -61,7 +61,7 @@ public class ExpiredRefreshTokensSweepJobTests(IntegrationTestWebApplicationFact
         await SeedDatabaseAsync(expired, revokedButNotExpired, stillActive);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppIdentityDbContext context = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+        IdentityDb context = scope.ServiceProvider.GetRequiredService<IdentityDb>();
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(now);
         ExpiredRefreshTokensSweepJob job = new ExpiredRefreshTokensSweepJob(context, timeProvider);

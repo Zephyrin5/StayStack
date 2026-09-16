@@ -10,7 +10,7 @@ namespace Identity.Jobs;
 ///     ignored). Only a token past its own ExpiresAt has no further reuse-
 ///     detection value left to preserve.
 /// </summary>
-public class ExpiredRefreshTokensSweepJob(AppIdentityDbContext dbContext, TimeProvider timeProvider)
+public class ExpiredRefreshTokensSweepJob(IdentityDb dbContext, TimeProvider timeProvider)
 {
     [TickerFunction(functionName: "Identity.SweepExpiredRefreshTokens", cronExpression: "0 3 * * *")]
     public async Task SweepAsync(TickerFunctionContext context, CancellationToken cancellationToken)

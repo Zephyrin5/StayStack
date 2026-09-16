@@ -49,7 +49,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
 
         // The user is linked to a Host that exists, and the loser left no second Host.
         using IServiceScope scope = factory.Services.CreateScope();
-        AppIdentityDbContext identity = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+        IdentityDb identity = scope.ServiceProvider.GetRequiredService<IdentityDb>();
         ApplicationUser user = await identity.Users.AsNoTracking()
             .SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
 
@@ -75,7 +75,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(0, await HostCountAsync(businessName));
 
         using IServiceScope scope = factory.Services.CreateScope();
-        ApplicationUser user = await scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>().Users.AsNoTracking()
+        ApplicationUser user = await scope.ServiceProvider.GetRequiredService<IdentityDb>().Users.AsNoTracking()
             .SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken);
         Assert.Null(user.HostId);
     }
@@ -148,7 +148,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
         (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
         string businessName = UniqueBusinessName();
 
-        CommitFault<AppIdentityDbContext> lostAck = CommitFaults.FailAfterCommit<AppIdentityDbContext>((context, ct) =>
+        CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterCommit<AppDbContext>((context, ct) =>
             CommitFaults.CommittedRowExistsAsync(context,
                 "SELECT 1 FROM users WHERE id = @userId AND host_id IS NOT NULL", "userId", userId, ct));
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
@@ -183,7 +183,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
             await scope.ServiceProvider.GetRequiredService<IHostRegistrar>().RegisterHostAsync(
                 hostId, "Archived Co", "archived@example.com", null, TestContext.Current.CancellationToken);
 
-            AppHostsDbContext hosts = scope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+            HostsDb hosts = scope.ServiceProvider.GetRequiredService<HostsDb>();
             Host host = await hosts.Hosts.SingleAsync(h => h.Id == hostId, TestContext.Current.CancellationToken);
             host.Archive(DateTimeOffset.UtcNow, null);
             await hosts.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -196,7 +196,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
         }
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppHostsDbContext assertHosts = assertScope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+        HostsDb assertHosts = assertScope.ServiceProvider.GetRequiredService<HostsDb>();
         int count = await assertHosts.Hosts
             .IgnoreQueryFilters()
             .CountAsync(h => h.Id == hostId, TestContext.Current.CancellationToken);
@@ -219,7 +219,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
         }
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppHostsDbContext hosts = assertScope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+        HostsDb hosts = assertScope.ServiceProvider.GetRequiredService<HostsDb>();
         int count = await hosts.Hosts
             .IgnoreQueryFilters()
             .CountAsync(h => h.Id == hostId, TestContext.Current.CancellationToken);
@@ -230,7 +230,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     private async Task<bool> HostExistsAsync(Guid hostId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppHostsDbContext hosts = scope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+        HostsDb hosts = scope.ServiceProvider.GetRequiredService<HostsDb>();
         return await hosts.Hosts
             .IgnoreQueryFilters()
             .AnyAsync(h => h.Id == hostId, TestContext.Current.CancellationToken);
@@ -239,7 +239,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
     private async Task<int> HostCountAsync(string businessName)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppHostsDbContext hosts = scope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+        HostsDb hosts = scope.ServiceProvider.GetRequiredService<HostsDb>();
         return await hosts.Hosts
             .IgnoreQueryFilters()
             .CountAsync(h => h.BusinessName == businessName, TestContext.Current.CancellationToken);
@@ -321,7 +321,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(persistedUser);
         Assert.Equal(result.HostId, persistedUser.HostId);
 
-        AppHostsDbContext hostsDb = scope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+        HostsDb hostsDb = scope.ServiceProvider.GetRequiredService<HostsDb>();
         bool hostExists = await hostsDb.Hosts.AnyAsync(h => h.Id == result.HostId, TestContext.Current.CancellationToken);
         Assert.True(hostExists);
     }
@@ -361,7 +361,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
         (Guid userId, string accessToken) = await SeedAndSignInUserAsync();
 
         using IServiceScope preScope = factory.Services.CreateScope();
-        AppHostsDbContext preHostsDb = preScope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+        HostsDb preHostsDb = preScope.ServiceProvider.GetRequiredService<HostsDb>();
         int hostCountBefore = await preHostsDb.Hosts.CountAsync(TestContext.Current.CancellationToken);
 
         // Force the AddToRoleAsync step inside BecomeHostHandler to fail by
@@ -370,7 +370,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
         // had just created against a real database.
         using (IServiceScope seedScope = factory.Services.CreateScope())
         {
-            AppIdentityDbContext identityDb = seedScope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+            IdentityDb identityDb = seedScope.ServiceProvider.GetRequiredService<IdentityDb>();
             var hostRole = await identityDb.Roles.SingleAsync(
                 r => r.Name == "Host", TestContext.Current.CancellationToken);
             identityDb.Roles.Remove(hostRole);
@@ -393,7 +393,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
             Assert.NotNull(persistedUser);
             Assert.Null(persistedUser.HostId); // rolled back, not left dangling
 
-            AppHostsDbContext hostsDb = assertScope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+            HostsDb hostsDb = assertScope.ServiceProvider.GetRequiredService<HostsDb>();
             int hostCountAfter = await hostsDb.Hosts.CountAsync(TestContext.Current.CancellationToken);
             Assert.Equal(hostCountBefore, hostCountAfter); // no orphaned Host row survived
         }
@@ -402,7 +402,7 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
             // Restore the role so later tests in this shared-container
             // collection aren't affected by this test's setup.
             using IServiceScope cleanupScope = factory.Services.CreateScope();
-            AppIdentityDbContext identityDb = cleanupScope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+            IdentityDb identityDb = cleanupScope.ServiceProvider.GetRequiredService<IdentityDb>();
             bool roleStillMissing = !await identityDb.Roles.AnyAsync(
                 r => r.Name == "Host", TestContext.Current.CancellationToken);
             if (roleStillMissing)

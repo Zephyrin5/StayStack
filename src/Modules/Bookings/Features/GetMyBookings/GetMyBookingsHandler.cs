@@ -9,7 +9,7 @@ using Persistence;
 namespace Bookings.Features.GetMyBookings;
 
 public class GetMyBookingsHandler(
-    AppBookingsDbContext dbContext,
+    BookingsDb dbContext,
     IUnitLookup unitLookup,
     ICurrentUserProvider currentUserProvider,
     TimeProvider timeProvider) : IRequestHandler<GetMyBookingsRequest, PagedResponse<BookingSummary>>

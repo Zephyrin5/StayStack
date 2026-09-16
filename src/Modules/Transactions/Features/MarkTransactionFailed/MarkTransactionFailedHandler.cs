@@ -5,7 +5,7 @@ using Transactions.Entities;
 using Transactions.Exceptions;
 namespace Transactions.Features.MarkTransactionFailed;
 
-public class MarkTransactionFailedHandler(AppTransactionsDbContext dbContext)
+public class MarkTransactionFailedHandler(TransactionsDb dbContext)
     : IRequestHandler<MarkTransactionFailedRequest, MarkTransactionFailedResponse>
 {
     public async ValueTask<MarkTransactionFailedResponse> Handle(

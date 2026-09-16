@@ -10,11 +10,12 @@ using Persistence;
 using Transactions.Entities;
 using Transactions.Entities.Configurations;
 using Transactions.Exceptions;
+using System.Data;
 namespace Transactions.Features.InitiateTransaction;
 
 public class InitiateTransactionHandler(
-    AppTransactionsDbContext dbContext,
-    IAtomicScope atomicScope,
+    TransactionsDb dbContext,
+    ITransactionRunner transactionRunner,
     IBookingLookup bookingLookup,
     ICurrentUserProvider currentUserProvider) : IRequestHandler<InitiateTransactionRequest, InitiateTransactionResponse>
 {
@@ -35,9 +36,8 @@ public class InitiateTransactionHandler(
         // Minted before the retry so a lost acknowledgement finds its own row (docs/adr/0025).
         Guid transactionId = Guid.CreateVersion7();
 
-        return await atomicScope.ExecuteAsync(
-            AtomicParticipants.Transactions,
-            AtomicParticipants.Transactions | AtomicParticipants.Bookings,
+        return await transactionRunner.ExecuteAsync(
+                IsolationLevel.ReadCommitted,
             async token =>
             {
                 // Excludes a cancellation committing between the payability check and the insert (docs/adr/0028).

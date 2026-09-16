@@ -9,6 +9,8 @@ public class CheckoutIdempotencyRecordConfiguration : IEntityTypeConfiguration<C
 
     public void Configure(EntityTypeBuilder<CheckoutIdempotencyRecord> builder)
     {
+        builder.ToTable("checkout_idempotency_records");
+
         builder.HasKey(r => r.BookingId);
 
         // At most one record per key, and this is the concurrency control

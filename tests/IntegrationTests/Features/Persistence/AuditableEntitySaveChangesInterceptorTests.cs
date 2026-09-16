@@ -1,7 +1,8 @@
-using Bookings;
+﻿using Bookings;
 using Bookings.Contracts;
 using Bookings.Entities;
 using BuildingBlocks.Identity;
+using Database;
 using Hosts;
 using Hosts.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -46,13 +47,12 @@ public class AuditableEntitySaveChangesInterceptorTests(IntegrationTestWebApplic
         }
     }
 
-    private TContext Create<TContext>(Func<DbContextOptions<TContext>, TContext> create, ICurrentUserProvider user, TimeProvider clock)
-        where TContext : DbContext
+    private AppDbContext Create(ICurrentUserProvider user, TimeProvider clock)
     {
-        DbContextOptionsBuilder<TContext> options = new DbContextOptionsBuilder<TContext>();
+        DbContextOptionsBuilder<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>();
         options.ConfigureStayStackDefaults(factory.ConnectionString, "audit_tests", isDevelopment: false);
         options.AddInterceptors(new AuditableEntitySaveChangesInterceptor(user, clock));
-        return create(options.Options);
+        return new AppDbContext(options.Options, AppDbContextModels.All);
     }
 
     private static Host NewHost() => Host.Create(Guid.CreateVersion7(), "Audited Host", "audit@example.com", null);
@@ -60,10 +60,10 @@ public class AuditableEntitySaveChangesInterceptorTests(IntegrationTestWebApplic
     [Fact]
     public async Task SavingChangesAsync_WithNoUser_StampsTheTimeAndNoCreator()
     {
-        await using AppHostsDbContext context = Create<AppHostsDbContext>(o => new AppHostsDbContext(o), new User(null), new FakeTimeProvider(FixedTime));
+        await using AppDbContext context = Create(new User(null), new FakeTimeProvider(FixedTime));
         Host host = NewHost();
 
-        context.Hosts.Add(host);
+        new HostsDb(context).Hosts.Add(host);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(FixedTime, host.CreatedAt);
@@ -75,9 +75,9 @@ public class AuditableEntitySaveChangesInterceptorTests(IntegrationTestWebApplic
     {
         User user = new User(Guid.NewGuid());
         CountingClock clock = new CountingClock(FixedTime);
-        await using AppBookingsDbContext context = Create<AppBookingsDbContext>(o => new AppBookingsDbContext(o), user, clock);
+        await using AppDbContext context = Create(user, clock);
 
-        context.RefundObligations.Add(new RefundObligation
+        new BookingsDb(context).RefundObligations.Add(new RefundObligation
         {
             BookingId = Guid.CreateVersion7(),
             CancelledAt = DateTimeOffset.UtcNow,
@@ -95,9 +95,9 @@ public class AuditableEntitySaveChangesInterceptorTests(IntegrationTestWebApplic
     [Fact]
     public async Task SavingChangesAsync_WithNothingChanged_LeavesTheModificationStampsEmpty()
     {
-        await using AppHostsDbContext context = Create<AppHostsDbContext>(o => new AppHostsDbContext(o), new User(Guid.NewGuid()), new FakeTimeProvider(FixedTime));
+        await using AppDbContext context = Create(new User(Guid.NewGuid()), new FakeTimeProvider(FixedTime));
         Host host = NewHost();
-        context.Hosts.Add(host);
+        new HostsDb(context).Hosts.Add(host);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -110,10 +110,10 @@ public class AuditableEntitySaveChangesInterceptorTests(IntegrationTestWebApplic
     public void SavingChanges_Synchronous_StampsTheTimeAndCreator()
     {
         Guid userId = Guid.NewGuid();
-        using AppHostsDbContext context = Create<AppHostsDbContext>(o => new AppHostsDbContext(o), new User(userId), new FakeTimeProvider(FixedTime));
+        using AppDbContext context = Create(new User(userId), new FakeTimeProvider(FixedTime));
         Host host = NewHost();
 
-        context.Hosts.Add(host);
+        new HostsDb(context).Hosts.Add(host);
         context.SaveChanges();
 
         Assert.Equal(FixedTime, host.CreatedAt);

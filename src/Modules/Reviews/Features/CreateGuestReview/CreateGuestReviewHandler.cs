@@ -13,7 +13,7 @@ using Reviews.Exceptions;
 namespace Reviews.Features.CreateGuestReview;
 
 public class CreateGuestReviewHandler(
-    AppReviewsDbContext dbContext,
+    ReviewsDb dbContext,
     IBookingLookup bookingLookup,
     IUnitLookup unitLookup,
     IHostAuthorization hostAuthorization,
@@ -85,11 +85,11 @@ public class CreateGuestReviewHandler(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf<GuestReview>(dbContext))
+        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf(dbContext.GuestReviews))
         {
             // An earlier attempt committed and lost its acknowledgement - answer
             // with that row (Persistence.CommittedInsertRecovery).
-            GuestReview committed = await dbContext.FindOwnCommittedInsertAsync<GuestReview>(review.Id, cancellationToken);
+            GuestReview committed = await dbContext.GuestReviews.FindOwnCommittedInsertAsync(review.Id, cancellationToken);
             return new CreateGuestReviewResponse { GuestReviewId = committed.Id };
         }
         catch (DbUpdateException ex) when (ex.IsViolationOf(GuestReviewConfiguration.BookingIndex))

@@ -6,6 +6,8 @@ public class PropertyConfiguration : IEntityTypeConfiguration<Property>
 {
     public void Configure(EntityTypeBuilder<Property> builder)
     {
+        builder.ToTable("properties");
+
         builder.HasKey(p => p.Id);
 
         builder.Property(p => p.City).HasMaxLength(100);
@@ -27,7 +29,7 @@ public class PropertyConfiguration : IEntityTypeConfiguration<Property>
         // GetPropertiesHandler's city filter is ILIKE '%term%' - freeform,
         // case-insensitive, leading-wildcard - which a plain B-tree index
         // can never serve. gin_trgm_ops (pg_trgm, enabled in
-        // AppCatalogDbContext.OnStayStackModelCreating) is the standard
+        // CatalogDb.OnStayStackModelCreating) is the standard
         // Postgres way to index substring search instead of falling back to
         // a full table scan on every property search.
         // Named explicitly per ADR-0011's gotcha - HasDatabaseName is

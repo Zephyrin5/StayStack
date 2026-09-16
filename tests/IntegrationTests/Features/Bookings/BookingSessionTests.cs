@@ -40,7 +40,7 @@ public class BookingSessionTests(IntegrationTestWebApplicationFactory factory)
     private async Task SeedCatalogAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         context.AddRange(_pendingProperties);
         _pendingProperties.Clear();
         context.AddRange(entities);
@@ -254,7 +254,7 @@ public class BookingSessionTests(IntegrationTestWebApplicationFactory factory)
 
         // And nothing was cancelled by the attempt.
         using IServiceScope scope = factory.Services.CreateScope();
-        Booking booking = await scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+        Booking booking = await scope.ServiceProvider.GetRequiredService<BookingsDb>()
             .Bookings.AsNoTracking()
             .SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
         Assert.NotEqual(BookingStatus.Cancelled, booking.BookingStatus);

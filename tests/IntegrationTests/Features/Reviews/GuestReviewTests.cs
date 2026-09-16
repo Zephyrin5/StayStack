@@ -20,12 +20,13 @@ using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Persistence;
 namespace IntegrationTests.Features.Reviews;
 
 // Exercises the private host-facing guest-review slice end-to-end - the
 // other half of the mutual review pair (see StayReviewTests for the
 // guest-facing half). Same "seed a Confirmed booking with an explicit past
-// CheckOut directly into AppBookingsDbContext" reasoning StayReviewTests
+// CheckOut directly into BookingsDb" reasoning StayReviewTests
 // uses, since the real Hold/Confirm HTTP flow can't produce a
 // checkout-already-passed booking.
 [Collection("Integration Tests")]
@@ -135,7 +136,7 @@ public class GuestReviewTests(IntegrationTestWebApplicationFactory factory)
         booking.Confirm();
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         context.Bookings.Add(booking);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
@@ -258,7 +259,7 @@ public class GuestReviewTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppReviewsDbContext reviewsDb = scope.ServiceProvider.GetRequiredService<AppReviewsDbContext>();
+        ReviewsDb reviewsDb = scope.ServiceProvider.GetRequiredService<ReviewsDb>();
         GuestReview archived = await reviewsDb.GuestReviews.IgnoreQueryFilters()
             .SingleAsync(r => r.Id == created.GuestReviewId, TestContext.Current.CancellationToken);
         Assert.Equal(EntityStatus.Archived, archived.Status);
@@ -275,7 +276,7 @@ public class GuestReviewTests(IntegrationTestWebApplicationFactory factory)
         DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unitId, today.AddDays(-5), today.AddDays(-2));
 
-        CommitFault<AppReviewsDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppReviewsDbContext>(context =>
+        CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<GuestReview>().Any(e => e.Entity.BookingId == bookingId));
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
@@ -294,7 +295,7 @@ public class GuestReviewTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(result);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        Assert.Equal(result.GuestReviewId, Assert.Single(await scope.ServiceProvider.GetRequiredService<AppReviewsDbContext>()
+        Assert.Equal(result.GuestReviewId, Assert.Single(await scope.ServiceProvider.GetRequiredService<ReviewsDb>()
             .GuestReviews.IgnoreQueryFilters().AsNoTracking().Where(r => r.BookingId == bookingId)
             .ToListAsync(TestContext.Current.CancellationToken)).Id);
     }

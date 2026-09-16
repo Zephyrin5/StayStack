@@ -22,6 +22,7 @@ using Transactions;
 using Transactions.Contracts;
 using Transactions.Entities;
 using Bookings.Features.CancelBooking;
+using Persistence;
 namespace IntegrationTests.Features.Bookings;
 
 // A transient failure on COMMIT is the one failure an execution strategy
@@ -37,8 +38,8 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
     // Before the commit carrying this booking: the rollback case, where nothing
     // was written and the retry must write it. Targeted at the tracked booking
     // because TickerQ's jobs commit on this context too.
-    private static CommitFault<AppBookingsDbContext> FailTheCommitCarrying(Guid bookingId) =>
-        CommitFaults.FailBeforeCommit<AppBookingsDbContext>(context =>
+    private static CommitFault<AppDbContext> FailTheCommitCarrying(Guid bookingId) =>
+        CommitFaults.FailBeforeCommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<Booking>().Any(entry => entry.Entity.Id == bookingId));
 
     private Unit CreateTestUnit()
@@ -62,7 +63,7 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
             context.AddRange(_pendingProperties);
             _pendingProperties.Clear();
             context.Add(unit);
@@ -102,7 +103,7 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
     {
         (Guid bookingId, string managementToken, Guid holdId) = await CreateGuestBookingAsync();
 
-        CommitFault<AppBookingsDbContext> commitFailure = FailTheCommitCarrying(bookingId);
+        CommitFault<AppDbContext> commitFailure = FailTheCommitCarrying(bookingId);
         using WebApplicationFactory<Program> host = factory.WithCommitFault(commitFailure);
 
         using HttpClient client = host.CreateClient();
@@ -142,7 +143,7 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
         // A handler that accepted its changes and then failed to commit leaves
         // an in-memory entity that reads exactly like success.
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppBookingsDbContext db = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb db = assertScope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         Booking booking = await db.Bookings.AsNoTracking()
             .SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
@@ -173,10 +174,10 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
 
         using (IServiceScope paymentScope = factory.Services.CreateScope())
         {
-            Money total = (await paymentScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Bookings
+            Money total = (await paymentScope.ServiceProvider.GetRequiredService<BookingsDb>().Bookings
                 .AsNoTracking().SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken)).TotalPrice;
 
-            AppTransactionsDbContext transactions = paymentScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+            TransactionsDb transactions = paymentScope.ServiceProvider.GetRequiredService<TransactionsDb>();
             Transaction payment = Transaction.Create(Guid.CreateVersion7(), bookingId, total);
             payment.MarkSucceeded(DateTimeOffset.UtcNow);
             transactions.Transactions.Add(payment);
@@ -191,7 +192,7 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(session);
 
         // After the commit carrying this booking as Cancelled.
-        CommitFault<AppBookingsDbContext> lostAck = CommitFaults.FailAfterCommit<AppBookingsDbContext>(context =>
+        CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterCommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<Booking>()
                 .Any(e => e.Entity.Id == bookingId && e.Entity.BookingStatus == BookingStatus.Cancelled));
 
@@ -216,7 +217,7 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(BookingStatus.Cancelled, cancelled.BookingStatus);
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppBookingsDbContext db = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb db = assertScope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         Assert.Equal(BookingStatus.Cancelled, (await db.Bookings.AsNoTracking()
             .SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken)).BookingStatus);
@@ -229,7 +230,7 @@ public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
             .Where(o => o.BookingId == bookingId).ToListAsync(TestContext.Current.CancellationToken));
         Assert.NotNull(obligation.ResolvedAt);
 
-        Transaction refunded = await assertScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>()
+        Transaction refunded = await assertScope.ServiceProvider.GetRequiredService<TransactionsDb>()
             .Transactions.AsNoTracking().SingleAsync(t => t.BookingId == bookingId, TestContext.Current.CancellationToken);
         Assert.Equal(TransactionStatus.RefundPending, refunded.TransactionStatus);
         Assert.Equal(obligation.PolicyRefundAmount, refunded.RefundAmount?.Amount);

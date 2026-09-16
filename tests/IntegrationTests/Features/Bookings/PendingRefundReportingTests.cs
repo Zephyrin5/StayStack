@@ -18,6 +18,7 @@ using Transactions;
 using Transactions.Contracts;
 using Transactions.Entities;
 using Bookings.Contracts;
+using System.Data;
 namespace IntegrationTests.Features.Bookings;
 
 // A cancellation response reporting a refund that has not been recorded yet
@@ -46,7 +47,7 @@ public class PendingRefundReportingTests(IntegrationTestWebApplicationFactory fa
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb catalog = scope.ServiceProvider.GetRequiredService<CatalogDb>();
             catalog.AddRange(property, unit);
             await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
@@ -111,10 +112,10 @@ public class PendingRefundReportingTests(IntegrationTestWebApplicationFactory fa
     {
         using IServiceScope scope = factory.Services.CreateScope();
 
-        Money total = (await scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Bookings.AsNoTracking()
+        Money total = (await scope.ServiceProvider.GetRequiredService<BookingsDb>().Bookings.AsNoTracking()
             .SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken)).TotalPrice;
 
-        AppTransactionsDbContext transactions = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        TransactionsDb transactions = scope.ServiceProvider.GetRequiredService<TransactionsDb>();
         Transaction payment = Transaction.Create(Guid.CreateVersion7(), bookingId, total);
         payment.MarkSucceeded(DateTimeOffset.UtcNow);
         transactions.Transactions.Add(payment);
@@ -127,16 +128,15 @@ public class PendingRefundReportingTests(IntegrationTestWebApplicationFactory fa
     {
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            await scope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.IAtomicScope>().ExecuteAsync(
-                BuildingBlocks.Persistence.AtomicParticipants.Bookings,
-                BuildingBlocks.Persistence.AtomicParticipants.Bookings | BuildingBlocks.Persistence.AtomicParticipants.Transactions,
+            await scope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.ITransactionRunner>().ExecuteAsync(
+                IsolationLevel.ReadCommitted,
                 token => scope.ServiceProvider.GetRequiredService<ITransactionReversal>().ResolveRefundAsync(bookingId, token),
                 TestContext.Current.CancellationToken);
         }
 
         using IServiceScope readScope = factory.Services.CreateScope();
 
-        Transaction refunded = await readScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>()
+        Transaction refunded = await readScope.ServiceProvider.GetRequiredService<TransactionsDb>()
             .Transactions.AsNoTracking()
             .SingleAsync(t => t.BookingId == bookingId, TestContext.Current.CancellationToken);
 
@@ -160,7 +160,7 @@ public class PendingRefundReportingTests(IntegrationTestWebApplicationFactory fa
         // other test's pending booking in the shared database too.
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            await scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Bookings
+            await scope.ServiceProvider.GetRequiredService<BookingsDb>().Bookings
                 .Where(b => b.Id == checkout.BookingId)
                 .ExecuteUpdateAsync(
                     set => set.SetProperty(b => b.PaymentDueAt, DateTimeOffset.UtcNow.AddMinutes(-1)),
@@ -170,8 +170,8 @@ public class PendingRefundReportingTests(IntegrationTestWebApplicationFactory fa
         using (IServiceScope jobScope = factory.Services.CreateScope())
         {
             await new ExpireUnpaidBookingsJob(
-                    jobScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
-                    jobScope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.IAtomicScope>(),
+                    jobScope.ServiceProvider.GetRequiredService<BookingsDb>(),
+                    jobScope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.ITransactionRunner>(),
                     jobScope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
                     jobScope.ServiceProvider.GetRequiredService<global::Promotions.Contracts.IPromotionRedemption>(),
                     TimeProvider.System,

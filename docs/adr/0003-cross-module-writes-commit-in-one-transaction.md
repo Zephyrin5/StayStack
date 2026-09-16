@@ -1,4 +1,4 @@
-# 0003 - Cross-module writes commit in one database transaction
+﻿# 0003 - Cross-module writes commit in one database transaction
 
 **Status:** Accepted
 
@@ -11,7 +11,7 @@ This is a modular monolith: each module (Identity, Catalog, Hosts, Promotions, B
 - **A payment succeeding** (`MarkTransactionSucceededHandler`): marks the `Transaction` succeeded (Transactions) and confirms the `Booking` (Bookings), or refunds the payment if the booking can no longer use it.
 - **Cancelling or expiring a booking**: cancels the `Booking` and releases its hold (Bookings) and reverses any redemption (Promotions); a guest cancellation also records any refund (Transactions).
 
-Each module's writes going through its own context on its own connection made every one of these several commits. The design that answered that - compensating actions delivered by a transactional outbox, durable intent records for forward calls, and reconcile jobs over both - carried 22 distinct recovery states, and the outbox relay held a claim transaction while its handlers opened a second module's connection. At `MaxPoolSize=5`, 20 concurrent payment successes stalled for 15-46 s on pool exhaustion (docs/design/transaction-ownership.md, Stage 0).
+Each module's writes going through its own context on its own connection made every one of these several commits. The design that answered that - compensating actions delivered by a transactional outbox, durable intent records for forward calls, and reconcile jobs over both - carried 22 distinct recovery states, and the outbox relay held a claim transaction while its handlers opened a second module's connection. At `MaxPoolSize=5`, 20 concurrent payment successes stalled for 15-46 s on pool exhaustion.
 
 ## Decision
 
@@ -33,14 +33,14 @@ The scope makes *database* writes atomic with each other. It cannot make a fact 
 
 ## Alternatives considered
 
-- **Compensating actions through a transactional outbox, with intent records for forward calls.** The previous design. It stayed correct if modules moved to separate databases, which is the property it was chosen for. Replaced because that separation is not a known requirement, and the cost was paid on every workflow now: 22 recovery states, tests that pinned dispatcher interleavings rather than outcomes, and pool starvation measured under a modest burst. Extraction remains possible and is costed in [docs/extraction-inventory.md](../extraction-inventory.md).
+- **Compensating actions through a transactional outbox, with intent records for forward calls.** The previous design. It stayed correct if modules moved to separate databases, which is the property it was chosen for. Replaced because that separation is not a known requirement, and the cost was paid on every workflow now: 22 recovery states, tests that pinned dispatcher interleavings rather than outcomes, and pool starvation measured under a modest burst. Extraction remains possible.
 - **A distributed transaction (`TransactionScope`/2PC).** Rejected: there is one database, so a coordinator buys nothing a shared connection does not.
 - **A messaging library (`MassTransit`, `CAP`, `Brighter`).** Rejected: broker-first, reflection-based delivery for writes that can simply share a transaction.
 - **Merging the module contexts into one.** Rejected: it removes the boundary that keeps a module writing only its own tables.
 
 ## Consequences
 
-- **Extraction is costed, not free.** Every `IAtomicScope` call site that names a module is a place that module's writes commit in another module's transaction. `docs/extraction-inventory.md` lists them, and `ExtractionInventoryProtocolTests` fails when the list and the source disagree.
+- **Extraction is not free.** Every workflow that writes across modules commits in one transaction, so moving a module to its own database means answering for those workflows again - the cost this decision accepts in exchange for one commit per workflow.
 - **A failure in one module fails the whole workflow.** A Transactions error during a cancellation fails the cancellation, which the caller retries, instead of cancelling and retrying the refund in the background. That is the intended trade: a caller-visible failure over a half-applied one.
 - **Locks are held for the whole workflow.** A cancellation holds its booking lock across the redemption reversal and the refund decision. Stage 6 measurements show one pooled connection per converted workflow and no stall under the same burst; lock duration is what to revisit if contention on a single booking appears.
 - **`HoldAvailabilityHandler` is outside this decision.** It keeps its own Serializable transaction and reads Catalog on a second connection (ADR-0029).

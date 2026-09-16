@@ -11,6 +11,8 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
 
     public void Configure(EntityTypeBuilder<Transaction> builder)
     {
+        builder.ToTable("transactions");
+
         builder.HasKey(t => t.Id);
 
         // Every transition guards its starting state in memory; xmin makes a stale write match no row.

@@ -20,6 +20,7 @@ using System.Net.Http.Json;
 using Transactions;
 using Transactions.Entities;
 using Transactions.Features.InitiateTransaction;
+using Persistence;
 namespace IntegrationTests.Features.Bookings;
 
 // A creation path cannot recover from an ambiguous commit unless it knows what
@@ -39,14 +40,14 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
     // rather than by the change tracker - and targeted at all because TickerQ's
     // jobs commit on this context too, and one of them taking the injection
     // left this test green with recovery disabled.
-    private static CommitFault<AppBookingsDbContext> LoseTheAckOnTheHoldFor(Guid unitId) =>
-        CommitFaults.FailAfterCommit<AppBookingsDbContext>((context, ct) => CommitFaults.CommittedRowExistsAsync(
+    private static CommitFault<AppDbContext> LoseTheAckOnTheHoldFor(Guid unitId) =>
+        CommitFaults.FailAfterCommit<AppDbContext>((context, ct) => CommitFaults.CommittedRowExistsAsync(
             context, "SELECT 1 FROM unit_availability_holds WHERE unit_id = @UnitId", "UnitId", unitId, ct));
 
     // After the commit carrying a payment for this booking - still tracked,
     // since SaveChangesAsync accepts it rather than detaching it.
-    private static CommitFault<AppTransactionsDbContext> LoseTheAckOnThePaymentFor(Guid bookingId) =>
-        CommitFaults.FailAfterCommit<AppTransactionsDbContext>(context =>
+    private static CommitFault<AppDbContext> LoseTheAckOnThePaymentFor(Guid bookingId) =>
+        CommitFaults.FailAfterCommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<Transaction>().Any(e => e.Entity.BookingId == bookingId));
 
     private readonly List<Property> _pendingProperties = [];
@@ -69,7 +70,7 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         Unit unit = CreateTestUnit();
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb catalog = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         catalog.AddRange(_pendingProperties);
         _pendingProperties.Clear();
         catalog.Add(unit);
@@ -88,7 +89,7 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         Unit unit = await SeedUnitAsync();
         DateOnly checkIn = CatalogSeeding.Today().AddDays(140);
 
-        CommitFault<AppBookingsDbContext> lostAck = LoseTheAckOnTheHoldFor(unit.Id);
+        CommitFault<AppDbContext> lostAck = LoseTheAckOnTheHoldFor(unit.Id);
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
         using HttpClient client = host.CreateClient();
@@ -118,7 +119,7 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         Assert.NotNull(hold);
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppBookingsDbContext bookings = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb bookings = assertScope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         // Exactly one, and it is the one the caller was handed. Two rows would
         // mean the retry inserted a second; zero would mean the response names
@@ -144,7 +145,7 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         Unit unit = await SeedUnitAsync();
         DateOnly checkIn = CatalogSeeding.Today().AddDays(142);
 
-        CommitFault<AppBookingsDbContext> lostAck = LoseTheAckOnTheHoldFor(unit.Id);
+        CommitFault<AppDbContext> lostAck = LoseTheAckOnTheHoldFor(unit.Id);
 
         using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
         {
@@ -205,7 +206,7 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         Assert.NotNull(recovered);
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppBookingsDbContext bookings = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb bookings = assertScope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         List<UnitAvailabilityHold> held = await bookings.UnitAvailabilityHolds.AsNoTracking()
             .Where(h => h.UnitId == unit.Id)
@@ -265,7 +266,7 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         Assert.NotNull(session);
         string sessionToken = session.SessionToken;
 
-        CommitFault<AppTransactionsDbContext> lostAck = LoseTheAckOnThePaymentFor(booking.BookingId);
+        CommitFault<AppDbContext> lostAck = LoseTheAckOnThePaymentFor(booking.BookingId);
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
         using HttpClient client = host.CreateClient();
@@ -295,8 +296,8 @@ public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory
         Assert.NotNull(initiated);
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppTransactionsDbContext transactions =
-            assertScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        TransactionsDb transactions =
+            assertScope.ServiceProvider.GetRequiredService<TransactionsDb>();
 
         List<Transaction> rows = await transactions.Transactions.AsNoTracking()
             .Where(t => t.BookingId == booking.BookingId)

@@ -13,6 +13,8 @@ public class UnitAvailabilityHoldConfiguration : IEntityTypeConfiguration<UnitAv
 
     public void Configure(EntityTypeBuilder<UnitAvailabilityHold> builder)
     {
+        builder.ToTable("unit_availability_holds");
+
         builder.HasKey(h => h.Id);
 
         builder.Property(h => h.StayRange).HasColumnType("daterange").IsRequired();

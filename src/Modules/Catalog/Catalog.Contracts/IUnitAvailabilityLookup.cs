@@ -3,7 +3,7 @@ namespace Catalog.Contracts;
 /// <summary>
 ///     Lets Catalog ask Availability which units/dates currently have a
 ///     blocking hold or booking, without ever referencing
-///     UnitAvailabilityHold, AppBookingsDbContext, or
+///     UnitAvailabilityHold, BookingsDb, or
 ///     unit_availability_holds directly. Declared here (Catalog is upstream
 ///     of Availability in the module order - see docs/adr/0004) and
 ///     implemented by Availability, which already depends on

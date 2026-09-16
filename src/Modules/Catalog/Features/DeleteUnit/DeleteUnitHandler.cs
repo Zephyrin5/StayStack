@@ -9,11 +9,12 @@ using Mediator;
 using Microsoft.EntityFrameworkCore;
 using SeedWork.Enums;
 using Unit = Catalog.Entities.Unit;
+using System.Data;
 namespace Catalog.Features.DeleteUnit;
 
 public class DeleteUnitHandler(
-    AppCatalogDbContext dbContext,
-    IAtomicScope atomicScope,
+    CatalogDb dbContext,
+    ITransactionRunner transactionRunner,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization,
     IUnitArchivalGuard unitArchivalGuard,
@@ -57,9 +58,8 @@ public class DeleteUnitHandler(
         // Bookings participates read-only: the archival guard's reads run under
         // the unit lock on this transaction's connection rather than a second
         // pooled one.
-        await atomicScope.ExecuteAsync(
-            AtomicParticipants.Catalog,
-            AtomicParticipants.Catalog | AtomicParticipants.Bookings,
+        await transactionRunner.ExecuteAsync(
+                IsolationLevel.ReadCommitted,
             async token =>
         {
             // Reloaded inside the delegate (docs/adr/0025); the scope clears the

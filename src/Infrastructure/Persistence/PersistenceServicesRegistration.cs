@@ -1,3 +1,4 @@
+using BuildingBlocks.Persistence;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,6 +35,8 @@ public static class PersistenceServicesRegistration
             options.ConfigureStayStackDefaults(connectionString, "app", isDevelopment, migrationsAssembly: "Database");
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
+
+        services.AddScoped<ITransactionRunner, TransactionRunner>();
 
         return services;
     }

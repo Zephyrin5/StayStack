@@ -45,7 +45,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
     {
         (Property property, Unit unit) = CreateTestUnit();
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
 
         // Owner first - a Unit without its Property does not resolve.
         context.Add(property);
@@ -86,7 +86,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         Assert.Equal(concurrentRequests - 1, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         int holdCount = await context.UnitAvailabilityHolds.CountAsync(h => h.UnitId == unit.Id, TestContext.Current.CancellationToken);
         Assert.Equal(1, holdCount);
     }
@@ -123,7 +123,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         Assert.Equal(concurrentRequests - 1, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         int holdCount = await context.UnitAvailabilityHolds.CountAsync(h => h.UnitId == unit.Id, TestContext.Current.CancellationToken);
         Assert.Equal(1, holdCount);
     }
@@ -180,7 +180,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         Assert.Equal(2 * concurrentRequestsPerRange - 2, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         int holdCount = await context.UnitAvailabilityHolds.CountAsync(h => h.UnitId == unit.Id, TestContext.Current.CancellationToken);
         Assert.Equal(2, holdCount);
     }
@@ -272,7 +272,7 @@ public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFacto
         // Cross-checked against the database, not just HTTP status codes -
         // the actual invariant this cap exists to protect.
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         int actualActiveHoldCount = await context.UnitAvailabilityHolds
             .CountAsync(h => units.Select(u => u.Id).Contains(h.UnitId), TestContext.Current.CancellationToken);
         Assert.True(actualActiveHoldCount <= Cap,

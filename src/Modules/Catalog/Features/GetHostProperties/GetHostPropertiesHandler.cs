@@ -9,7 +9,7 @@ using Persistence;
 namespace Catalog.Features.GetHostProperties;
 
 public class GetHostPropertiesHandler(
-    AppCatalogDbContext dbContext,
+    CatalogDb dbContext,
     IHostLookup hostLookup) : IRequestHandler<GetHostPropertiesRequest, PagedResponse<PropertySummary>>
 {
     public async ValueTask<PagedResponse<PropertySummary>> Handle(GetHostPropertiesRequest request, CancellationToken cancellationToken)

@@ -1,4 +1,4 @@
-// Proves two confirmations for one hold leave exactly one booking (an unforced race), and that
+﻿// Proves two confirmations for one hold leave exactly one booking (an unforced race), and that
 // a second confirmation under the same idempotency key replays the first's booking with a usable
 // token, whether it waits on the first's open transaction or arrives after the first commits; each
 // interleaving is pinned by a barrier. Not verified by breaking the mechanisms.
@@ -48,7 +48,7 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
             context.AddRange(_pendingProperties);
             _pendingProperties.Clear();
             context.Add(unit);
@@ -126,7 +126,7 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
         Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.NotFound));
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb bookings = scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         Assert.Equal(1, await bookings.Bookings.AsNoTracking()
             .CountAsync(b => b.HoldId == holdId, TestContext.Current.CancellationToken));
@@ -174,6 +174,9 @@ public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory
             await gate.Task;
             return unit;
         }
+
+        public Task<bool> IsUnitLiveForWriteAsync(Guid unitId, CancellationToken cancellationToken) =>
+            inner.IsUnitLiveForWriteAsync(unitId, cancellationToken);
 
         public Task<IReadOnlyDictionary<Guid, UnitSummary>> GetUnitsAsync(
             IEnumerable<Guid> unitIds, CancellationToken cancellationToken) =>

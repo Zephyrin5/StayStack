@@ -12,7 +12,7 @@ using Unit = Catalog.Entities.Unit;
 namespace Catalog.Features.CreatePricingRule;
 
 public class CreatePricingRuleHandler(
-    AppCatalogDbContext dbContext,
+    CatalogDb dbContext,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization) : IRequestHandler<CreatePricingRuleRequest, CreatePricingRuleResponse>
 {

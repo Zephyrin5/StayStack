@@ -33,6 +33,7 @@ using System.Net;
 using Transactions.Features.InitiateTransaction;
 using Transactions.Features.MarkTransactionFailed;
 using Transactions.Features.MarkTransactionSucceeded;
+using Persistence;
 namespace IntegrationTests.Features.Bookings;
 
 // A specification, not a regression suite: these describe what the booking
@@ -74,7 +75,7 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
     private async Task SeedCatalogAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         context.AddRange(_pendingProperties);
         _pendingProperties.Clear();
         context.AddRange(entities);
@@ -185,8 +186,8 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
         // reach that hold. Either the transition did not stick, or a booking
         // points at it.
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext availability = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
-        AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb availability = scope.ServiceProvider.GetRequiredService<BookingsDb>();
+        BookingsDb bookings = scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         UnitAvailabilityHold hold = await availability.UnitAvailabilityHolds.AsNoTracking()
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
@@ -245,7 +246,7 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
 
         using (IServiceScope seedScope = factory.Services.CreateScope())
         {
-            AppBookingsDbContext availability = seedScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            BookingsDb availability = seedScope.ServiceProvider.GetRequiredService<BookingsDb>();
             availability.UnitAvailabilityHolds.Add(new UnitAvailabilityHold
             {
                 Id = holdId,
@@ -259,7 +260,7 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
             });
             await availability.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-            AppBookingsDbContext bookingsDb = seedScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            BookingsDb bookingsDb = seedScope.ServiceProvider.GetRequiredService<BookingsDb>();
             bookingsDb.Bookings.Add(Booking.Create(
                 bookingId, unit.Id, holdId, null, "Jane Guest", "jane@example.com", null,
                 checkIn, checkIn.AddDays(2), 2,
@@ -274,8 +275,8 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
         timeProvider.SetUtcNow(DateTimeOffset.UtcNow);
 
         ExpireUnpaidBookingsJob job = new ExpireUnpaidBookingsJob(
-            scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
-            scope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.IAtomicScope>(),
+            scope.ServiceProvider.GetRequiredService<BookingsDb>(),
+            scope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.ITransactionRunner>(),
             new ReleaseHoldThenFail(scope.ServiceProvider.GetRequiredService<IHoldConfirmation>()),
             scope.ServiceProvider.GetRequiredService<global::Promotions.Contracts.IPromotionRedemption>(),
             timeProvider,
@@ -286,10 +287,10 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
 
         // Assert
         using IServiceScope assertScope = factory.Services.CreateScope();
-        string holdStatus = (await assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+        string holdStatus = (await assertScope.ServiceProvider.GetRequiredService<BookingsDb>()
             .UnitAvailabilityHolds.AsNoTracking()
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken)).Status;
-        BookingStatus bookingStatus = (await assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+        BookingStatus bookingStatus = (await assertScope.ServiceProvider.GetRequiredService<BookingsDb>()
             .Bookings.AsNoTracking()
             .SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken)).BookingStatus;
 
@@ -330,7 +331,7 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
         Guid transactionId = await InitiateTransactionAsync(_client, booking.BookingId, customerToken);
 
         // After the commit that marks this transaction Succeeded.
-        CommitFault<AppTransactionsDbContext> lostAck = CommitFaults.FailAfterCommit<AppTransactionsDbContext>(context =>
+        CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterCommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<Transaction>()
                 .Any(e => e.Entity.Id == transactionId && e.Entity.TransactionStatus == TransactionStatus.Succeeded));
 
@@ -348,9 +349,9 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
 
         using IServiceScope assertScope = factory.Services.CreateScope();
 
-        Booking persisted = await assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+        Booking persisted = await assertScope.ServiceProvider.GetRequiredService<BookingsDb>()
             .Bookings.AsNoTracking().SingleAsync(b => b.Id == booking.BookingId, TestContext.Current.CancellationToken);
-        Transaction transaction = await assertScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>()
+        Transaction transaction = await assertScope.ServiceProvider.GetRequiredService<TransactionsDb>()
             .Transactions.AsNoTracking().SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
 
         Assert.Equal(BookingStatus.Confirmed, persisted.BookingStatus);
@@ -413,8 +414,8 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
         using IServiceScope succeedScope = factory.Services.CreateScope();
         using IServiceScope failScope = factory.Services.CreateScope();
 
-        AppTransactionsDbContext succeedDb = succeedScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
-        AppTransactionsDbContext failDb = failScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        TransactionsDb succeedDb = succeedScope.ServiceProvider.GetRequiredService<TransactionsDb>();
+        TransactionsDb failDb = failScope.ServiceProvider.GetRequiredService<TransactionsDb>();
 
         Transaction forSuccess = await succeedDb.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
         Transaction forFailure = await failDb.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
@@ -422,7 +423,7 @@ public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory facto
         Assert.Equal(TransactionStatus.Pending, forSuccess.TransactionStatus);
         Assert.Equal(TransactionStatus.Pending, forFailure.TransactionStatus);
 
-        async Task<bool> TryCommitAsync(AppTransactionsDbContext context, Action transition)
+        async Task<bool> TryCommitAsync(TransactionsDb context, Action transition)
         {
             try
             {

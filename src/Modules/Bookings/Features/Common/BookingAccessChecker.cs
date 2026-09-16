@@ -27,7 +27,7 @@ internal static class BookingAccessChecker
     ///     proof rather than a bearer credential that could leak.
     /// </summary>
     public static async Task<BookingAccess?> ResolveAsync(
-        AppBookingsDbContext dbContext,
+        BookingsDb dbContext,
         Guid bookingId,
         Guid? customerId,
         Guid? sessionBookingId,
@@ -81,7 +81,7 @@ internal static class BookingAccessChecker
     ///     </para>
     /// </summary>
     public static async Task<BookingAccess?> ResolveByManagementTokenAsync(
-        AppBookingsDbContext dbContext,
+        BookingsDb dbContext,
         Guid bookingId,
         string managementToken,
         TimeProvider timeProvider,

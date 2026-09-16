@@ -134,7 +134,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         Property property = await db.Properties.SingleAsync(p => p.Id == propertyId, TestContext.Current.CancellationToken);
         Assert.Equal(PropertyType.Chalet, property.PropertyType);
         Assert.Equal("Salmiya", property.City);
@@ -181,7 +181,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         Assert.Equal(EntityStatus.Archived, (await db.Properties.IgnoreQueryFilters().SingleAsync(p => p.Id == propertyId, TestContext.Current.CancellationToken)).Status);
         Assert.Equal(EntityStatus.Archived, (await db.Units.IgnoreQueryFilters().SingleAsync(u => u.Id == unitId, TestContext.Current.CancellationToken)).Status);
 
@@ -258,7 +258,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         Unit unit = await db.Units.SingleAsync(u => u.Id == unitId, TestContext.Current.CancellationToken);
         Assert.Equal(4, unit.MaxOccupancy);
         Assert.Equal(99.9m, unit.BasePrice.Amount);
@@ -318,7 +318,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         Unit unit = await db.Units.SingleAsync(u => u.Id == unitId, TestContext.Current.CancellationToken);
         Assert.Equal(CancellationPolicy.Create(tiers), unit.CancellationPolicy);
     }
@@ -365,7 +365,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         Assert.Equal(EntityStatus.Archived, (await db.Units.IgnoreQueryFilters().SingleAsync(u => u.Id == unitId, TestContext.Current.CancellationToken)).Status);
         Assert.Equal(EntityStatus.Active, (await db.Properties.SingleAsync(p => p.Id == propertyId, TestContext.Current.CancellationToken)).Status);
 
@@ -408,7 +408,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
 
         using (IServiceScope seedScope = factory.Services.CreateScope())
         {
-            AppBookingsDbContext bookingsDb = seedScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            BookingsDb bookingsDb = seedScope.ServiceProvider.GetRequiredService<BookingsDb>();
             Booking booking = Booking.Create(
                 Guid.CreateVersion7(), unitId, Guid.NewGuid(), null,
                 "Jane Guest", "jane@example.com", null,
@@ -427,14 +427,14 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
         using IServiceScope verifyScope = factory.Services.CreateScope();
-        AppCatalogDbContext db = verifyScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = verifyScope.ServiceProvider.GetRequiredService<CatalogDb>();
         Assert.Equal(EntityStatus.Active, (await db.Units.SingleAsync(u => u.Id == unitId, TestContext.Current.CancellationToken)).Status);
     }
 
     private async Task SeedHoldAsync(Guid unitId, DateOnly checkIn, string status, DateTimeOffset? holdExpiresAt)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         context.UnitAvailabilityHolds.Add(new UnitAvailabilityHold
         {
@@ -477,7 +477,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
 
         using (IServiceScope seedScope = factory.Services.CreateScope())
         {
-            AppBookingsDbContext bookingsDb = seedScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            BookingsDb bookingsDb = seedScope.ServiceProvider.GetRequiredService<BookingsDb>();
             Booking booking = Booking.Create(
                 Guid.CreateVersion7(), unitId, Guid.NewGuid(), null,
                 "Jane Guest", "jane@example.com", null,
@@ -497,7 +497,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using IServiceScope verifyScope = factory.Services.CreateScope();
-        AppCatalogDbContext db = verifyScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = verifyScope.ServiceProvider.GetRequiredService<CatalogDb>();
         Assert.Equal(EntityStatus.Archived,
             (await db.Units.IgnoreQueryFilters().SingleAsync(u => u.Id == unitId, TestContext.Current.CancellationToken)).Status);
     }

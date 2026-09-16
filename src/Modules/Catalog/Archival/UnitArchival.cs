@@ -15,7 +15,7 @@ public static class UnitArchival
     ///     transaction must carry the archive, and must call this for every unit before archiving any.
     /// </summary>
     public static async Task EnsureArchivableAsync(
-        AppCatalogDbContext dbContext,
+        CatalogDb dbContext,
         Guid unitId,
         string timeZoneId,
         TimeProvider timeProvider,

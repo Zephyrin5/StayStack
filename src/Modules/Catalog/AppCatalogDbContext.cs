@@ -4,6 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using Persistence;
 namespace Catalog;
 
+// Kept only so this module's existing migrations compile; nothing registers or uses it. The
+// model lives in the module's IModuleModel, and this class goes when the migrations are squashed.
 public class AppCatalogDbContext(DbContextOptions<AppCatalogDbContext> options) : StayStackDbContext(options)
 {
     public DbSet<Property> Properties => Set<Property>();

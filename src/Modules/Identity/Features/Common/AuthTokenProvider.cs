@@ -14,7 +14,7 @@ namespace Identity.Features.Common;
 // this implements - the comments below cover each piece's local "why",
 // the ADR ties them together into the one coherent picture.
 public class AuthTokenProvider(
-    AppIdentityDbContext dbContext,
+    IdentityDb dbContext,
     IOptions<AuthTokenConfiguration> jwtSettings,
     TimeProvider timeProvider) : IAuthTokenProvider
 {

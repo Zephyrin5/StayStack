@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 namespace Identity;
 
+// Kept only so this module's existing migrations compile; nothing registers or uses it. The
+// model lives in the module's IModuleModel, and this class goes when the migrations are squashed.
 public class AppIdentityDbContext(DbContextOptions<AppIdentityDbContext> options)
     : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>(options)
 {

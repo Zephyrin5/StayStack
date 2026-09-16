@@ -8,7 +8,7 @@ using Promotions.Entities;
 namespace Promotions.Features.GetHostPromotions;
 
 public class GetHostPromotionsHandler(
-    AppPromotionsDbContext dbContext,
+    PromotionsDb dbContext,
     IHostLookup hostLookup) : IRequestHandler<GetHostPromotionsRequest, PagedResponse<PromotionSummary>>
 {
     public async ValueTask<PagedResponse<PromotionSummary>> Handle(

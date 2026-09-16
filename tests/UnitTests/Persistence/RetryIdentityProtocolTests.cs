@@ -1,4 +1,4 @@
-// PROVES COVERAGE, NOT CORRECTNESS. A green run means every participant it can find is present - not that any of them is right; the behavioural tests are the evidence.
+﻿// PROVES COVERAGE, NOT CORRECTNESS. A green run means every participant it can find is present - not that any of them is right; the behavioural tests are the evidence.
 // It cannot tell that the recovery lookup exists, runs first, or finds the row, and it follows calls by name, not by type - so a minting method whose name is declared more than once in src is invisible through an instance call.
 // Evidence that recovery works: the lost-acknowledgement tests in CreationAmbiguityTests, CatalogRetryTests and PromotionRedemptionRetryTests.
 
@@ -44,10 +44,10 @@ public partial class RetryIdentityProtocolTests
     [GeneratedRegex(@"\bIExecutionStrategy\s+(\w+)\s*=")]
     private static partial Regex StrategyVariable();
 
-    // An IAtomicScope's work is retried by its owner's execution strategy, so its
-    // delegate is a retry delegate too.
-    [GeneratedRegex(@"\bIAtomicScope\s+(\w+)\b")]
-    private static partial Regex AtomicScopeVariable();
+    // ITransactionRunner runs its work inside an execution strategy, so its delegate is a retry
+    // delegate too.
+    [GeneratedRegex(@"\bITransactionRunner\s+(\w+)\b")]
+    private static partial Regex TransactionRunnerVariable();
 
     [GeneratedRegex(@"\b(?:Guid\.(?:CreateVersion7|NewGuid)|SecureToken\.Generate)\(\)")]
     private static partial Regex DirectMint();
@@ -210,7 +210,7 @@ public partial class RetryIdentityProtocolTests
 
         foreach ((string path, string code) in sources)
         {
-            foreach (Match variable in StrategyVariable().Matches(code).Concat(AtomicScopeVariable().Matches(code)))
+            foreach (Match variable in StrategyVariable().Matches(code).Concat(TransactionRunnerVariable().Matches(code)))
             {
                 string call = $@"\b{Regex.Escape(variable.Groups[1].Value)}\.ExecuteAsync\s*\(";
 
@@ -243,7 +243,7 @@ public partial class RetryIdentityProtocolTests
         // exactly the kind of call that must stay outside a delegate.
         Assert.True(delegates.Count >= 15, $"Found only {delegates.Count} retry delegates - the scan is broken.");
         Assert.True(delegates.Any(d => Path.GetFileName(d.File) == "BecomeHostHandler.cs"),
-            "The scan no longer finds IAtomicScope.ExecuteAsync delegates (BecomeHostHandler's) - the scan is broken.");
+            "The scan no longer finds ITransactionRunner.ExecuteAsync delegates (BecomeHostHandler's) - the scan is broken.");
         Assert.True(factories.Contains("IssuedRefreshToken.New"),
             "The scan no longer recognises IssuedRefreshToken.New as minting: " + string.Join(", ", factories));
 
@@ -263,7 +263,7 @@ public partial class RetryIdentityProtocolTests
 
         Assert.True(violations.Count == 0,
             "A retried delegate mints an identity, so a retry after a lost acknowledgement cannot recognise " +
-            "its own committed write (docs/adr/0025). Generate the id outside strategy.ExecuteAsync or IAtomicScope.ExecuteAsync and pass " +
+            "its own committed write (docs/adr/0025). Generate the id outside strategy.ExecuteAsync or ITransactionRunner.ExecuteAsync and pass " +
             "it in - or, if recovery genuinely never needs it, add it to AllowedMinting with the reason:\n  " +
             string.Join("\n  ", violations.Distinct()));
     }

@@ -15,30 +15,7 @@ public static class HostsServicesRegistration
         IConfiguration configuration,
         IWebHostEnvironment? environment = null)
     {
-        // Registered as a service so its own dependencies
-        // (ICurrentUserProvider, TimeProvider) resolve through DI rather
-        // than being newed up by hand.
-        services.AddScoped<AuditableEntitySaveChangesInterceptor>();
 
-        // Registered unconditionally, including under "Testing" - see the
-        // note in IdentityServicesRegistration on why production
-        // registration code shouldn't decide to skip itself under tests.
-        // IntegrationTestWebApplicationFactory overrides this DbContext's
-        // connection via RemoveAll + a fresh AddDbContext call.
-        services.AddDbContext<AppHostsDbContext>((serviceProvider, options) =>
-        {
-            string connectionString = configuration.GetConnectionString("AppConnection")
-                                      ?? throw new InvalidOperationException(
-                                          "Connection string for AppHostsDbContext not found.");
-
-            options.ConfigureStayStackDefaults(
-                connectionString,
-                "hosts",
-                environment is not null && environment.IsDevelopment());
-
-            options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
-        });
-        services.AddAtomicParticipant<AppHostsDbContext>(AtomicParticipants.Hosts);
         services.AddSingleton<IModuleModel, HostsModel>();
         services.AddScoped<HostsDb>();
 

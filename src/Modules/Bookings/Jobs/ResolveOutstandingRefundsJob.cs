@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using TickerQ.Utilities.Base;
 using TickerQ.Utilities.Models;
 using Transactions.Contracts;
+using System.Data;
 namespace Bookings.Jobs;
 
 /// <summary>
@@ -22,8 +23,8 @@ namespace Bookings.Jobs;
 ///     </para>
 /// </summary>
 public partial class ResolveOutstandingRefundsJob(
-    AppBookingsDbContext dbContext,
-    IAtomicScope atomicScope,
+    BookingsDb dbContext,
+    ITransactionRunner transactionRunner,
     ITransactionReversal transactionReversal,
     TimeProvider timeProvider,
     ILogger<ResolveOutstandingRefundsJob> logger)
@@ -107,9 +108,8 @@ public partial class ResolveOutstandingRefundsJob(
                 // it cannot roll back, and it would hold the connection, the row
                 // locks and a pool slot for the length of an HTTP round trip. It
                 // belongs after the commit, driven by the recorded RefundPending.
-                decimal? resolved = await atomicScope.ExecuteAsync(
-                    AtomicParticipants.Bookings,
-                    AtomicParticipants.Bookings | AtomicParticipants.Transactions,
+                decimal? resolved = await transactionRunner.ExecuteAsync(
+                IsolationLevel.ReadCommitted,
                     token => transactionReversal.ResolveRefundAsync(bookingId, token),
                     cancellationToken);
 

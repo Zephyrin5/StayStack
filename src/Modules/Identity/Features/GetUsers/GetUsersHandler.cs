@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Persistence;
 namespace Identity.Features.GetUsers;
 
-public class GetUsersHandler(AppIdentityDbContext dbContext) : IRequestHandler<GetUsersRequest, PagedResponse<UserSummary>>
+public class GetUsersHandler(IdentityDb dbContext) : IRequestHandler<GetUsersRequest, PagedResponse<UserSummary>>
 {
     public async ValueTask<PagedResponse<UserSummary>> Handle(GetUsersRequest request, CancellationToken cancellationToken)
     {

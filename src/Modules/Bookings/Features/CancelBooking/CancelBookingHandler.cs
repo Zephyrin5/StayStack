@@ -14,11 +14,12 @@ using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using System.Data.Common;
 using Transactions.Contracts;
+using System.Data;
 namespace Bookings.Features.CancelBooking;
 
 public class CancelBookingHandler(
-    AppBookingsDbContext dbContext,
-    IAtomicScope atomicScope,
+    BookingsDb dbContext,
+    ITransactionRunner transactionRunner,
     IHoldConfirmation holdConfirmation,
     IPromotionRedemption promotionRedemption,
     ITransactionReversal transactionReversal,
@@ -54,9 +55,8 @@ public class CancelBookingHandler(
             // Once, outside the retry, so attempts either side of a tier boundary agree.
             Money refundAmount = CancellationRefund.Compute(booking.TotalPrice, cancellationPolicy, booking.CheckIn, today);
 
-            Booking cancelled = await atomicScope.ExecuteAsync(
-                AtomicParticipants.Bookings,
-                AtomicParticipants.Bookings | AtomicParticipants.Transactions | AtomicParticipants.Promotions,
+            Booking cancelled = await transactionRunner.ExecuteAsync(
+                IsolationLevel.ReadCommitted,
                 async token =>
                 {
                     DbTransaction transaction = dbContext.Database.CurrentTransaction!.GetDbTransaction();

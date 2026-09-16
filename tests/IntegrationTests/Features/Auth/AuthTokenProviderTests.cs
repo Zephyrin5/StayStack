@@ -31,7 +31,7 @@ public class AuthTokenProviderTests(IntegrationTestWebApplicationFactory factory
         string rawToken = await scope.ServiceProvider.GetRequiredService<IAuthTokenProvider>()
             .GenerateRefreshToken(userId, familyId: null, parentTokenId: null, IssuedRefreshToken.New(), Ct);
 
-        RefreshToken stored = await scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>().RefreshTokens
+        RefreshToken stored = await scope.ServiceProvider.GetRequiredService<IdentityDb>().RefreshTokens
             .AsNoTracking().SingleAsync(t => t.UserId == userId, Ct);
 
         Assert.Equal(Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(rawToken))), stored.TokenHash);
@@ -48,7 +48,7 @@ public class AuthTokenProviderTests(IntegrationTestWebApplicationFactory factory
         RefreshTokenValidationResult result = await provider.ValidateRefreshToken(rawToken, Ct);
 
         Assert.Equal(userId, result.UserId);
-        Assert.True((await scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>().RefreshTokens
+        Assert.True((await scope.ServiceProvider.GetRequiredService<IdentityDb>().RefreshTokens
             .AsNoTracking().SingleAsync(t => t.UserId == userId, Ct)).IsRevoked);
     }
 

@@ -1,14 +1,22 @@
-using SeedWork.ValueObjects;
+﻿using SeedWork.ValueObjects;
 namespace Catalog.Contracts;
 
 /// <summary>
 ///     Lets Bookings resolve a unit's price/currency without ever
-///     referencing Catalog's own entities or AppCatalogDbContext directly -
+///     referencing Catalog's own entities or CatalogDb directly -
 ///     same boundary reasoning as Hosts.Contracts.IHostLookup.
 /// </summary>
 public interface IUnitLookup
 {
     Task<UnitSummary?> GetUnitAsync(Guid unitId, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     Whether the unit is still sellable, answered by a locking read so that a caller holding the
+    ///     unit's advisory lock inside a Serializable transaction cannot miss an archive that committed
+    ///     while it waited for that lock: the read raises a serialization failure instead, and the
+    ///     caller's execution strategy retries on a fresh snapshot (docs/adr/0028).
+    /// </summary>
+    Task<bool> IsUnitLiveForWriteAsync(Guid unitId, CancellationToken cancellationToken);
 
     /// <summary>
     ///     Batch counterpart to GetUnitAsync - one round trip for many

@@ -21,6 +21,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using Npgsql;
+using Persistence;
 using Promotions;
 using Promotions.Enums;
 using Promotions.Features.CreatePromotion;
@@ -63,26 +64,14 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
             }
 
             builder.ConfigureServices(services =>
-            {
-                Configure<AppIdentityDbContext>(services, meter, connectionString);
-                Configure<AppCatalogDbContext>(services, meter, connectionString);
-                Configure<AppHostsDbContext>(services, meter, connectionString);
-                Configure<AppPromotionsDbContext>(services, meter, connectionString);
-                Configure<AppBookingsDbContext>(services, meter, connectionString);
-                Configure<AppTransactionsDbContext>(services, meter, connectionString);
-                Configure<AppReviewsDbContext>(services, meter, connectionString);
-            });
-        });
-
-    private static void Configure<TContext>(IServiceCollection services, ConnectionMeter meter, string? connectionString)
-        where TContext : DbContext =>
-        services.ConfigureDbContext<TContext>(options =>
-        {
-            options.AddInterceptors(meter);
-            if (connectionString is not null)
-            {
-                options.UseNpgsql(connectionString);
-            }
+                services.ConfigureDbContext<AppDbContext>(options =>
+                {
+                    options.AddInterceptors(meter);
+                    if (connectionString is not null)
+                    {
+                        options.UseNpgsql(connectionString);
+                    }
+                }));
         });
 
     private static HttpClient ClientPreservingContext(WebApplicationFactory<Program> host)
@@ -292,7 +281,7 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
             await client.SendAsync(ConfirmRequest(hold4, customerToken, await CreatePromotionAsync(client, hostToken)), Ct));
         using (IServiceScope scope = host.Services.CreateScope())
         {
-            await scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Bookings
+            await scope.ServiceProvider.GetRequiredService<BookingsDb>().Bookings
                 .Where(b => b.Id == overdue.BookingId)
                 .ExecuteUpdateAsync(set => set.SetProperty(b => b.PaymentDueAt, DateTimeOffset.UtcNow.AddMinutes(-1)), Ct);
         }
@@ -341,7 +330,7 @@ public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactor
     private static async Task<Guid> SeedPropertyIdOfAsync(WebApplicationFactory<Program> host, Guid unitId)
     {
         using IServiceScope scope = host.Services.CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>().Units
+        return await scope.ServiceProvider.GetRequiredService<CatalogDb>().Units
             .Where(u => u.Id == unitId).Select(u => u.PropertyId).SingleAsync(Ct);
     }
 

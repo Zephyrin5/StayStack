@@ -2,7 +2,7 @@ namespace Hosts.Contracts;
 
 /// <summary>
 ///     Write-side counterpart to IHostLookup. Identity's BecomeHost feature
-///     depends on this instead of AppHostsDbContext, same boundary
+///     depends on this instead of HostsDb, same boundary
 ///     reasoning as IHostLookup - Identity never sees a Host entity.
 /// </summary>
 public interface IHostRegistrar

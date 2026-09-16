@@ -63,6 +63,8 @@ public sealed class IdentityModel : IModuleModel
 
         builder.Entity<RefreshToken>(refreshToken =>
         {
+            refreshToken.ToTable("refresh_tokens");
+
             refreshToken.Property(t => t.TokenHash).IsRequired().HasMaxLength(64);
             refreshToken.HasIndex(t => t.TokenHash).IsUnique();
 

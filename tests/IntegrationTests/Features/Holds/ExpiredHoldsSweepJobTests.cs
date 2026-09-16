@@ -15,7 +15,7 @@ public class ExpiredHoldsSweepJobTests(IntegrationTestWebApplicationFactory fact
     private async Task SeedDatabaseAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         context.AddRange(entities);
         await context.SaveChangesAsync();
@@ -69,7 +69,7 @@ public class ExpiredHoldsSweepJobTests(IntegrationTestWebApplicationFactory fact
         await SeedDatabaseAsync(expiredHeld, stillLiveHeld, expiredButBooked);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         FakeTimeProvider timeProvider = new FakeTimeProvider();
         timeProvider.SetUtcNow(now);
         ExpiredHoldsSweepJob job = new ExpiredHoldsSweepJob(context, timeProvider);

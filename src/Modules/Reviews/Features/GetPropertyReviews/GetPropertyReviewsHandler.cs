@@ -5,7 +5,7 @@ using Persistence;
 using Reviews.Entities;
 namespace Reviews.Features.GetPropertyReviews;
 
-public class GetPropertyReviewsHandler(AppReviewsDbContext dbContext)
+public class GetPropertyReviewsHandler(ReviewsDb dbContext)
     : IRequestHandler<GetPropertyReviewsRequest, GetPropertyReviewsResponse>
 {
     public async ValueTask<GetPropertyReviewsResponse> Handle(GetPropertyReviewsRequest request, CancellationToken cancellationToken)

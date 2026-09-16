@@ -12,7 +12,7 @@ using System.Data.Common;
 namespace Catalog.Features.GetPriceCalendar;
 
 public class GetPriceCalendarHandler(
-    AppCatalogDbContext dbContext,
+    CatalogDb dbContext,
     IUnitAvailabilityLookup availabilityLookup,
     HybridCache cache,
     TimeProvider timeProvider) : IRequestHandler<GetPriceCalendarRequest, GetPriceCalendarResponse>

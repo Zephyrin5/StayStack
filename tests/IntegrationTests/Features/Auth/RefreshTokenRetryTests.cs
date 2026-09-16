@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Net.Http.Json;
+using Persistence;
 namespace IntegrationTests.Features.Auth;
 
 // A refresh is consume-once, which makes a lost acknowledgement dangerous. The
@@ -25,8 +26,8 @@ public class RefreshTokenRetryTests(IntegrationTestWebApplicationFactory factory
 {
     // After the commit carrying a rotation for this user - a new token with a
     // parent, which a sign-in's token does not have.
-    private static CommitFault<AppIdentityDbContext> LoseTheAckOnTheRotationFor(Guid userId) =>
-        CommitFaults.FailAfterCommit<AppIdentityDbContext>(context =>
+    private static CommitFault<AppDbContext> LoseTheAckOnTheRotationFor(Guid userId) =>
+        CommitFaults.FailAfterCommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<RefreshToken>()
                 .Any(e => e.Entity.UserId == userId && e.Entity.ParentTokenId != null));
 
@@ -59,7 +60,7 @@ public class RefreshTokenRetryTests(IntegrationTestWebApplicationFactory factory
     {
         using IServiceScope scope = factory.Services.CreateScope();
 
-        return await scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>().RefreshTokens.AsNoTracking()
+        return await scope.ServiceProvider.GetRequiredService<IdentityDb>().RefreshTokens.AsNoTracking()
             .Where(t => t.UserId == userId)
             .ToListAsync(TestContext.Current.CancellationToken);
     }
@@ -69,7 +70,7 @@ public class RefreshTokenRetryTests(IntegrationTestWebApplicationFactory factory
     {
         (Guid userId, string original) = await SignInAsync();
 
-        CommitFault<AppIdentityDbContext> lostAck = LoseTheAckOnTheRotationFor(userId);
+        CommitFault<AppDbContext> lostAck = LoseTheAckOnTheRotationFor(userId);
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
         // Act
@@ -105,7 +106,7 @@ public class RefreshTokenRetryTests(IntegrationTestWebApplicationFactory factory
         // with a new id, so it has to fall through to the reuse path.
         (Guid userId, string original) = await SignInAsync();
 
-        CommitFault<AppIdentityDbContext> lostAck = LoseTheAckOnTheRotationFor(userId);
+        CommitFault<AppDbContext> lostAck = LoseTheAckOnTheRotationFor(userId);
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
         HttpResponseMessage recovered = await RefreshAsync(host.CreateClient(), original);

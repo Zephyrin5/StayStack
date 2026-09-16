@@ -3,7 +3,7 @@ namespace Bookings.Contracts;
 
 /// <summary>
 ///     Lets Transactions resolve a booking's amount/currency without ever
-///     referencing Bookings' own entities or AppBookingsDbContext directly -
+///     referencing Bookings' own entities or BookingsDb directly -
 ///     same boundary reasoning as Catalog.Contracts.IUnitLookup.
 /// </summary>
 public interface IBookingLookup
@@ -12,7 +12,7 @@ public interface IBookingLookup
 
     /// <summary>
     ///     Lets Reviews authorize a review submission without ever
-    ///     referencing Booking or AppBookingsDbContext directly - same
+    ///     referencing Booking or BookingsDb directly - same
     ///     ownership proof CancelBookingHandler itself uses (a matching
     ///     customerId, or a matching guest-checkout management token), via
     ///     the same internal BookingAccessChecker both go through. Null if

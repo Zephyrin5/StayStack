@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 namespace Catalog.Features.GetPropertyById;
 
-public class GetPropertyByIdHandler(AppCatalogDbContext dbContext, HybridCache cache)
+public class GetPropertyByIdHandler(CatalogDb dbContext, HybridCache cache)
     : IRequestHandler<GetPropertyByIdRequest, GetPropertyByIdResponse>
 {
     public async ValueTask<GetPropertyByIdResponse> Handle(GetPropertyByIdRequest request, CancellationToken cancellationToken)

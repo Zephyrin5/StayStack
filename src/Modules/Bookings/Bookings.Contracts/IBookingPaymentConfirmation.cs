@@ -3,7 +3,7 @@ namespace Bookings.Contracts;
 /// <summary>
 ///     Write-side counterpart to IBookingLookup - lets Transactions turn a
 ///     succeeded transaction into a Confirmed booking without ever seeing
-///     the Booking entity or touching AppBookingsDbContext directly. Same
+///     the Booking entity or touching BookingsDb directly. Same
 ///     boundary reasoning as Catalog.Contracts.IHoldConfirmation.
 /// </summary>
 public interface IBookingPaymentConfirmation

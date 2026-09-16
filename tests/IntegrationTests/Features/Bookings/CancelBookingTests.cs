@@ -81,7 +81,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
     private async Task SeedCatalogAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
 
         // Owners first - a Unit without its Property does not resolve.
         context.AddRange(_pendingProperties);
@@ -108,7 +108,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         booking.Confirm();
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         context.Bookings.Add(booking);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
@@ -120,7 +120,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         string rawToken = SecureToken.Generate();
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         context.BookingManagementTokens.Add(new BookingManagementToken
         {
             Id = Guid.NewGuid(),
@@ -294,7 +294,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
     private async Task<TransactionStatus> GetTransactionStatusAsync(Guid transactionId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppTransactionsDbContext context = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        TransactionsDb context = scope.ServiceProvider.GetRequiredService<TransactionsDb>();
         Transaction transaction = await context.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
         return transaction.TransactionStatus;
     }
@@ -302,7 +302,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
     private async Task<decimal?> GetTransactionRefundAmountAsync(Guid transactionId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppTransactionsDbContext context = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        TransactionsDb context = scope.ServiceProvider.GetRequiredService<TransactionsDb>();
         Transaction transaction = await context.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
         return transaction.RefundAmount?.Amount;
     }
@@ -337,7 +337,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
             TestJsonOptions.Default, TestContext.Current.CancellationToken);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        Transaction settled = await scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>().Transactions
+        Transaction settled = await scope.ServiceProvider.GetRequiredService<TransactionsDb>().Transactions
             .AsNoTracking().SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
 
         Assert.NotNull(body);
@@ -497,7 +497,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(TransactionStatus.RefundPending, await GetTransactionStatusAsync(transactionId));
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext bookingsDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb bookingsDb = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         Booking booking = await bookingsDb.Bookings.SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
         Assert.Equal(BookingStatus.Cancelled, booking.BookingStatus);
     }
@@ -696,7 +696,7 @@ public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext db = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb db = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         Booking booking = await db.Bookings.AsNoTracking()
             .SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
         Assert.NotEqual(BookingStatus.Cancelled, booking.BookingStatus);

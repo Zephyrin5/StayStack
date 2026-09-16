@@ -1,13 +1,38 @@
-using Catalog.Domain;
+﻿using Catalog.Domain;
 using Catalog.Entities;
 using Catalog.Exceptions;
+using Dapper;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using SeedWork.Enums;
 namespace Catalog.Contracts;
 
 // internal, same reasoning as Hosts.Contracts' implementations - Bookings
 // should only ever reach this through IUnitLookup, resolved via DI.
-internal class UnitLookup(AppCatalogDbContext dbContext) : IUnitLookup
+internal class UnitLookup(CatalogDb dbContext) : IUnitLookup
 {
+    public async Task<bool> IsUnitLiveForWriteAsync(Guid unitId, CancellationToken cancellationToken)
+    {
+        // A snapshot-isolated caller sees the unit as of its transaction's first statement, which is
+        // taken before it waits on the unit's advisory lock - so an archive that committed during the
+        // wait is invisible to a plain read. FOR SHARE is what makes it visible: Postgres refuses a
+        // locking read of a row updated by a transaction that committed after the caller's snapshot,
+        // raising 40001 for the execution strategy to retry on a fresh one (docs/adr/0028).
+        IDbContextTransaction transaction = dbContext.Database.CurrentTransaction
+                                            ?? throw new InvalidOperationException(
+                                                $"{nameof(IsUnitLiveForWriteAsync)} must run inside a transaction. Outside one the row " +
+                                                "lock is released before the write it guards, and the answer is a plain stale read.");
+
+        // Raw SQL because EF has no locking-read API. `status <> @ArchivedStatus` is the soft-delete
+        // filter restated by hand; SoftDeleteFilterShapeTests fails if the filter grows past what this
+        // copy matches.
+        return await dbContext.Database.GetDbConnection().ExecuteScalarAsync<int?>(new CommandDefinition(
+            "SELECT 1 FROM units WHERE id = @UnitId AND status <> @ArchivedStatus FOR SHARE",
+            new { UnitId = unitId, ArchivedStatus = (int)EntityStatus.Archived },
+            transaction.GetDbTransaction(),
+            cancellationToken: cancellationToken)) is not null;
+    }
+
     public async Task<UnitSummary?> GetUnitAsync(Guid unitId, CancellationToken cancellationToken)
     {
         // Materialize first, map after - see docs/adr/0006. Left-joined with

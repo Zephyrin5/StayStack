@@ -12,7 +12,7 @@ using Unit = Catalog.Entities.Unit;
 namespace Catalog.Features.UpdatePricingRule;
 
 public class UpdatePricingRuleHandler(
-    AppCatalogDbContext dbContext,
+    CatalogDb dbContext,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization) : IRequestHandler<UpdatePricingRuleRequest, UpdatePricingRuleResponse>
 {

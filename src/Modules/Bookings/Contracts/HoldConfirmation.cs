@@ -11,7 +11,7 @@ namespace Bookings.Contracts;
 
 // internal, same reasoning as Hosts.Contracts' implementations - Bookings
 // should only ever reach this through IHoldConfirmation, resolved via DI.
-internal class HoldConfirmation(AppBookingsDbContext dbContext, TimeProvider timeProvider) : IHoldConfirmation
+internal class HoldConfirmation(BookingsDb dbContext, TimeProvider timeProvider) : IHoldConfirmation
 {
     /// <summary>
     ///     The columns a <see cref="ConfirmedHold"/> is built from, shared by

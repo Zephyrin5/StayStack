@@ -18,6 +18,7 @@ using SeedWork.Enums;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Persistence;
 namespace IntegrationTests.Features.Promotions;
 
 // End-to-end over real HTTP, same reasoning as PricingRuleHandlerTests -
@@ -117,7 +118,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         CreatePromotionResponse created = await CreateHostPromotionAsync(hostToken, code, PromotionDiscountType.Percentage, 15m);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppPromotionsDbContext db = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+        PromotionsDb db = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
         Promotion promotion = await db.Promotions.SingleAsync(p => p.Id == created.PromotionId, TestContext.Current.CancellationToken);
         Assert.Equal(code, promotion.Code);
         Assert.Equal(hostId, promotion.HostId);
@@ -143,7 +144,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(created);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppPromotionsDbContext db = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+        PromotionsDb db = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
         Promotion promotion = await db.Promotions.SingleAsync(p => p.Id == created.PromotionId, TestContext.Current.CancellationToken);
         Assert.Equal("SUMMER26", promotion.Code);
     }
@@ -204,7 +205,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(created);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppPromotionsDbContext db = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+        PromotionsDb db = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
         Promotion promotion = await db.Promotions.SingleAsync(p => p.Id == created.PromotionId, TestContext.Current.CancellationToken);
         Assert.Null(promotion.HostId);
     }
@@ -245,7 +246,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppPromotionsDbContext db = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+        PromotionsDb db = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
         Promotion promotion = await db.Promotions.SingleAsync(p => p.Id == created.PromotionId, TestContext.Current.CancellationToken);
         Assert.Equal(25m, promotion.DiscountValue);
         Assert.Equal(50, promotion.MaxRedemptions);
@@ -310,7 +311,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppPromotionsDbContext db = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+        PromotionsDb db = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
         Promotion archived = await db.Promotions.IgnoreQueryFilters()
             .SingleAsync(p => p.Id == created.PromotionId, TestContext.Current.CancellationToken);
         Assert.Equal(EntityStatus.Archived, archived.Status);
@@ -428,7 +429,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         (_, string hostToken) = await SeedHostUserAsync();
         string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
 
-        CommitFault<AppPromotionsDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppPromotionsDbContext>(context =>
+        CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<Promotion>().Any(e => e.Entity.Code == code));
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
@@ -450,7 +451,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         string adminToken = await SignInAsSeededAdminAsync();
         string code = _faker.Random.AlphaNumeric(10).ToUpperInvariant();
 
-        CommitFault<AppPromotionsDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppPromotionsDbContext>(context =>
+        CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<Promotion>().Any(e => e.Entity.Code == code));
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
@@ -468,7 +469,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
     }
 
     private async Task AssertTheOneCommittedPromotionIsReturnedAsync(
-        CommitFault<AppPromotionsDbContext> lostAck, HttpResponseMessage response, string code)
+        CommitFault<AppDbContext> lostAck, HttpResponseMessage response, string code)
     {
         Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the save.");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -477,7 +478,7 @@ public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(created);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        Assert.Equal(created.PromotionId, Assert.Single(await scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>()
+        Assert.Equal(created.PromotionId, Assert.Single(await scope.ServiceProvider.GetRequiredService<PromotionsDb>()
             .Promotions.IgnoreQueryFilters().AsNoTracking().Where(p => p.Code == code)
             .ToListAsync(TestContext.Current.CancellationToken)).Id);
     }

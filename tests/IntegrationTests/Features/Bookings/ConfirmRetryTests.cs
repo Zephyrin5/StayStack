@@ -18,6 +18,7 @@ using Promotions.Enums;
 using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Json;
+using Persistence;
 namespace IntegrationTests.Features.Bookings;
 
 // ConfirmBookingHandler's recovery for a confirmation that committed and lost its
@@ -45,7 +46,7 @@ public class ConfirmRetryTests(IntegrationTestWebApplicationFactory factory)
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb catalog = scope.ServiceProvider.GetRequiredService<CatalogDb>();
             catalog.AddRange(property, unit);
             await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
@@ -73,7 +74,7 @@ public class ConfirmRetryTests(IntegrationTestWebApplicationFactory factory)
 
         // After the confirmation's one commit, which claims the hold and inserts
         // the booking together.
-        CommitFault<AppBookingsDbContext> lostAck = CommitFaults.FailAfterCommit<AppBookingsDbContext>(context =>
+        CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterCommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<Booking>().Any(e => e.Entity.HoldId == holdId));
 
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
@@ -93,7 +94,7 @@ public class ConfirmRetryTests(IntegrationTestWebApplicationFactory factory)
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppBookingsDbContext db = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            BookingsDb db = scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
             // One booking, the one returned; the hold claimed.
             Booking booking = Assert.Single(await db.Bookings.AsNoTracking()
@@ -135,14 +136,14 @@ public class ConfirmRetryTests(IntegrationTestWebApplicationFactory factory)
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppPromotionsDbContext promotions = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+            PromotionsDb promotions = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
             promotions.Add(promotion);
             await promotions.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         Guid holdId = await HoldAUnitAsync(daysUntilCheckIn: 151);
 
-        CommitFault<AppBookingsDbContext> lostAck = CommitFaults.FailAfterCommit<AppBookingsDbContext>(context =>
+        CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterCommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<Booking>().Any(e => e.Entity.HoldId == holdId));
 
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
@@ -166,12 +167,12 @@ public class ConfirmRetryTests(IntegrationTestWebApplicationFactory factory)
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            BookingsDb bookings = scope.ServiceProvider.GetRequiredService<BookingsDb>();
             Booking booking = Assert.Single(await bookings.Bookings.AsNoTracking()
                 .Where(b => b.HoldId == holdId).ToListAsync(TestContext.Current.CancellationToken));
             Assert.Equal(confirmed.BookingId, booking.Id);
 
-            AppPromotionsDbContext promotions = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+            PromotionsDb promotions = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
             Assert.Single(await promotions.PromotionRedemptions.AsNoTracking()
                 .Where(r => r.BookingId == booking.Id).ToListAsync(TestContext.Current.CancellationToken));
             Assert.Equal(1, (await promotions.Promotions.AsNoTracking()

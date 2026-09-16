@@ -19,6 +19,7 @@ using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Persistence;
 namespace IntegrationTests.Features.Catalog;
 
 // Exercises CreateProperty, AdminCreateProperty and CreateUnit end-to-end
@@ -101,7 +102,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         Assert.NotEqual(Guid.Empty, result.PropertyId);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         bool propertyExists = await db.Properties.AnyAsync(p => p.Id == result.PropertyId, TestContext.Current.CancellationToken);
         Assert.True(propertyExists);
     }
@@ -117,7 +118,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         // Read the HostId back from the database rather than decoding the
         // JWT - simpler, and this test only needs the id, not the claim.
         using IServiceScope seedScope = factory.Services.CreateScope();
-        AppIdentityDbContext identityDb = seedScope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+        IdentityDb identityDb = seedScope.ServiceProvider.GetRequiredService<IdentityDb>();
         Guid hostId = await identityDb.Users
             .Where(u => u.HostId != null)
             .OrderByDescending(u => u.Id)
@@ -152,7 +153,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         Assert.NotNull(result);
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppCatalogDbContext db = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = assertScope.ServiceProvider.GetRequiredService<CatalogDb>();
         Property property = await db.Properties.SingleAsync(p => p.Id == result.PropertyId, TestContext.Current.CancellationToken);
         Assert.Equal(hostId, property.HostId);
     }
@@ -194,7 +195,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         Assert.NotEqual(Guid.Empty, result.UnitId);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         Unit unit = await db.Units.SingleAsync(u => u.Id == result.UnitId, TestContext.Current.CancellationToken);
         Assert.Equal(property.PropertyId, unit.PropertyId);
     }
@@ -270,7 +271,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         Assert.NotNull(result);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         Unit unit = await db.Units.SingleAsync(u => u.Id == result.UnitId, TestContext.Current.CancellationToken);
         Assert.Equal(CancellationPolicy.CreateDefault(), unit.CancellationPolicy);
     }
@@ -301,7 +302,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         Assert.NotNull(result);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         Unit unit = await db.Units.SingleAsync(u => u.Id == result.UnitId, TestContext.Current.CancellationToken);
         Assert.Equal(CancellationPolicy.Create(tiers), unit.CancellationPolicy);
     }
@@ -337,7 +338,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         string hostAccessToken = await SeedHostUserAsync();
         string city = $"LostAck-{Guid.NewGuid():N}";
 
-        CommitFault<AppCatalogDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppCatalogDbContext>(context =>
+        CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<Property>().Any(e => e.Entity.City == city));
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
@@ -358,7 +359,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         Assert.NotNull(result);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        Assert.Equal(result.PropertyId, Assert.Single(await scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>()
+        Assert.Equal(result.PropertyId, Assert.Single(await scope.ServiceProvider.GetRequiredService<CatalogDb>()
             .Properties.IgnoreQueryFilters().AsNoTracking().Where(p => p.City == city)
             .ToListAsync(TestContext.Current.CancellationToken)).Id);
     }
@@ -370,7 +371,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
 
         using (IServiceScope seed = factory.Services.CreateScope())
         {
-            AppHostsDbContext hosts = seed.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+            HostsDb hosts = seed.ServiceProvider.GetRequiredService<HostsDb>();
             hosts.Hosts.Add(global::Hosts.Entities.Host.Create(hostId, "Lost Ack Stays", $"{hostId:N}@example.com", null));
             await hosts.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
@@ -384,7 +385,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         Assert.NotNull(admin?.AccessToken);
 
         string city = $"LostAck-{Guid.NewGuid():N}";
-        CommitFault<AppCatalogDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppCatalogDbContext>(context =>
+        CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<Property>().Any(e => e.Entity.City == city));
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
@@ -406,7 +407,7 @@ public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFac
         Assert.NotNull(result);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        Assert.Equal(result.PropertyId, Assert.Single(await scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>()
+        Assert.Equal(result.PropertyId, Assert.Single(await scope.ServiceProvider.GetRequiredService<CatalogDb>()
             .Properties.IgnoreQueryFilters().AsNoTracking().Where(p => p.City == city)
             .ToListAsync(TestContext.Current.CancellationToken)).Id);
     }

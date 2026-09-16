@@ -9,7 +9,7 @@ using Unit = Catalog.Entities.Unit;
 namespace Catalog.Features.ListPricingRules;
 
 public class ListPricingRulesHandler(
-    AppCatalogDbContext dbContext,
+    CatalogDb dbContext,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization) : IRequestHandler<ListPricingRulesRequest, ListPricingRulesResponse>
 {

@@ -6,6 +6,8 @@ public class HostConfiguration : IEntityTypeConfiguration<Host>
 {
     public void Configure(EntityTypeBuilder<Host> builder)
     {
+        builder.ToTable("hosts");
+
         builder.HasKey(o => o.Id);
 
         builder.Property(o => o.BusinessName).HasMaxLength(200).IsRequired();

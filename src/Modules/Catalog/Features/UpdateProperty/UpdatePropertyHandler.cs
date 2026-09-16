@@ -10,7 +10,7 @@ using SeedWork.ValueObjects;
 namespace Catalog.Features.UpdateProperty;
 
 public class UpdatePropertyHandler(
-    AppCatalogDbContext dbContext,
+    CatalogDb dbContext,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization,
     IOptions<LocalizationSettings> localizationSettings) : IRequestHandler<UpdatePropertyRequest, UpdatePropertyResponse>

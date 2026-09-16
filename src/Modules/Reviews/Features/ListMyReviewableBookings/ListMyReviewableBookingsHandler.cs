@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Reviews.Features.ListMyReviewableBookings;
 
 public class ListMyReviewableBookingsHandler(
-    AppReviewsDbContext dbContext,
+    ReviewsDb dbContext,
     IBookingLookup bookingLookup,
     IUnitLookup unitLookup,
     ICurrentUserProvider currentUserProvider,

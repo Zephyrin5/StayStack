@@ -1,4 +1,4 @@
-using System.Data.Common;
+﻿using System.Data.Common;
 using BuildingBlocks.Pagination;
 using Catalog;
 using Catalog.Entities;
@@ -44,19 +44,19 @@ public class PagedSliceTests(IntegrationTestWebApplicationFactory factory)
     // service provider, so disposing the scope first makes every query throw
     // ObjectDisposedException before it reaches the database - which looks
     // exactly like a failing assertion while proving nothing.
-    private sealed class CountedContext(IServiceScope scope, AppCatalogDbContext context) : IAsyncDisposable
+    private sealed class CountedContext(IServiceScope scope, AppDbContext db) : IAsyncDisposable
     {
-        public AppCatalogDbContext Context { get; } = context;
+        public CatalogDb Context { get; } = new CatalogDb(db);
 
         public async ValueTask DisposeAsync()
         {
-            await Context.DisposeAsync();
+            await db.DisposeAsync();
             scope.Dispose();
         }
     }
 
     // A separate context, because an interceptor has to be present when the
-    // context is configured and the container's registered AppCatalogDbContext
+    // context is configured and the container's registered AppDbContext
     // already is. Built by copying the registered options rather than calling
     // UseNpgsql from scratch: the registration also applies the snake_case
     // naming convention, and a context configured without it looks for a
@@ -64,15 +64,16 @@ public class PagedSliceTests(IntegrationTestWebApplicationFactory factory)
     private CountedContext ContextWith(CommandCountingInterceptor interceptor)
     {
         IServiceScope scope = factory.Services.CreateScope();
-        DbContextOptions<AppCatalogDbContext> registered =
-            scope.ServiceProvider.GetRequiredService<DbContextOptions<AppCatalogDbContext>>();
+        DbContextOptions<AppDbContext> registered =
+            scope.ServiceProvider.GetRequiredService<DbContextOptions<AppDbContext>>();
 
         return new CountedContext(
             scope,
-            new AppCatalogDbContext(
-                new DbContextOptionsBuilder<AppCatalogDbContext>(registered)
+            new AppDbContext(
+                new DbContextOptionsBuilder<AppDbContext>(registered)
                     .AddInterceptors(interceptor)
-                    .Options));
+                    .Options,
+                scope.ServiceProvider.GetRequiredService<IEnumerable<IModuleModel>>()));
     }
 
     [Fact]
@@ -208,7 +209,7 @@ public class PagedSliceTests(IntegrationTestWebApplicationFactory factory)
     private async Task SeedPropertiesAsync(string city, int count)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
 
         for (int i = 0; i < count; i++)
         {

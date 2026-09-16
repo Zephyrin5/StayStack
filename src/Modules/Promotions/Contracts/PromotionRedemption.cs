@@ -17,7 +17,7 @@ namespace Promotions.Contracts;
 // internal, same reasoning as Catalog.Contracts.HoldConfirmation - Bookings
 // should only ever reach this through IPromotionRedemption, resolved via DI.
 internal class PromotionRedemption(
-    AppPromotionsDbContext dbContext,
+    PromotionsDb dbContext,
     IUnitLookup unitLookup,
     TimeProvider timeProvider) : IPromotionRedemption
 {
@@ -46,7 +46,7 @@ internal class PromotionRedemption(
         {
             // Resolved through IUnitLookup rather than reading Unit/Property
             // directly - this module has no reference to Catalog or
-            // AppCatalogDbContext at all (docs/adr/0004). UnitSummary
+            // CatalogDb at all (docs/adr/0004). UnitSummary
             // already carries HostId (added for Reviews' own cross-module
             // need), so this is one call instead of two local EF reads.
             UnitSummary unit = await unitLookup.GetUnitAsync(unitId, cancellationToken)

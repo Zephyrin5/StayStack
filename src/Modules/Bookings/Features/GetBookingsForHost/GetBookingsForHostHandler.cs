@@ -10,7 +10,7 @@ using Persistence;
 namespace Bookings.Features.GetBookingsForHost;
 
 public class GetBookingsForHostHandler(
-    AppBookingsDbContext dbContext,
+    BookingsDb dbContext,
     IUnitLookup unitLookup,
     IHostLookup hostLookup) : IRequestHandler<GetBookingsForHostRequest, PagedResponse<HostBookingSummary>>
 {

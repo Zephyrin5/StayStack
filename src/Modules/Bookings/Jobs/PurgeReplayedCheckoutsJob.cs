@@ -19,7 +19,7 @@ namespace Bookings.Jobs;
 ///     </para>
 /// </summary>
 public class PurgeReplayedCheckoutsJob(
-    AppBookingsDbContext dbContext,
+    BookingsDb dbContext,
     TimeProvider timeProvider,
     IOptions<BookingLifecyclePolicyOptions> policy)
 {

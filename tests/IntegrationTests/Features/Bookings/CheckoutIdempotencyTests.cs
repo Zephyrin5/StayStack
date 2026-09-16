@@ -41,7 +41,7 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
     private async Task SeedCatalogAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         context.AddRange(_pendingProperties);
         _pendingProperties.Clear();
         context.AddRange(entities);
@@ -159,7 +159,7 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
         // returns 404 on the consumed hold; the failure mode being fixed is
         // not a double booking, it is a guest locked out of a real one.
         using IServiceScope scope = factory.Services.CreateScope();
-        int bookingsForHold = await scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+        int bookingsForHold = await scope.ServiceProvider.GetRequiredService<BookingsDb>()
             .Bookings.AsNoTracking()
             .CountAsync(b => b.HoldId == holdId, TestContext.Current.CancellationToken);
         Assert.Equal(1, bookingsForHold);
@@ -227,7 +227,7 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
         Assert.Equal(HttpStatusCode.NotFound, second.StatusCode);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        int bookingsForHold = await scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+        int bookingsForHold = await scope.ServiceProvider.GetRequiredService<BookingsDb>()
             .Bookings.AsNoTracking()
             .CountAsync(b => b.HoldId == holdId, TestContext.Current.CancellationToken);
         Assert.Equal(1, bookingsForHold);
@@ -267,7 +267,7 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
         ConfirmBookingResponse created = await ReadAsync(await ConfirmAsync(holdId, key));
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         CheckoutIdempotencyRecord record = await context.CheckoutIdempotencyRecords.AsNoTracking()
             .SingleAsync(r => r.BookingId == created.BookingId, TestContext.Current.CancellationToken);
@@ -304,7 +304,7 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
             await context.CheckoutIdempotencyRecords
                 .Where(r => r.BookingId == created.BookingId)
@@ -336,7 +336,7 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
             await context.CheckoutIdempotencyRecords
                 .Where(r => r.BookingId == expired.BookingId)
@@ -349,7 +349,7 @@ public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory facto
         }
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppBookingsDbContext db = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb db = assertScope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         Assert.False(await db.CheckoutIdempotencyRecords.AnyAsync(r => r.BookingId == expired.BookingId, TestContext.Current.CancellationToken));
         Assert.True(await db.CheckoutIdempotencyRecords.AnyAsync(r => r.BookingId == current.BookingId, TestContext.Current.CancellationToken));

@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Transactions.Entities;
 namespace Transactions.Features.MarkTransactionRefunded;
 
-public class MarkTransactionRefundedHandler(AppTransactionsDbContext dbContext)
+public class MarkTransactionRefundedHandler(TransactionsDb dbContext)
     : IRequestHandler<MarkTransactionRefundedRequest, MarkTransactionRefundedResponse>
 {
     public async ValueTask<MarkTransactionRefundedResponse> Handle(

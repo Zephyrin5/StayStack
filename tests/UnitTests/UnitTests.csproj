@@ -19,6 +19,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\src\Core\SeedWork\SeedWork.csproj"/>
+        <ProjectReference Include="..\..\src\Infrastructure\Database\Database.csproj"/>
         <ProjectReference Include="..\..\src\Infrastructure\Persistence\Persistence.csproj"/>
         <ProjectReference Include="..\..\src\Modules\Bookings\Bookings.csproj"/>
         <ProjectReference Include="..\..\src\Modules\Catalog\Catalog.csproj"/>

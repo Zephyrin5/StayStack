@@ -7,7 +7,7 @@ namespace Transactions.Contracts;
 
 // Bookings reaches this only through ITransactionReversal, resolved via DI.
 internal class TransactionReversal(
-    AppTransactionsDbContext dbContext,
+    TransactionsDb dbContext,
     IBookingLookup bookingLookup,
     TimeProvider timeProvider) : ITransactionReversal
 {

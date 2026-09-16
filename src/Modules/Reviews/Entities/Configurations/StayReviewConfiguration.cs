@@ -9,6 +9,8 @@ public class StayReviewConfiguration : IEntityTypeConfiguration<StayReview>
 
     public void Configure(EntityTypeBuilder<StayReview> builder)
     {
+        builder.ToTable("stay_reviews");
+
         builder.HasKey(r => r.Id);
 
         builder.Property(r => r.ReviewerGuestEmail).HasMaxLength(320).IsRequired();

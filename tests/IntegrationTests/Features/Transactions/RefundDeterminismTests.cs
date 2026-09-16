@@ -74,11 +74,11 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
 
         using IServiceScope scope = factory.Services.CreateScope();
 
-        AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb catalog = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         catalog.AddRange(property, unit);
         await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb bookings = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         bookings.UnitAvailabilityHolds.Add(new UnitAvailabilityHold
         {
             Id = holdId,
@@ -101,7 +101,7 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
 
         await bookings.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        AppTransactionsDbContext transactions = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        TransactionsDb transactions = scope.ServiceProvider.GetRequiredService<TransactionsDb>();
         Transaction payment = Transaction.Create(Guid.CreateVersion7(), bookingId, Money.Of(200m, Currency.KWD));
         transactions.Transactions.Add(payment);
         await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -139,11 +139,11 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
     {
         using IServiceScope scope = factory.Services.CreateScope();
 
-        Transaction payment = await scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>()
+        Transaction payment = await scope.ServiceProvider.GetRequiredService<TransactionsDb>()
             .Transactions.AsNoTracking()
             .SingleAsync(t => t.Id == seeded.TransactionId, TestContext.Current.CancellationToken);
 
-        AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb bookings = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         Booking booking = await bookings.Bookings.AsNoTracking()
             .SingleAsync(b => b.Id == seeded.BookingId, TestContext.Current.CancellationToken);
         RefundObligation obligation = await bookings.RefundObligations.AsNoTracking()
@@ -370,13 +370,13 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
 
         using IServiceScope scope = factory.Services.CreateScope();
 
-        AppTransactionsDbContext transactions = scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+        TransactionsDb transactions = scope.ServiceProvider.GetRequiredService<TransactionsDb>();
         Transaction payment = await transactions.Transactions
             .SingleAsync(t => t.Id == seeded.TransactionId, TestContext.Current.CancellationToken);
         payment.MarkSucceeded(succeededAt);
         await transactions.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb bookings = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         Booking booking = await bookings.Bookings
             .SingleAsync(b => b.Id == seeded.BookingId, TestContext.Current.CancellationToken);
         booking.Cancel(cancelledAt);
@@ -447,7 +447,7 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
         // every batch with them and never reach the payable one above.
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppBookingsDbContext bookings = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+            BookingsDb bookings = scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
             for (int i = 0; i < 1000; i++)
             {
@@ -488,8 +488,8 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppTransactionsDbContext transactions =
-                scope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>();
+            TransactionsDb transactions =
+                scope.ServiceProvider.GetRequiredService<TransactionsDb>();
 
             Transaction recorded = await transactions.Transactions
                 .SingleAsync(t => t.Id == seeded.TransactionId, TestContext.Current.CancellationToken);

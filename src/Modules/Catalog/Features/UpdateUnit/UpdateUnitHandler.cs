@@ -11,7 +11,7 @@ using Unit = Catalog.Entities.Unit;
 namespace Catalog.Features.UpdateUnit;
 
 public class UpdateUnitHandler(
-    AppCatalogDbContext dbContext,
+    CatalogDb dbContext,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization,
     IOptions<LocalizationSettings> localizationSettings) : IRequestHandler<UpdateUnitRequest, UpdateUnitResponse>

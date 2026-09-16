@@ -10,6 +10,8 @@ public class PromotionRedemptionConfiguration : IEntityTypeConfiguration<Promoti
 
     public void Configure(EntityTypeBuilder<PromotionRedemption> builder)
     {
+        builder.ToTable("promotion_redemptions");
+
         builder.HasKey(r => r.Id);
 
         builder.Property(r => r.GuestEmail).HasMaxLength(320).IsRequired();

@@ -11,7 +11,7 @@ using SeedWork.ValueObjects;
 namespace Catalog.Features.AdminCreateProperty;
 
 public class AdminCreatePropertyHandler(
-    AppCatalogDbContext dbContext,
+    CatalogDb dbContext,
     IHostLookup hostLookup,
     IOptions<LocalizationSettings> localizationSettings)
     : IRequestHandler<AdminCreatePropertyRequest, CreatePropertyResponse>
@@ -42,13 +42,13 @@ public class AdminCreatePropertyHandler(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf<Property>(dbContext))
+        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf(dbContext.Properties))
         {
             // A violation of this row's own primary key means an earlier attempt
             // committed and lost its acknowledgement - answer with that row
             // (Persistence.CommittedInsertRecovery). Nothing else is caught here:
             // no other unique index on this table has a domain answer.
-            Property committed = await dbContext.FindOwnCommittedInsertAsync<Property>(property.Id, cancellationToken);
+            Property committed = await dbContext.Properties.FindOwnCommittedInsertAsync(property.Id, cancellationToken);
             return new CreatePropertyResponse { PropertyId = committed.Id };
         }
 

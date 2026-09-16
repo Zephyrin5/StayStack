@@ -7,7 +7,7 @@ using Promotions.Entities;
 namespace Promotions.Features.ListMyPromotions;
 
 public class ListMyPromotionsHandler(
-    AppPromotionsDbContext dbContext,
+    PromotionsDb dbContext,
     IHostAuthorization hostAuthorization) : IRequestHandler<ListMyPromotionsRequest, PagedResponse<PromotionSummary>>
 {
     public async ValueTask<PagedResponse<PromotionSummary>> Handle(

@@ -50,7 +50,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
     private async Task SeedCatalogAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
 
         // Owners first - a Unit without its Property does not resolve.
         context.AddRange(_pendingProperties);
@@ -62,7 +62,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
     private async Task SeedAvailabilityAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         context.AddRange(entities);
         await context.SaveChangesAsync();
     }
@@ -116,7 +116,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(Currency.KWD, result.Currency);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext bookingsDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb bookingsDb = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         Booking booking = await bookingsDb.Bookings.SingleAsync(b => b.Id == result.BookingId, TestContext.Current.CancellationToken);
         Assert.Equal(unit.Id, booking.UnitId);
         Assert.Equal(holdId, booking.HoldId);
@@ -124,7 +124,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal("jane@example.com", booking.GuestEmail);
         Assert.Equal(2, booking.GuestCount); // from the hold, not re-collected at confirm time
 
-        AppBookingsDbContext availabilityDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb availabilityDb = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         UnitAvailabilityHold persistedHold = await availabilityDb.UnitAvailabilityHolds
             .AsNoTracking()
             .SingleAsync(h => h.Id == holdId, TestContext.Current.CancellationToken);
@@ -153,7 +153,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext catalogDb = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb catalogDb = scope.ServiceProvider.GetRequiredService<CatalogDb>();
             Unit trackedUnit = await catalogDb.Units.SingleAsync(u => u.Id == unit.Id, TestContext.Current.CancellationToken);
             trackedUnit.SetBasePrice(500m);
             await catalogDb.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -246,7 +246,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(result);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext bookingsDb = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb bookingsDb = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         Booking booking = await bookingsDb.Bookings.SingleAsync(b => b.Id == result.BookingId, TestContext.Current.CancellationToken);
         Assert.Null(booking.CustomerId);
     }
@@ -289,7 +289,7 @@ public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(result);
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppBookingsDbContext bookingsDb = assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb bookingsDb = assertScope.ServiceProvider.GetRequiredService<BookingsDb>();
         Booking booking = await bookingsDb.Bookings.SingleAsync(b => b.Id == result.BookingId, TestContext.Current.CancellationToken);
         Assert.Equal(user.Id, booking.CustomerId);
     }

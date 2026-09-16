@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 namespace Identity.Features.SignUp;
 
 public class SignUpHandler(
-    AppIdentityDbContext dbContext,
+    IdentityDb dbContext,
     UserManager<ApplicationUser> userManager,
     IAuthTokenProvider authTokenProvider) : IRequestHandler<SignUpRequest, SignUpResponse>
 {
@@ -34,7 +34,7 @@ public class SignUpHandler(
         };
 
         // One transaction. All three writes - the user, the role assignment, the
-        // refresh token - land in AppIdentityDbContext on the connection this
+        // refresh token - land in IdentityDb on the connection this
         // transaction owns, so a failure anywhere rolls back all of them.
         // BecomeHostHandler also writes Hosts, so it runs in an atomic scope
         // (docs/adr/0003); nothing here does.
@@ -86,7 +86,7 @@ public class SignUpHandler(
     ///     Everything registration writes, inside the caller's transaction.
     ///     <para>
     ///         UserManager saves through this same scoped
-    ///         AppIdentityDbContext, so its own SaveChanges calls enlist in
+    ///         IdentityDb, so its own SaveChanges calls enlist in
     ///         that transaction rather than committing beside it.
     ///     </para>
     /// </summary>

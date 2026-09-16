@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Persistence;
 namespace IntegrationTests.Features.Hosts;
 
 [Collection("Integration Tests")]
@@ -83,7 +84,7 @@ public class CreateHostTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotEqual(Guid.Empty, result.HostId);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppHostsDbContext db = scope.ServiceProvider.GetRequiredService<AppHostsDbContext>();
+        HostsDb db = scope.ServiceProvider.GetRequiredService<HostsDb>();
         Host host = await db.Hosts.SingleAsync(h => h.Id == result.HostId, TestContext.Current.CancellationToken);
         Assert.Equal("Gulf Stays Co.", host.BusinessName);
         Assert.Equal("Gulf Stays", host.DisplayName?.Values["en"]);
@@ -131,7 +132,7 @@ public class CreateHostTests(IntegrationTestWebApplicationFactory factory)
         string adminAccessToken = await SignInAsSeededAdminAsync();
         string contactEmail = $"lost-ack-{Guid.NewGuid():N}@example.com";
 
-        CommitFault<AppHostsDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppHostsDbContext>(context =>
+        CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<Host>().Any(e => e.Entity.ContactEmail == contactEmail));
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
@@ -146,7 +147,7 @@ public class CreateHostTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(result);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        Assert.Equal(result.HostId, Assert.Single(await scope.ServiceProvider.GetRequiredService<AppHostsDbContext>()
+        Assert.Equal(result.HostId, Assert.Single(await scope.ServiceProvider.GetRequiredService<HostsDb>()
             .Hosts.IgnoreQueryFilters().AsNoTracking().Where(h => h.ContactEmail == contactEmail)
             .ToListAsync(TestContext.Current.CancellationToken)).Id);
     }

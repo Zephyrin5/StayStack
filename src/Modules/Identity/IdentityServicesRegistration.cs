@@ -43,21 +43,6 @@ public static class IdentityServicesRegistration
         services.AddSingleton<IValidateOptions<AuthTokenConfiguration>, AuthTokenConfigurationValidator>();
         services.AddScoped<IAuthTokenProvider, AuthTokenProvider>();
 
-        // Registered unconditionally, including under "Testing" - the test
-        // host (IntegrationTestWebApplicationFactory) overrides this via
-        // RemoveAll<DbContextOptions<...>>() + a fresh AddDbContext. Production
-        // code has no "am I under test" awareness.
-        services.AddDbContext<AppIdentityDbContext>(options =>
-        {
-            string connectionString = configuration.GetConnectionString("AppConnection")
-                                      ?? throw new InvalidOperationException("Connection string for IdentityDbContext not found.");
-
-            options.ConfigureStayStackDefaults(
-                connectionString,
-                "identity",
-                environment is not null && environment.IsDevelopment());
-        });
-        services.AddAtomicParticipant<AppIdentityDbContext>(AtomicParticipants.Identity);
         services.AddSingleton<IModuleModel, IdentityModel>();
         services.AddScoped<IdentityDb>();
 
@@ -80,9 +65,9 @@ public static class IdentityServicesRegistration
             .AddSignInManager();
 
         // Explicit rather than AddEntityFrameworkStores, which builds these with MakeGenericType
-        // (docs/adr/0001). The context moves to AppDbContext with the rest of the module in 1.3.
-        services.AddScoped<IUserStore<ApplicationUser>, UserStore<ApplicationUser, IdentityRole<Guid>, AppIdentityDbContext, Guid>>();
-        services.AddScoped<IRoleStore<IdentityRole<Guid>>, RoleStore<IdentityRole<Guid>, AppIdentityDbContext, Guid>>();
+        // (docs/adr/0001).
+        services.AddScoped<IUserStore<ApplicationUser>, UserStore<ApplicationUser, IdentityRole<Guid>, AppDbContext, Guid>>();
+        services.AddScoped<IRoleStore<IdentityRole<Guid>>, RoleStore<IdentityRole<Guid>, AppDbContext, Guid>>();
 
 
         services

@@ -4,6 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using Persistence;
 namespace Bookings;
 
+// Kept only so this module's existing migrations compile; nothing registers or uses it. The
+// model lives in the module's IModuleModel, and this class goes when the migrations are squashed.
 public class AppBookingsDbContext(DbContextOptions<AppBookingsDbContext> options) : StayStackDbContext(options)
 {
     public DbSet<Booking> Bookings => Set<Booking>();

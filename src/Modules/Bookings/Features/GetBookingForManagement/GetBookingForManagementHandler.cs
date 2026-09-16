@@ -9,7 +9,7 @@ using Bookings.Contracts;
 namespace Bookings.Features.GetBookingForManagement;
 
 public class GetBookingForManagementHandler(
-    AppBookingsDbContext dbContext,
+    BookingsDb dbContext,
     ICurrentUserProvider currentUserProvider,
     IBookingSessions bookingSessions,
     TimeProvider timeProvider,

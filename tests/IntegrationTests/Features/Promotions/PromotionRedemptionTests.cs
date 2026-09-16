@@ -186,7 +186,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppPromotionsDbContext promotions = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+            PromotionsDb promotions = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
 
             Promotion promotion = await promotions.Promotions.AsNoTracking()
                 .SingleAsync(p => p.Id == promotionId, TestContext.Current.CancellationToken);
@@ -306,7 +306,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         Assert.Equal(240m, result.TotalPrice); // 300 - 20%
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppPromotionsDbContext db = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+        PromotionsDb db = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
         Promotion promotion = await db.Promotions.SingleAsync(p => p.Id == promotionId, TestContext.Current.CancellationToken);
         Assert.Equal(1, promotion.RedemptionCount);
         PromotionRedemption redemption = await db.PromotionRedemptions
@@ -489,7 +489,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         Assert.Equal(HttpStatusCode.OK, cancelResponse.StatusCode);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppPromotionsDbContext db = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+        PromotionsDb db = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
         Promotion promotionAfterCancel = await db.Promotions.SingleAsync(p => p.Id == promotionId, TestContext.Current.CancellationToken);
         Assert.Equal(0, promotionAfterCancel.RedemptionCount);
 
@@ -541,7 +541,7 @@ public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory facto
         Assert.Equal(concurrentRequests - 1, responses.Count(r => r.StatusCode == HttpStatusCode.BadRequest));
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppPromotionsDbContext db = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+        PromotionsDb db = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
         Promotion promotion = await db.Promotions.AsNoTracking()
             .SingleAsync(p => p.Id == promotionId, TestContext.Current.CancellationToken);
         Assert.Equal(1, promotion.RedemptionCount);

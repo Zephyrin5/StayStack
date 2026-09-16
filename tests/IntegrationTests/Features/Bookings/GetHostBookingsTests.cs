@@ -277,7 +277,7 @@ public class GetHostBookingsTests(IntegrationTestWebApplicationFactory factory)
         // exactly why this state is reached later, once the stay is over.
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb catalog = scope.ServiceProvider.GetRequiredService<CatalogDb>();
             Unit unit = await catalog.Units.SingleAsync(u => u.Id == unitId, TestContext.Current.CancellationToken);
             unit.Archive(DateTimeOffset.UtcNow, null);
             await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);

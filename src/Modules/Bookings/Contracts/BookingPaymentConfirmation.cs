@@ -7,7 +7,7 @@ using System.Data.Common;
 namespace Bookings.Contracts;
 
 internal class BookingPaymentConfirmation(
-    AppBookingsDbContext dbContext,
+    BookingsDb dbContext,
     IHoldConfirmation holdConfirmation) : IBookingPaymentConfirmation
 {
     public async Task<bool> ConfirmPaymentAsync(Guid bookingId, CancellationToken cancellationToken)

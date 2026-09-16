@@ -6,6 +6,8 @@ public class RefundObligationConfiguration : IEntityTypeConfiguration<RefundObli
 {
     public void Configure(EntityTypeBuilder<RefundObligation> builder)
     {
+        builder.ToTable("refund_obligations");
+
         // The booking id itself, so "one obligation per booking" is enforced by
         // the key rather than by a check somebody has to remember. A second
         // writer collides; there is no interleaving that produces two.

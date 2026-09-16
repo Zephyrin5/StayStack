@@ -1,4 +1,4 @@
-// Proves redemption rejects a promotion that expires or is archived between snapshot and write,
+﻿// Proves redemption rejects a promotion that expires or is archived between snapshot and write,
 // placed there deterministically (an auto-advancing clock; an archive inside GetUnitAsync). Not
 // verified by breaking the mechanism.
 using BuildingBlocks.Persistence;
@@ -17,6 +17,7 @@ using Promotions.Entities;
 using Promotions.Enums;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
+using System.Data;
 namespace IntegrationTests.Features.Promotions;
 
 // RedeemAsync validates a promotion from a plain snapshot read, then enforces
@@ -66,7 +67,7 @@ public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory f
             hostId);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppPromotionsDbContext context = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+        PromotionsDb context = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
         context.Add(promotion);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         return promotion;
@@ -89,10 +90,10 @@ public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory f
 
         using IServiceScope scope = host.Services.CreateScope();
         IPromotionRedemption redemption = scope.ServiceProvider.GetRequiredService<IPromotionRedemption>();
-        IAtomicScope atomicScope = scope.ServiceProvider.GetRequiredService<IAtomicScope>();
+        ITransactionRunner transactionRunner = scope.ServiceProvider.GetRequiredService<ITransactionRunner>();
 
         PromotionInvalidException exception = await Assert.ThrowsAsync<PromotionInvalidException>(() =>
-            atomicScope.ExecuteAsync(AtomicParticipants.Promotions, AtomicParticipants.Promotions, token =>
+            transactionRunner.ExecuteAsync(IsolationLevel.ReadCommitted, token =>
                 redemption.RedeemAsync(
                     promotion.Code, Guid.NewGuid(), "guest@example.com",
                     Money.Of(200m, Currency.KWD), Guid.CreateVersion7(), Guid.CreateVersion7(), token),
@@ -118,7 +119,7 @@ public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory f
         Unit unit = CatalogSeeding.CreateUnit(property);
         using (IServiceScope seedScope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext catalog = seedScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb catalog = seedScope.ServiceProvider.GetRequiredService<CatalogDb>();
             catalog.Add(property);
             catalog.Add(unit);
             await catalog.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -141,10 +142,10 @@ public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory f
 
         using IServiceScope scope = host.Services.CreateScope();
         IPromotionRedemption redemption = scope.ServiceProvider.GetRequiredService<IPromotionRedemption>();
-        IAtomicScope atomicScope = scope.ServiceProvider.GetRequiredService<IAtomicScope>();
+        ITransactionRunner transactionRunner = scope.ServiceProvider.GetRequiredService<ITransactionRunner>();
 
         PromotionInvalidException exception = await Assert.ThrowsAsync<PromotionInvalidException>(() =>
-            atomicScope.ExecuteAsync(AtomicParticipants.Promotions, AtomicParticipants.Promotions, token =>
+            transactionRunner.ExecuteAsync(IsolationLevel.ReadCommitted, token =>
                 redemption.RedeemAsync(
                     promotion.Code, unit.Id, "guest@example.com",
                     Money.Of(200m, Currency.KWD), Guid.CreateVersion7(), Guid.CreateVersion7(), token),
@@ -161,7 +162,7 @@ public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory f
     private async Task ArchivePromotionAsync(Guid promotionId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppPromotionsDbContext context = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+        PromotionsDb context = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
         Promotion promotion = await context.Promotions.IgnoreQueryFilters().SingleAsync(p => p.Id == promotionId);
         promotion.Archive(Start, null);
         await context.SaveChangesAsync();
@@ -177,6 +178,9 @@ public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory f
             await onLookup();
             return await inner.GetUnitAsync(unitId, cancellationToken);
         }
+
+        public Task<bool> IsUnitLiveForWriteAsync(Guid unitId, CancellationToken cancellationToken) =>
+            inner.IsUnitLiveForWriteAsync(unitId, cancellationToken);
 
         public Task<IReadOnlyDictionary<Guid, UnitSummary>> GetUnitsAsync(
             IEnumerable<Guid> unitIds, CancellationToken cancellationToken) =>
@@ -196,7 +200,7 @@ public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory f
     private async Task AssertRedemptionCountAsync(Guid promotionId, int expected)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppPromotionsDbContext context = scope.ServiceProvider.GetRequiredService<AppPromotionsDbContext>();
+        PromotionsDb context = scope.ServiceProvider.GetRequiredService<PromotionsDb>();
         Promotion promotion = await context.Promotions
             .IgnoreQueryFilters()
             .SingleAsync(p => p.Id == promotionId, TestContext.Current.CancellationToken);

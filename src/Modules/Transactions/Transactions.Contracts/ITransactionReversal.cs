@@ -3,7 +3,7 @@ namespace Transactions.Contracts;
 
 /// <summary>
 ///     Lets Bookings resolve the payment behind a cancelled booking without
-///     referencing Transactions' entities or AppTransactionsDbContext.
+///     referencing Transactions' entities or TransactionsDb.
 /// </summary>
 public interface ITransactionReversal
 {

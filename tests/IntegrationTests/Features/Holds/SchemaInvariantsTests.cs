@@ -26,7 +26,7 @@ public class SchemaInvariantsTests(IntegrationTestWebApplicationFactory factory)
     public async Task UnitAvailabilityHolds_ShouldHaveOverlapExclusionConstraint()
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         IDbConnection connection = context.Database.GetDbConnection();
 
         const string sql = """

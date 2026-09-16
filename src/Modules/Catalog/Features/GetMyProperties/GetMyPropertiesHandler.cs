@@ -11,7 +11,7 @@ namespace Catalog.Features.GetMyProperties;
 // docs/adr/0007. Query-building/mapping logic is still shared, just as a
 // plain method call (PropertySummaryMapper), not through Mediator.
 public class GetMyPropertiesHandler(
-    AppCatalogDbContext dbContext,
+    CatalogDb dbContext,
     IHostAuthorization hostAuthorization) : IRequestHandler<GetMyPropertiesRequest, PagedResponse<PropertySummary>>
 {
     public async ValueTask<PagedResponse<PropertySummary>> Handle(GetMyPropertiesRequest request, CancellationToken cancellationToken)

@@ -9,6 +9,9 @@ using Microsoft.EntityFrameworkCore;
 using Persistence;
 namespace UnitTests.Persistence;
 
+// Checks the module contexts, which still own the migrations until they are squashed into one
+// Initial migration on AppDbContext.
+//
 // HasPendingModelChanges() compares the live entity model against the last
 // migration's frozen snapshot - the same check Database.Migrate() runs
 // before applying anything, and the one PasswordHasher.HashPassword() and

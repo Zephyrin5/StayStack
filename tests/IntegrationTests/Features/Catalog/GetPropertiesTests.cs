@@ -133,7 +133,7 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     private async Task SeedHoldAsync(Guid unitId, DateOnly checkIn, DateOnly checkOut, string status = "booked")
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         context.UnitAvailabilityHolds.Add(new UnitAvailabilityHold
         {

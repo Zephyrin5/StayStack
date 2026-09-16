@@ -8,7 +8,7 @@ using Persistence;
 namespace Catalog.Features.GetProperties;
 
 public class GetPropertiesHandler(
-    AppCatalogDbContext dbContext,
+    CatalogDb dbContext,
     IUnitAvailabilityLookup availabilityLookup,
     TimeProvider timeProvider,
     HybridCache cache) : IRequestHandler<GetPropertiesRequest, PagedSliceResponse<PropertySummary>>

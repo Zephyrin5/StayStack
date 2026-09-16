@@ -7,7 +7,7 @@ using Promotions.Entities;
 namespace Promotions.Features.UpdatePromotion;
 
 public class UpdatePromotionHandler(
-    AppPromotionsDbContext dbContext,
+    PromotionsDb dbContext,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization) : IRequestHandler<UpdatePromotionRequest, UpdatePromotionResponse>
 {

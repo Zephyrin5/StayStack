@@ -7,7 +7,7 @@ using Promotions.Entities;
 namespace Promotions.Features.DeletePromotion;
 
 public class DeletePromotionHandler(
-    AppPromotionsDbContext dbContext,
+    PromotionsDb dbContext,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization,
     TimeProvider timeProvider) : IRequestHandler<DeletePromotionRequest, DeletePromotionResponse>

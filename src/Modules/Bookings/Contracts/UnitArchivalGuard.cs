@@ -11,7 +11,7 @@ namespace Bookings.Contracts;
 // Bookings.Contracts (docs/adr/0004) - defining the interface on the
 // Catalog side is what keeps the reference direction correct while the
 // query itself still runs against Bookings' own data.
-internal class UnitArchivalGuard(AppBookingsDbContext dbContext) : IUnitArchivalGuard
+internal class UnitArchivalGuard(BookingsDb dbContext) : IUnitArchivalGuard
 {
     public Task<bool> HasActiveBookingForUnitAsync(Guid unitId, DateOnly today, CancellationToken cancellationToken)
     {

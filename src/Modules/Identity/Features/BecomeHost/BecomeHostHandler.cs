@@ -1,4 +1,4 @@
-using BuildingBlocks.Exceptions;
+﻿using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using BuildingBlocks.Persistence;
 using Hosts.Contracts;
@@ -8,15 +8,16 @@ using Identity.Features.Common;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 namespace Identity.Features.BecomeHost;
 
 public class BecomeHostHandler(
-    AppIdentityDbContext dbContext,
+    IdentityDb dbContext,
     UserManager<ApplicationUser> userManager,
     ICurrentUserProvider currentUserProvider,
     IHostRegistrar hostRegistrar,
     IAuthTokenProvider authTokenProvider,
-    IAtomicScope atomicScope) : IRequestHandler<BecomeHostRequest, BecomeHostResponse>
+    ITransactionRunner transactionRunner) : IRequestHandler<BecomeHostRequest, BecomeHostResponse>
 {
     public async ValueTask<BecomeHostResponse> Handle(BecomeHostRequest request, CancellationToken cancellationToken)
     {
@@ -32,12 +33,10 @@ public class BecomeHostHandler(
 
         try
         {
-            // The Host, the link, the role and the refresh token commit together
-            // (docs/design/transaction-ownership.md), so no failure leaves a Host
-            // without its user, or a linked user without the Host role.
-            return await atomicScope.ExecuteAsync(
-                AtomicParticipants.Identity,
-                AtomicParticipants.Identity | AtomicParticipants.Hosts,
+            // The Host, the link, the role and the refresh token commit together (docs/adr/0003), so no
+            // failure leaves a Host without its user, or a linked user without the Host role.
+            return await transactionRunner.ExecuteAsync(
+                IsolationLevel.ReadCommitted,
                 async token =>
                 {
                     ApplicationUser user = await userManager.FindByIdAsync(userId.ToString())

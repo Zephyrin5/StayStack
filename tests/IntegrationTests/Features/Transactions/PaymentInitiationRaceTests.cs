@@ -134,7 +134,7 @@ public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory fac
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb catalog = scope.ServiceProvider.GetRequiredService<CatalogDb>();
             catalog.AddRange(_pendingProperties);
             _pendingProperties.Clear();
             catalog.Add(unit);
@@ -211,7 +211,7 @@ public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory fac
 
         using IServiceScope assertScope = factory.Services.CreateScope();
 
-        Assert.Empty(await assertScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>()
+        Assert.Empty(await assertScope.ServiceProvider.GetRequiredService<TransactionsDb>()
             .Transactions.AsNoTracking()
             .Where(t => t.BookingId == booking.BookingId)
             .ToListAsync(TestContext.Current.CancellationToken));
@@ -230,7 +230,7 @@ public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory fac
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb catalog = scope.ServiceProvider.GetRequiredService<CatalogDb>();
             catalog.AddRange(_pendingProperties);
             _pendingProperties.Clear();
             catalog.Add(unit);
@@ -267,7 +267,7 @@ public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory fac
         // other test's pending booking in the shared database too.
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            await scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>().Bookings
+            await scope.ServiceProvider.GetRequiredService<BookingsDb>().Bookings
                 .Where(b => b.Id == booking.BookingId)
                 .ExecuteUpdateAsync(
                     set => set.SetProperty(b => b.PaymentDueAt, DateTimeOffset.UtcNow.AddMinutes(-1)),
@@ -306,8 +306,8 @@ public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory fac
             using IServiceScope jobScope = factory.Services.CreateScope();
 
             await new ExpireUnpaidBookingsJob(
-                    jobScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
-                    jobScope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.IAtomicScope>(),
+                    jobScope.ServiceProvider.GetRequiredService<BookingsDb>(),
+                    jobScope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.ITransactionRunner>(),
                     jobScope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
                     jobScope.ServiceProvider.GetRequiredService<global::Promotions.Contracts.IPromotionRedemption>(),
                     TimeProvider.System,
@@ -331,13 +331,13 @@ public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory fac
 
         using IServiceScope assertScope = factory.Services.CreateScope();
 
-        Booking current = await assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+        Booking current = await assertScope.ServiceProvider.GetRequiredService<BookingsDb>()
             .Bookings.AsNoTracking()
             .SingleAsync(b => b.Id == booking.BookingId, TestContext.Current.CancellationToken);
 
         Assert.Equal(BookingStatus.Pending, current.BookingStatus);
 
-        Assert.Single(await assertScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>()
+        Assert.Single(await assertScope.ServiceProvider.GetRequiredService<TransactionsDb>()
             .Transactions.AsNoTracking()
             .Where(t => t.BookingId == booking.BookingId)
             .ToListAsync(TestContext.Current.CancellationToken));
@@ -409,10 +409,10 @@ public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory fac
 
         using IServiceScope assertScope = factory.Services.CreateScope();
 
-        Assert.Equal(BookingStatus.Cancelled, (await assertScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>()
+        Assert.Equal(BookingStatus.Cancelled, (await assertScope.ServiceProvider.GetRequiredService<BookingsDb>()
             .Bookings.AsNoTracking().SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken)).BookingStatus);
 
-        Assert.Single(await assertScope.ServiceProvider.GetRequiredService<AppTransactionsDbContext>()
+        Assert.Single(await assertScope.ServiceProvider.GetRequiredService<TransactionsDb>()
             .Transactions.AsNoTracking()
             .Where(t => t.BookingId == bookingId)
             .ToListAsync(TestContext.Current.CancellationToken));
@@ -429,7 +429,7 @@ public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory fac
         long low = key & 0xFFFFFFFFL;
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext db = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb db = scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(10);
 
@@ -459,7 +459,7 @@ public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory fac
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppCatalogDbContext catalog = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb catalog = scope.ServiceProvider.GetRequiredService<CatalogDb>();
             catalog.AddRange(_pendingProperties);
             _pendingProperties.Clear();
             catalog.Add(unit);

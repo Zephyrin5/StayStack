@@ -154,7 +154,7 @@ public class PricingRuleHandlerTests(IntegrationTestWebApplicationFactory factor
         Assert.NotNull(result);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         PricingRule rule = await db.PricingRules.SingleAsync(r => r.Id == result.PricingRuleId, TestContext.Current.CancellationToken);
         Assert.Equal(PricingRuleType.DayOfWeekMultiplier, rule.RuleType);
         Assert.Equal([5, 6], rule.DaysOfWeek ?? []);
@@ -296,7 +296,7 @@ public class PricingRuleHandlerTests(IntegrationTestWebApplicationFactory factor
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         PricingRule rule = await db.PricingRules.SingleAsync(r => r.Id == created.PricingRuleId, TestContext.Current.CancellationToken);
         Assert.Equal(275m, rule.OverridePrice);
         Assert.Equal(new DateOnly(2026, 12, 21), rule.DateRange!.Value.LowerBound);
@@ -384,7 +384,7 @@ public class PricingRuleHandlerTests(IntegrationTestWebApplicationFactory factor
         Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext db = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         PricingRule archived = await db.PricingRules.IgnoreQueryFilters()
             .SingleAsync(r => r.Id == created.PricingRuleId, TestContext.Current.CancellationToken);
         Assert.Equal(EntityStatus.Archived, archived.Status);

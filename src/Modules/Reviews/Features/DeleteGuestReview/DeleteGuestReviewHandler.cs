@@ -6,7 +6,7 @@ using Reviews.Entities;
 namespace Reviews.Features.DeleteGuestReview;
 
 public class DeleteGuestReviewHandler(
-    AppReviewsDbContext dbContext,
+    ReviewsDb dbContext,
     ICurrentUserProvider currentUserProvider,
     TimeProvider timeProvider) : IRequestHandler<DeleteGuestReviewRequest, DeleteGuestReviewResponse>
 {

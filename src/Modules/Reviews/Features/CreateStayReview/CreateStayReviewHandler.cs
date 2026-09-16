@@ -13,7 +13,7 @@ using Reviews.Exceptions;
 namespace Reviews.Features.CreateStayReview;
 
 public class CreateStayReviewHandler(
-    AppReviewsDbContext dbContext,
+    ReviewsDb dbContext,
     IBookingLookup bookingLookup,
     IUnitLookup unitLookup,
     ICurrentUserProvider currentUserProvider,
@@ -28,7 +28,7 @@ public class CreateStayReviewHandler(
         // Same two-path ownership proof CancelBookingHandler itself uses -
         // an authenticated customer's own id, or a guest-checkout
         // management token - resolved cross-module without Reviews ever
-        // seeing Booking or AppBookingsDbContext.
+        // seeing Booking or BookingsDb.
         BookingAccessResult access = await bookingLookup.VerifyBookingAccessAsync(
                                           request.BookingId, currentUserProvider.UserId, cancellationToken)
                                       ?? throw new NotFoundException("Booking", request.BookingId);
@@ -95,11 +95,11 @@ public class CreateStayReviewHandler(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf<StayReview>(dbContext))
+        catch (DbUpdateException ex) when (ex.IsPrimaryKeyViolationOf(dbContext.StayReviews))
         {
             // An earlier attempt committed and lost its acknowledgement - answer
             // with that row (Persistence.CommittedInsertRecovery).
-            StayReview committed = await dbContext.FindOwnCommittedInsertAsync<StayReview>(review.Id, cancellationToken);
+            StayReview committed = await dbContext.StayReviews.FindOwnCommittedInsertAsync(review.Id, cancellationToken);
             return new CreateStayReviewResponse { StayReviewId = committed.Id };
         }
         catch (DbUpdateException ex) when (ex.IsViolationOf(StayReviewConfiguration.BookingIndex))

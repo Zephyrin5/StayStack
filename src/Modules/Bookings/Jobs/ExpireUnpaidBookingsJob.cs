@@ -9,14 +9,15 @@ using Promotions.Contracts;
 using System.Data.Common;
 using TickerQ.Utilities.Base;
 using TickerQ.Utilities.Models;
+using System.Data;
 namespace Bookings.Jobs;
 
 /// <summary>
 ///     Cancels bookings past <see cref="Booking.PaymentDueAt"/> and releases their holds (docs/adr/0020).
 /// </summary>
 public partial class ExpireUnpaidBookingsJob(
-    AppBookingsDbContext dbContext,
-    IAtomicScope atomicScope,
+    BookingsDb dbContext,
+    ITransactionRunner transactionRunner,
     IHoldConfirmation holdConfirmation,
     IPromotionRedemption promotionRedemption,
     TimeProvider timeProvider,
@@ -66,9 +67,8 @@ public partial class ExpireUnpaidBookingsJob(
 
     private async Task ClaimAndExpireAsync(Guid bookingId, CancellationToken cancellationToken)
     {
-        bool expired = await atomicScope.ExecuteAsync(
-            AtomicParticipants.Bookings,
-            AtomicParticipants.Bookings | AtomicParticipants.Promotions,
+        bool expired = await transactionRunner.ExecuteAsync(
+                IsolationLevel.ReadCommitted,
             async token =>
             {
                 DbTransaction transaction = dbContext.Database.CurrentTransaction!.GetDbTransaction();

@@ -10,7 +10,7 @@ namespace Bookings.Contracts;
 // resolved via DI. The management token never reaches here; it is exchanged
 // for a session first (BookingAccessChecker.ResolveByManagementTokenAsync).
 internal class BookingLookup(
-    AppBookingsDbContext dbContext, IBookingSessions bookingSessions) : IBookingLookup
+    BookingsDb dbContext, IBookingSessions bookingSessions) : IBookingLookup
 {
     public async Task<BookingSummary?> GetBookingAsync(Guid bookingId, CancellationToken cancellationToken)
     {

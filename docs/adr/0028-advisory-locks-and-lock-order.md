@@ -1,4 +1,4 @@
-# 0028 - Advisory locks and lock order
+﻿# 0028 - Advisory locks and lock order
 
 **Status:** Accepted
 
@@ -24,7 +24,7 @@ Several pairs of operations must exclude each other but share no row to lock: on
 
 **Advisory lock, then the booking row lock, then the hold, then the transaction row, then the refund obligation.**
 
-Cancellation, expiry and payment success each run as one atomic scope across the modules they touch - Bookings with Transactions, Promotions or both (docs/extraction-inventory.md), so every lock a workflow takes is held until its single commit, across modules. The order is derived over the merged scopes:
+Cancellation, expiry and payment success each run as one transaction across the modules they touch - Bookings with Transactions, Promotions or both - so every lock a workflow takes is held until its single commit. The order is derived over those transactions:
 
 - Two paths take both `BookingPaymentLock` and the booking's `FOR UPDATE` row lock - cancellation and expiry - so they take them in one order. Advisory first also means a path waiting on it holds no row lock while it waits, so payment success, which takes the row lock and no advisory lock, never queues behind an unrelated initiation.
 - Booking before hold: payment success (`BookingPaymentConfirmation`) locks the booking and then marks the hold paid, so cancellation locks the booking before releasing the hold. The reverse order deadlocks against a concurrent payment; `40P01` is retried, but only by redoing the whole scope under contention.
@@ -35,6 +35,8 @@ Cancellation, expiry and payment success each run as one atomic scope across the
 ### Taking a lock is not re-reading
 
 A lock orders two operations; it says nothing about what the other did first. Every holder re-reads the state it depends on after acquiring: initiation re-reads the booking's payability, creation re-reads the property, holds re-read the unit.
+
+The hold's re-read is a locking read (`IUnitLookup.IsUnitLiveForWriteAsync`, `SELECT ... FOR SHARE`), because a plain one cannot see what it is looking for. `HoldAvailabilityHandler` runs at Serializable, and a snapshot is taken when its first statement begins - the statement that waits for the advisory lock. An archive that commits during that wait is therefore invisible to every later read in that transaction, and the hold would be inserted against an archived unit. Postgres refuses a locking read of a row updated by a transaction that committed after the caller's snapshot, so the re-read raises `40001`, the execution strategy retries on a fresh snapshot, and the unit is gone. `ArchivalRaceTests` fails without it. The lock order is unaffected: archival takes the same advisory lock before it touches `units`, so the row lock is only ever taken behind it.
 
 ### Sweeps skip rather than wait
 

@@ -141,7 +141,7 @@ public class SignUpTests(IntegrationTestWebApplicationFactory factory)
         // Two things at once, and the first is the load-bearing one.
         //
         // Registration is one transaction, which works only if UserManager
-        // saves through the same scoped AppIdentityDbContext the transaction
+        // saves through the same scoped IdentityDb the transaction
         // was opened on. If it resolved its own context the writes would commit
         // beside the transaction and the rollback would remove nothing - so
         // this asserts the assumption rather than a comment asserting it.
@@ -214,7 +214,7 @@ public class SignUpTests(IntegrationTestWebApplicationFactory factory)
         string email = _faker.Internet.Email();
         // After the commit that registered this email, matched on the tracked
         // account.
-        CommitFault<AppIdentityDbContext> lostAck = CommitFaults.FailAfterCommit<AppIdentityDbContext>(context =>
+        CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterCommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<ApplicationUser>().Any(e => e.Entity.Email == email));
 
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
@@ -233,7 +233,7 @@ public class SignUpTests(IntegrationTestWebApplicationFactory factory)
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
-            AppIdentityDbContext db = scope.ServiceProvider.GetRequiredService<AppIdentityDbContext>();
+            IdentityDb db = scope.ServiceProvider.GetRequiredService<IdentityDb>();
 
             ApplicationUser account = await db.Users.AsNoTracking()
                 .SingleAsync(u => u.Email == email, TestContext.Current.CancellationToken);

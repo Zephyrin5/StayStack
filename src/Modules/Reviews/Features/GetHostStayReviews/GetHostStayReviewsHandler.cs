@@ -8,7 +8,7 @@ using Reviews.Features.GetPropertyReviews;
 namespace Reviews.Features.GetHostStayReviews;
 
 public class GetHostStayReviewsHandler(
-    AppReviewsDbContext dbContext,
+    ReviewsDb dbContext,
     IHostAuthorization hostAuthorization) : IRequestHandler<GetHostStayReviewsRequest, PagedResponse<StayReviewSummary>>
 {
     public async ValueTask<PagedResponse<StayReviewSummary>> Handle(

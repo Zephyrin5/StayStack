@@ -1,5 +1,5 @@
-using Catalog;
-using Catalog.Entities;
+﻿using Catalog.Entities;
+using Database;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Persistence;
@@ -33,9 +33,9 @@ public class SoftDeleteFilterShapeTests
 
     private static IEntityType GetUnitEntityType()
     {
-        var builder = new DbContextOptionsBuilder<AppCatalogDbContext>();
-        builder.ConfigureStayStackDefaults(UnusedConnectionString, "catalog", false);
-        using AppCatalogDbContext context = new AppCatalogDbContext(builder.Options);
+        var builder = new DbContextOptionsBuilder<AppDbContext>();
+        builder.ConfigureStayStackDefaults(UnusedConnectionString, "app", false);
+        using AppDbContext context = new AppDbContext(builder.Options, AppDbContextModels.All);
 
         IEntityType? unit = context.Model.FindEntityType(typeof(Unit));
         Assert.NotNull(unit);

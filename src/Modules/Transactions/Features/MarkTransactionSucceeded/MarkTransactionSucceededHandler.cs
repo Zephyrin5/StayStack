@@ -6,11 +6,12 @@ using Microsoft.EntityFrameworkCore;
 using Transactions.Contracts;
 using Transactions.Entities;
 using Transactions.Exceptions;
+using System.Data;
 namespace Transactions.Features.MarkTransactionSucceeded;
 
 public class MarkTransactionSucceededHandler(
-    AppTransactionsDbContext dbContext,
-    IAtomicScope atomicScope,
+    TransactionsDb dbContext,
+    ITransactionRunner transactionRunner,
     IBookingPaymentConfirmation bookingPaymentConfirmation,
     ITransactionReversal transactionReversal,
     TimeProvider timeProvider)
@@ -24,9 +25,8 @@ public class MarkTransactionSucceededHandler(
 
         // The payment, the booking's confirmation and its hold's sale - or, when
         // the payment bought nothing, its refund - commit together.
-        return await atomicScope.ExecuteAsync(
-            AtomicParticipants.Transactions,
-            AtomicParticipants.Transactions | AtomicParticipants.Bookings,
+        return await transactionRunner.ExecuteAsync(
+                IsolationLevel.ReadCommitted,
             async token =>
             {
                 attempts++;

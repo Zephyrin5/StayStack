@@ -36,28 +36,25 @@ public class PrimaryKeyConstraintTests(IntegrationTestWebApplicationFactory fact
 
     public static TheoryData<string> RecoveredTables => ["properties", "promotions", "guest_reviews", "stay_reviews", "hosts"];
 
-    private static (DbContext Context, string ModelName) Resolve(IServiceProvider services, string table) => table switch
+    // The name comes from the DbSet the recovering handler uses, so this reads the same model entry
+    // the match is made against.
+    private static string ModelName(IServiceProvider services, string table) => table switch
     {
-        "properties" => Model<AppCatalogDbContext, Property>(services),
-        "promotions" => Model<AppPromotionsDbContext, Promotion>(services),
-        "guest_reviews" => Model<AppReviewsDbContext, GuestReview>(services),
-        "stay_reviews" => Model<AppReviewsDbContext, StayReview>(services),
-        "hosts" => Model<AppHostsDbContext, Host>(services),
+        "properties" => ConstraintViolations.PrimaryKeyNameOf(services.GetRequiredService<CatalogDb>().Properties),
+        "promotions" => ConstraintViolations.PrimaryKeyNameOf(services.GetRequiredService<PromotionsDb>().Promotions),
+        "guest_reviews" => ConstraintViolations.PrimaryKeyNameOf(services.GetRequiredService<ReviewsDb>().GuestReviews),
+        "stay_reviews" => ConstraintViolations.PrimaryKeyNameOf(services.GetRequiredService<ReviewsDb>().StayReviews),
+        "hosts" => ConstraintViolations.PrimaryKeyNameOf(services.GetRequiredService<HostsDb>().Hosts),
         _ => throw new ArgumentOutOfRangeException(nameof(table))
     };
-
-    private static (DbContext, string) Model<TContext, TEntity>(IServiceProvider services) where TContext : DbContext
-    {
-        TContext context = services.GetRequiredService<TContext>();
-        return (context, ConstraintViolations.PrimaryKeyNameOf<TEntity>(context));
-    }
 
     [Theory]
     [MemberData(nameof(RecoveredTables))]
     public async Task ThePrimaryKey_CarriesTheModelsName_AndIsCheckedBeforeAnyOtherUniqueIndex(string table)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        (DbContext context, string modelName) = Resolve(scope.ServiceProvider, table);
+        string modelName = ModelName(scope.ServiceProvider, table);
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         Row row = Assert.Single(await context.Database.SqlQuery<Row>($"""
             SELECT con.conname AS name,

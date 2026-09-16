@@ -9,6 +9,8 @@ public class PromotionConfiguration : IEntityTypeConfiguration<Promotion>
 
     public void Configure(EntityTypeBuilder<Promotion> builder)
     {
+        builder.ToTable("promotions");
+
         builder.HasKey(p => p.Id);
 
         builder.Property(p => p.Code).HasMaxLength(30).IsRequired();

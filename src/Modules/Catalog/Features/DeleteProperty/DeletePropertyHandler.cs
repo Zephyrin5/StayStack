@@ -11,11 +11,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using SeedWork.Enums;
 using Unit = Catalog.Entities.Unit;
+using System.Data;
 namespace Catalog.Features.DeleteProperty;
 
 public class DeletePropertyHandler(
-    AppCatalogDbContext dbContext,
-    IAtomicScope atomicScope,
+    CatalogDb dbContext,
+    ITransactionRunner transactionRunner,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization,
     IUnitArchivalGuard unitArchivalGuard,
@@ -39,9 +40,8 @@ public class DeletePropertyHandler(
 
         // One transaction holds the property lock (excludes unit creation) and every unit lock
         // (excludes new holds) until the archive commits (docs/adr/0028).
-        await atomicScope.ExecuteAsync(
-            AtomicParticipants.Catalog,
-            AtomicParticipants.Catalog | AtomicParticipants.Bookings,
+        await transactionRunner.ExecuteAsync(
+                IsolationLevel.ReadCommitted,
             async token =>
             {
                 await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(

@@ -168,33 +168,12 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
                 options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
             });
 
-            services.RemoveAll<DbContextOptions<AppIdentityDbContext>>();
-            services.AddDbContext<AppIdentityDbContext>(options =>
-                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "identity", false));
 
-            services.RemoveAll<DbContextOptions<AppCatalogDbContext>>();
-            services.AddDbContext<AppCatalogDbContext>(options =>
-                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "catalog", false));
 
-            services.RemoveAll<DbContextOptions<AppHostsDbContext>>();
-            services.AddDbContext<AppHostsDbContext>(options =>
-                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "hosts", false));
 
-            services.RemoveAll<DbContextOptions<AppPromotionsDbContext>>();
-            services.AddDbContext<AppPromotionsDbContext>(options =>
-                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "promotions", false));
 
-            services.RemoveAll<DbContextOptions<AppBookingsDbContext>>();
-            services.AddDbContext<AppBookingsDbContext>(options =>
-                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "bookings", false));
 
-            services.RemoveAll<DbContextOptions<AppTransactionsDbContext>>();
-            services.AddDbContext<AppTransactionsDbContext>(options =>
-                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "transactions", false));
 
-            services.RemoveAll<DbContextOptions<AppReviewsDbContext>>();
-            services.AddDbContext<AppReviewsDbContext>(options =>
-                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "reviews", false));
         });
     }
 }

@@ -9,6 +9,8 @@ public class GuestReviewConfiguration : IEntityTypeConfiguration<GuestReview>
 
     public void Configure(EntityTypeBuilder<GuestReview> builder)
     {
+        builder.ToTable("guest_reviews");
+
         builder.HasKey(r => r.Id);
 
         builder.Property(r => r.GuestEmail).HasMaxLength(320).IsRequired();

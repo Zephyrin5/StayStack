@@ -28,6 +28,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Bookings.Contracts;
 using Bookings.Features.CreateBookingSession;
+using Persistence;
 namespace IntegrationTests.Features.Reviews;
 
 // Exercises the guest-facing stay-review slices end-to-end. A real
@@ -36,7 +37,7 @@ namespace IntegrationTests.Features.Reviews;
 // Catalog.Contracts.IUnitLookup, which only returns a real HostId when the
 // unit's PropertyId points at an actual Property row (see UnitLookup's own
 // LEFT JOIN comment). The Booking itself is seeded directly into
-// AppBookingsDbContext with a Confirmed status and an explicit CheckOut date
+// BookingsDb with a Confirmed status and an explicit CheckOut date
 // - going through the real Hold/Confirm HTTP flow can't produce a
 // checkout-already-passed booking, since HoldAvailabilityEndpoint requires a
 // future date range.
@@ -379,7 +380,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         }
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         context.Bookings.Add(booking);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
@@ -391,7 +392,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         string rawToken = SecureToken.Generate();
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         context.BookingManagementTokens.Add(new BookingManagementToken
         {
             Id = Guid.NewGuid(),
@@ -704,7 +705,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         Assert.Equal(0, propertyReviews.RatingSummary.Count);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppReviewsDbContext reviewsDb = scope.ServiceProvider.GetRequiredService<AppReviewsDbContext>();
+        ReviewsDb reviewsDb = scope.ServiceProvider.GetRequiredService<ReviewsDb>();
         StayReview archived = await reviewsDb.StayReviews.IgnoreQueryFilters()
             .SingleAsync(r => r.Id == created.StayReviewId, TestContext.Current.CancellationToken);
         Assert.Equal(EntityStatus.Archived, archived.Status);
@@ -723,7 +724,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         DateOnly today = CatalogSeeding.Today();
         Guid bookingId = await SeedBookingAsync(unitId, customerId, today.AddDays(-5), today.AddDays(-2));
 
-        CommitFault<AppReviewsDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppReviewsDbContext>(context =>
+        CommitFault<AppDbContext> lostAck = CommitFaults.FailAfterAutocommit<AppDbContext>(context =>
             context.ChangeTracker.Entries<StayReview>().Any(e => e.Entity.BookingId == bookingId));
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
 
@@ -751,7 +752,7 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(result);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        Assert.Equal(result.StayReviewId, Assert.Single(await scope.ServiceProvider.GetRequiredService<AppReviewsDbContext>()
+        Assert.Equal(result.StayReviewId, Assert.Single(await scope.ServiceProvider.GetRequiredService<ReviewsDb>()
             .StayReviews.IgnoreQueryFilters().AsNoTracking().Where(r => r.BookingId == bookingId)
             .ToListAsync(TestContext.Current.CancellationToken)).Id);
     }

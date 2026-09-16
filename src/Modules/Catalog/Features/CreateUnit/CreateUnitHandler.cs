@@ -16,7 +16,7 @@ using Unit = Catalog.Entities.Unit;
 namespace Catalog.Features.CreateUnit;
 
 public class CreateUnitHandler(
-    AppCatalogDbContext dbContext,
+    CatalogDb dbContext,
     ICurrentUserProvider currentUserProvider,
     IHostAuthorization hostAuthorization,
     IOptions<LocalizationSettings> localizationSettings) : IRequestHandler<CreateUnitRequest, CreateUnitResponse>

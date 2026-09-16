@@ -1,4 +1,4 @@
-// Proves Catalog writes survive a retry: two tests inject pre-commit (FailBeforeCommit), three
+﻿// Proves Catalog writes survive a retry: two tests inject pre-commit (FailBeforeCommit), three
 // post-commit (FailAfterCommit). The pre-commit pair fail without ChangeTracker.Clear(); the
 // pricing-rule create fails without its recovery lookup.
 using Catalog;
@@ -17,6 +17,7 @@ using SeedWork.ValueObjects;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Persistence;
 namespace IntegrationTests.Features.Catalog;
 
 // The Catalog half of CancelRetryTests, and it exists because the same defect
@@ -39,7 +40,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
     // green while proving nothing. A pricing rule matches by its unit, and a
     // unit by its property, too: a create's new id is the handler's, unknown to
     // the test.
-    private static bool Carries(AppCatalogDbContext context, Guid entityId) =>
+    private static bool Carries(AppDbContext context, Guid entityId) =>
         context.ChangeTracker.Entries().Any(entry => entry.Entity switch
         {
             Unit unit => unit.Id == entityId || unit.PropertyId == entityId,
@@ -52,11 +53,11 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
     // commit, nothing was written and the retry writes it. After it, the work is
     // durable and the caller never finds out - so a handler that assumes a clean
     // slate reports failure for work that succeeded.
-    private static CommitFault<AppCatalogDbContext> FailTheCommitCarrying(Guid entityId) =>
-        CommitFaults.FailBeforeCommit<AppCatalogDbContext>(context => Carries(context, entityId));
+    private static CommitFault<AppDbContext> FailTheCommitCarrying(Guid entityId) =>
+        CommitFaults.FailBeforeCommit<AppDbContext>(context => Carries(context, entityId));
 
-    private static CommitFault<AppCatalogDbContext> LoseTheAckOnTheCommitCarrying(Guid entityId) =>
-        CommitFaults.FailAfterCommit<AppCatalogDbContext>(context => Carries(context, entityId));
+    private static CommitFault<AppDbContext> LoseTheAckOnTheCommitCarrying(Guid entityId) =>
+        CommitFaults.FailAfterCommit<AppDbContext>(context => Carries(context, entityId));
 
     private readonly List<Property> _pendingProperties = [];
 
@@ -76,7 +77,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
     private async Task SeedAsync(Unit unit)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         context.AddRange(_pendingProperties);
         _pendingProperties.Clear();
         context.Add(unit);
@@ -105,7 +106,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
 
         string adminToken = await SignInAsAdministratorAsync();
 
-        CommitFault<AppCatalogDbContext> commitFailure = FailTheCommitCarrying(unit.Id);
+        CommitFault<AppDbContext> commitFailure = FailTheCommitCarrying(unit.Id);
         using WebApplicationFactory<Program> host = factory.WithCommitFault(commitFailure);
         using HttpClient client = host.CreateClient();
 
@@ -129,7 +130,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         // filter hides it; asking for the row directly is what distinguishes
         // "archived" from "deleted" and from "still active".
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppCatalogDbContext db = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = assertScope.ServiceProvider.GetRequiredService<CatalogDb>();
 
         Unit persisted = await db.Units.IgnoreQueryFilters().AsNoTracking()
             .SingleAsync(u => u.Id == unit.Id, TestContext.Current.CancellationToken);
@@ -171,7 +172,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
             .ReadFromJsonAsync<CreatePricingRuleResponse>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
         Assert.NotNull(rule);
 
-        CommitFault<AppCatalogDbContext> commitFailure = FailTheCommitCarrying(rule.PricingRuleId);
+        CommitFault<AppDbContext> commitFailure = FailTheCommitCarrying(rule.PricingRuleId);
         using WebApplicationFactory<Program> host = factory.WithCommitFault(commitFailure);
         using HttpClient client = host.CreateClient();
 
@@ -196,7 +197,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         Assert.True(commitFailure.HasFired, "The commit failure never reached the update.");
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppCatalogDbContext db = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = assertScope.ServiceProvider.GetRequiredService<CatalogDb>();
 
         PricingRule persisted = await db.PricingRules.AsNoTracking()
             .SingleAsync(r => r.Id == rule.PricingRuleId, TestContext.Current.CancellationToken);
@@ -220,7 +221,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
 
         string adminToken = await SignInAsAdministratorAsync();
 
-        CommitFault<AppCatalogDbContext> lostAck = LoseTheAckOnTheCommitCarrying(unit.Id);
+        CommitFault<AppDbContext> lostAck = LoseTheAckOnTheCommitCarrying(unit.Id);
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
         using HttpClient client = host.CreateClient();
 
@@ -249,7 +250,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(rule);
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppCatalogDbContext db = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = assertScope.ServiceProvider.GetRequiredService<CatalogDb>();
 
         // Exactly one, and the one the caller was handed.
         List<PricingRule> rules = await db.PricingRules.AsNoTracking()
@@ -269,14 +270,14 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
 
         using (IServiceScope seed = factory.Services.CreateScope())
         {
-            AppCatalogDbContext context = seed.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+            CatalogDb context = seed.ServiceProvider.GetRequiredService<CatalogDb>();
             context.Add(property);
             await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         string adminToken = await SignInAsAdministratorAsync();
 
-        CommitFault<AppCatalogDbContext> lostAck = LoseTheAckOnTheCommitCarrying(property.Id);
+        CommitFault<AppDbContext> lostAck = LoseTheAckOnTheCommitCarrying(property.Id);
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
         using HttpClient client = host.CreateClient();
 
@@ -302,7 +303,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         Assert.NotNull(created);
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppCatalogDbContext db = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = assertScope.ServiceProvider.GetRequiredService<CatalogDb>();
 
         // Exactly one, and the one the caller was handed.
         List<Unit> units = await db.Units.IgnoreQueryFilters().AsNoTracking()
@@ -327,7 +328,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
 
         string adminToken = await SignInAsAdministratorAsync();
 
-        CommitFault<AppCatalogDbContext> lostAck = LoseTheAckOnTheCommitCarrying(unit.Id);
+        CommitFault<AppDbContext> lostAck = LoseTheAckOnTheCommitCarrying(unit.Id);
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
         using HttpClient client = host.CreateClient();
 
@@ -340,7 +341,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the archive.");
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppCatalogDbContext db = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = assertScope.ServiceProvider.GetRequiredService<CatalogDb>();
 
         Unit persisted = await db.Units.IgnoreQueryFilters().AsNoTracking()
             .SingleAsync(u => u.Id == unit.Id, TestContext.Current.CancellationToken);
@@ -359,7 +360,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
 
         string adminToken = await SignInAsAdministratorAsync();
 
-        CommitFault<AppCatalogDbContext> lostAck = LoseTheAckOnTheCommitCarrying(propertyId);
+        CommitFault<AppDbContext> lostAck = LoseTheAckOnTheCommitCarrying(propertyId);
         using WebApplicationFactory<Program> host = factory.WithCommitFault(lostAck);
         using HttpClient client = host.CreateClient();
 
@@ -373,7 +374,7 @@ public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
         Assert.True(lostAck.HasFired, "The lost acknowledgement never reached the archive.");
 
         using IServiceScope assertScope = factory.Services.CreateScope();
-        AppCatalogDbContext db = assertScope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb db = assertScope.ServiceProvider.GetRequiredService<CatalogDb>();
 
         Property persisted = await db.Properties.IgnoreQueryFilters().AsNoTracking()
             .SingleAsync(p => p.Id == propertyId, TestContext.Current.CancellationToken);

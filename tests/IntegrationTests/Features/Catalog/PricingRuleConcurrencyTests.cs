@@ -146,7 +146,7 @@ public class PricingRuleConcurrencyTests(IntegrationTestWebApplicationFactory fa
         Assert.Equal(concurrentRequests - 1, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         int ruleCount = await context.PricingRules.CountAsync(
             r => r.UnitId == unitId && r.RuleType == PricingRuleType.LengthOfStayDiscount, TestContext.Current.CancellationToken);
         Assert.Equal(1, ruleCount);
@@ -186,7 +186,7 @@ public class PricingRuleConcurrencyTests(IntegrationTestWebApplicationFactory fa
         Assert.Equal(concurrentRequests - 1, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
 
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         int ruleCount = await context.PricingRules.CountAsync(
             r => r.UnitId == unitId && r.RuleType == PricingRuleType.DayOfWeekMultiplier, TestContext.Current.CancellationToken);
         Assert.Equal(1, ruleCount);
@@ -249,7 +249,7 @@ public class PricingRuleConcurrencyTests(IntegrationTestWebApplicationFactory fa
         // the actual invariant this transaction exists to protect, checked
         // independently of which side of the race happened to succeed.
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         List<PricingRule> rules = await context.PricingRules.AsNoTracking()
             .Where(r => r.UnitId == unitId && r.RuleType == PricingRuleType.DateRangeOverride)
             .ToListAsync(TestContext.Current.CancellationToken);

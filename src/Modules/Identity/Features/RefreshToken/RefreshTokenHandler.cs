@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 namespace Identity.Features.RefreshToken;
 
 public class RefreshTokenHandler(
-    AppIdentityDbContext dbContext,
+    IdentityDb dbContext,
     UserManager<ApplicationUser> userManager,
     IAuthTokenProvider authTokenProvider) : IRequestHandler<RefreshTokenRequest, RefreshTokenResponse>
 {
@@ -27,7 +27,7 @@ public class RefreshTokenHandler(
         // stranding the client. Wrapped in the execution strategy for the
         // same deadlock-retry reason as HoldAvailabilityHandler (docs/adr/0010).
         //
-        // UserManager resolves the same scoped AppIdentityDbContext injected
+        // UserManager resolves the same scoped IdentityDb injected
         // here (same DI scope), so its calls below join this same
         // transaction for free.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();

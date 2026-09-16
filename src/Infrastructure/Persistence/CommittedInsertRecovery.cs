@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using SeedWork.Abstractions;
 using System.Diagnostics.CodeAnalysis;
 namespace Persistence;
@@ -36,12 +37,12 @@ public static class CommittedInsertRecovery
     ///     </para>
     /// </summary>
     public static async Task<TEntity> FindOwnCommittedInsertAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors | DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields | DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.NonPublicProperties | DynamicallyAccessedMemberTypes.Interfaces)] TEntity>(
-        this DbContext context, Guid id, CancellationToken cancellationToken)
+        this DbSet<TEntity> set, Guid id, CancellationToken cancellationToken)
         where TEntity : Entity
     {
-        context.ChangeTracker.Clear();
+        set.GetService<ICurrentDbContext>().Context.ChangeTracker.Clear();
 
-        return await context.Set<TEntity>().IgnoreQueryFilters().AsNoTracking()
+        return await set.IgnoreQueryFilters().AsNoTracking()
             .SingleAsync(e => e.Id == id, cancellationToken);
     }
 }

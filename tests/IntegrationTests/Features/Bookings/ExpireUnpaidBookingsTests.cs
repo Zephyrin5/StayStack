@@ -19,6 +19,7 @@ using Promotions.Contracts;
 using Transactions;
 using Transactions.Contracts;
 using Transactions.Entities;
+using System.Data;
 namespace IntegrationTests.Features.Bookings;
 
 // Confirming a checkout takes a unit off the market: the hold moves to
@@ -46,7 +47,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
     private async Task SeedCatalogAsync(params object[] entities)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppCatalogDbContext context = scope.ServiceProvider.GetRequiredService<AppCatalogDbContext>();
+        CatalogDb context = scope.ServiceProvider.GetRequiredService<CatalogDb>();
         context.AddRange(_pendingProperties);
         _pendingProperties.Clear();
         context.AddRange(entities);
@@ -56,7 +57,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
     private async Task<Guid> SeedHoldAsync(Guid unitId, DateOnly checkIn, DateOnly checkOut, string status)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         UnitAvailabilityHold hold = new UnitAvailabilityHold
         {
@@ -78,7 +79,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
     private async Task<Guid> SeedBookingAsync(Guid unitId, Guid holdId, DateTimeOffset paymentDueAt)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         Booking booking = Booking.Create(
             Guid.CreateVersion7(), unitId, holdId, null,
@@ -96,8 +97,8 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
     private static ExpireUnpaidBookingsJob CreateJob(IServiceScope scope, TimeProvider timeProvider)
     {
         return new ExpireUnpaidBookingsJob(
-            scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>(),
-            scope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.IAtomicScope>(),
+            scope.ServiceProvider.GetRequiredService<BookingsDb>(),
+            scope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.ITransactionRunner>(),
             scope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
             scope.ServiceProvider.GetRequiredService<global::Promotions.Contracts.IPromotionRedemption>(),
             timeProvider,
@@ -107,9 +108,8 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
     // ConfirmPaymentAsync runs only inside an atomic scope; this is the smallest
     // one, with the payment side left out.
     private static Task<bool> ConfirmPaymentAsync(IServiceScope scope, Guid bookingId, CancellationToken cancellationToken) =>
-        scope.ServiceProvider.GetRequiredService<IAtomicScope>().ExecuteAsync(
-            AtomicParticipants.Bookings,
-            AtomicParticipants.Bookings,
+        scope.ServiceProvider.GetRequiredService<ITransactionRunner>().ExecuteAsync(
+            IsolationLevel.ReadCommitted,
             token => scope.ServiceProvider.GetRequiredService<IBookingPaymentConfirmation>().ConfirmPaymentAsync(bookingId, token),
             cancellationToken);
 
@@ -122,13 +122,13 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
 
     // The same DbContext instance HoldConfirmation resolved from this scope -
     // an advisory transaction is only ambient to the context that opened it.
-    private static AppBookingsDbContext ContextIn(IServiceScope scope) =>
-        scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+    private static BookingsDb ContextIn(IServiceScope scope) =>
+        scope.ServiceProvider.GetRequiredService<BookingsDb>();
 
     private async Task<string> GetHoldStatusAsync(Guid holdId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         UnitAvailabilityHold hold = await context.UnitAvailabilityHolds.AsNoTracking()
             .SingleAsync(h => h.Id == holdId);
         return hold.Status;
@@ -137,7 +137,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
     private async Task<BookingStatus> GetBookingStatusAsync(Guid bookingId)
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        AppBookingsDbContext context = scope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb context = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         Booking booking = await context.Bookings.AsNoTracking().SingleAsync(b => b.Id == bookingId);
         return booking.BookingStatus;
     }
@@ -293,7 +293,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         Guid bookingId = await SeedBookingAsync(unit.Id, holdId, DateTimeOffset.UtcNow.AddMinutes(-1));
 
         using IServiceScope expiryScope = factory.Services.CreateScope();
-        AppBookingsDbContext expiryContext = expiryScope.ServiceProvider.GetRequiredService<AppBookingsDbContext>();
+        BookingsDb expiryContext = expiryScope.ServiceProvider.GetRequiredService<BookingsDb>();
 
         await using IDbContextTransaction expiryTransaction =
             await expiryContext.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
