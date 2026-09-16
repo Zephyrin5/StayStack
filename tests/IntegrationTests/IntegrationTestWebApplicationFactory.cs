@@ -10,6 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Persistence;
+using Persistence.Interceptors;
 using Promotions;
 using Reviews;
 using Testcontainers.PostgreSql;
@@ -160,6 +161,13 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
             // hand-rolled version once missed the snake_case convention
             // the hand-written Dapper SQL and Postgres exclusion
             // constraints depend on.
+            services.RemoveAll<DbContextOptions<AppDbContext>>();
+            services.AddDbContext<AppDbContext>((serviceProvider, options) =>
+            {
+                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "app", false, migrationsAssembly: "Database");
+                options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
+            });
+
             services.RemoveAll<DbContextOptions<AppIdentityDbContext>>();
             services.AddDbContext<AppIdentityDbContext>(options =>
                 options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "identity", false));

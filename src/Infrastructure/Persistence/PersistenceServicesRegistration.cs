@@ -1,6 +1,8 @@
 using Dapper;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Persistence.DapperTypeHandlers;
+using Persistence.Interceptors;
 namespace Persistence;
 
 public static class PersistenceServicesRegistration
@@ -15,6 +17,24 @@ public static class PersistenceServicesRegistration
         SqlMapper.AddTypeHandler(new NpgsqlRangeTypeHandler<DateOnly>());
         SqlMapper.AddTypeHandler(new DateOnlyTypeHandler());
         SqlMapper.AddTypeHandler(new CurrencyTypeHandler());
+        return services;
+    }
+
+    /// <summary>
+    ///     The one <see cref="AppDbContext"/>. Its model comes from the <see cref="IModuleModel"/>
+    ///     registrations each module adds, so this knows no module.
+    /// </summary>
+    public static IServiceCollection AddAppDbContext(
+        this IServiceCollection services, string connectionString, bool isDevelopment)
+    {
+        services.AddScoped<AuditableEntitySaveChangesInterceptor>();
+
+        services.AddDbContext<AppDbContext>((serviceProvider, options) =>
+        {
+            options.ConfigureStayStackDefaults(connectionString, "app", isDevelopment, migrationsAssembly: "Database");
+            options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
+        });
+
         return services;
     }
 }

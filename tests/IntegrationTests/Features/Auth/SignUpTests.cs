@@ -1,5 +1,6 @@
 using Bogus;
 using Identity;
+using Persistence;
 using Identity.Entities;
 using Identity.Features.Common;
 using Identity.Features.RefreshToken;

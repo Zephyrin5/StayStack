@@ -43,6 +43,8 @@ public static class BookingsServicesRegistration
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
         services.AddAtomicParticipant<AppBookingsDbContext>(AtomicParticipants.Bookings);
+        services.AddSingleton<IModuleModel, BookingsModel>();
+        services.AddScoped<BookingsDb>();
 
         services.AddScoped<IBookingLookup, BookingLookup>();
         services.AddScoped<IBookingPaymentConfirmation, BookingPaymentConfirmation>();

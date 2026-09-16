@@ -8,6 +8,7 @@ using Identity.Features.Common;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -57,6 +58,8 @@ public static class IdentityServicesRegistration
                 environment is not null && environment.IsDevelopment());
         });
         services.AddAtomicParticipant<AppIdentityDbContext>(AtomicParticipants.Identity);
+        services.AddSingleton<IModuleModel, IdentityModel>();
+        services.AddScoped<IdentityDb>();
 
         services
             .AddIdentityCore<ApplicationUser>(options =>
@@ -73,9 +76,13 @@ public static class IdentityServicesRegistration
                 options.Lockout.AllowedForNewUsers = true;
             })
             .AddRoles<IdentityRole<Guid>>()
-            .AddEntityFrameworkStores<AppIdentityDbContext>()
             .AddDefaultTokenProviders()
             .AddSignInManager();
+
+        // Explicit rather than AddEntityFrameworkStores, which builds these with MakeGenericType
+        // (docs/adr/0001). The context moves to AppDbContext with the rest of the module in 1.3.
+        services.AddScoped<IUserStore<ApplicationUser>, UserStore<ApplicationUser, IdentityRole<Guid>, AppIdentityDbContext, Guid>>();
+        services.AddScoped<IRoleStore<IdentityRole<Guid>>, RoleStore<IdentityRole<Guid>, AppIdentityDbContext, Guid>>();
 
 
         services

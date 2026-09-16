@@ -39,6 +39,8 @@ public static class HostsServicesRegistration
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
         services.AddAtomicParticipant<AppHostsDbContext>(AtomicParticipants.Hosts);
+        services.AddSingleton<IModuleModel, HostsModel>();
+        services.AddScoped<HostsDb>();
 
         services.AddScoped<IHostLookup, HostLookup>();
         services.AddScoped<IHostRegistrar, HostRegistrar>();

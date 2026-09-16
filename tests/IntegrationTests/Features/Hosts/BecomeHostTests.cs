@@ -5,6 +5,7 @@ using Bogus;
 using Hosts;
 using Hosts.Contracts;
 using Identity;
+using Persistence;
 using Identity.Entities;
 using Identity.Features.BecomeHost;
 using Identity.Features.RefreshToken;

@@ -39,6 +39,8 @@ public static class PromotionsServicesRegistration
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
         services.AddAtomicParticipant<AppPromotionsDbContext>(AtomicParticipants.Promotions);
+        services.AddSingleton<IModuleModel, PromotionsModel>();
+        services.AddScoped<PromotionsDb>();
 
         services.AddScoped<IPromotionRedemption, PromotionRedemption>();
 

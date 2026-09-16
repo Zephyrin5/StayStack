@@ -43,6 +43,10 @@ builder.Services.ConfigureIdentityServices(builder.Configuration, builder.Enviro
 // deny-list it logs every property not marked [Sensitive].
 //builder.Services.ConfigureObservabilityServices(builder.Configuration);
 builder.Services.ConfigurePersistenceServices();
+builder.Services.AddAppDbContext(
+    builder.Configuration.GetConnectionString("AppConnection")
+    ?? throw new InvalidOperationException("Connection string AppConnection not found."),
+    builder.Environment.IsDevelopment());
 builder.Services.ConfigureApiServices(builder.Configuration);
 builder.Services.ConfigureCatalogServices(builder.Configuration, builder.Environment);
 builder.Services.ConfigureHostsServices(builder.Configuration, builder.Environment);

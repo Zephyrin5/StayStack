@@ -38,6 +38,8 @@ public static class ReviewsServicesRegistration
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
         services.AddAtomicParticipant<AppReviewsDbContext>(AtomicParticipants.Reviews);
+        services.AddSingleton<IModuleModel, ReviewsModel>();
+        services.AddScoped<ReviewsDb>();
 
         return services;
     }

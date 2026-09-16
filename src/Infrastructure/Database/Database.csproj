@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.EntityFrameworkCore"/>
+        <!-- Direct, so dotnet ef's "does the startup project reference
+             Microsoft.EntityFrameworkCore.Design" check passes with this
+             project as the migrations project. -->
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Every module, because AppDbContext's model is the union of their IModuleModel
+             contributions. This is the one project allowed to reference them all. -->
+        <ProjectReference Include="..\Persistence\Persistence.csproj"/>
+        <ProjectReference Include="..\..\Modules\Identity\Identity.csproj"/>
+        <ProjectReference Include="..\..\Modules\Hosts\Hosts.csproj"/>
+        <ProjectReference Include="..\..\Modules\Catalog\Catalog.csproj"/>
+        <ProjectReference Include="..\..\Modules\Promotions\Promotions.csproj"/>
+        <ProjectReference Include="..\..\Modules\Bookings\Bookings.csproj"/>
+        <ProjectReference Include="..\..\Modules\Transactions\Transactions.csproj"/>
+        <ProjectReference Include="..\..\Modules\Reviews\Reviews.csproj"/>
+    </ItemGroup>
+
+</Project>

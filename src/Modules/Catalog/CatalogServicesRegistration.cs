@@ -39,6 +39,8 @@ public static class CatalogServicesRegistration
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
         services.AddAtomicParticipant<AppCatalogDbContext>(AtomicParticipants.Catalog);
+        services.AddSingleton<IModuleModel, CatalogModel>();
+        services.AddScoped<CatalogDb>();
 
         services.AddScoped<IUnitLookup, UnitLookup>();
 

@@ -39,6 +39,8 @@ public static class TransactionsServicesRegistration
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
         });
         services.AddAtomicParticipant<AppTransactionsDbContext>(AtomicParticipants.Transactions);
+        services.AddSingleton<IModuleModel, TransactionsModel>();
+        services.AddScoped<TransactionsDb>();
 
         services.AddScoped<ITransactionReversal, TransactionReversal>();
 
