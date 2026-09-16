@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 namespace UnitTests.Persistence;
 
 /// <summary>
@@ -69,6 +69,15 @@ internal static partial class SourceTree
     public static string WithoutCommentsOrStrings(string code) =>
         CommentOrStringPattern().Replace(code, match =>
             match.Value.StartsWith('/') ? string.Empty : match.Value.StartsWith('\'') ? "' '" : "\"\"");
+
+    /// <summary>
+    ///     Every string literal in the file, comments excluded - for assertions about SQL text, where a
+    ///     type or namespace spelled the same way outside a string must not count as a match.
+    /// </summary>
+    public static IEnumerable<string> StringLiterals(string code) =>
+        CommentOrStringPattern().Matches(code)
+            .Select(match => match.Value)
+            .Where(value => !value.StartsWith('/'));
 
     /// <summary>
     ///     The balanced <c>{...}</c> or <c>(...)</c> region opening at
