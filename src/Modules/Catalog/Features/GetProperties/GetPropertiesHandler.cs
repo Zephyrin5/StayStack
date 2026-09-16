@@ -1,4 +1,4 @@
-using BuildingBlocks.Pagination;
+﻿using BuildingBlocks.Pagination;
 using Catalog.Contracts;
 using Catalog.Entities;
 using Mediator;
@@ -81,14 +81,11 @@ public class GetPropertiesHandler(
 
         if (request.CheckIn is not null && request.CheckOut is not null)
         {
-            // Holds are Bookings' table (docs/adr/0004), so one round trip asks
-            // which units, platform-wide, have a blocking hold or booking for the
-            // dates. That set grows with the platform, not with the request:
-            // MaxStayNights bounds the window's width, not how many units are
-            // booked inside it. See IUnitAvailabilityLookup.GetBlockedUnitIdsAsync
-            // and docs/adr/0026.
-            IReadOnlySet<Guid> blockedUnitIds = await availabilityLookup.GetBlockedUnitIdsAsync(
-                request.CheckIn.Value, request.CheckOut.Value, timeProvider.GetUtcNow(), cancellationToken);
+            // Holds are Bookings' table (docs/adr/0004), so the blocked units arrive as a query rather
+            // than a set and this search composes it: one statement, filtering against the candidate
+            // page instead of pulling every occupied unit on the platform back to filter twenty rows.
+            IQueryable<Guid> blockedUnitIds = availabilityLookup.BlockedUnitIds(
+                request.CheckIn.Value, request.CheckOut.Value, timeProvider.GetUtcNow());
 
             // One composable Any() over Units, not two separate
             // property-level Where clauses - capacity and availability must

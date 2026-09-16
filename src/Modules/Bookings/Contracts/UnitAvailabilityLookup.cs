@@ -1,4 +1,4 @@
-using Bookings.Entities;
+﻿using Bookings.Entities;
 using Catalog.Contracts;
 using Microsoft.EntityFrameworkCore;
 using NpgsqlTypes;
@@ -36,20 +36,17 @@ internal class UnitAvailabilityLookup(BookingsDb dbContext) : IUnitAvailabilityL
             .ToList();
     }
 
-    public async Task<IReadOnlySet<Guid>> GetBlockedUnitIdsAsync(
-        DateOnly checkIn, DateOnly checkOut, DateTimeOffset now, CancellationToken cancellationToken)
+    public IQueryable<Guid> BlockedUnitIds(DateOnly checkIn, DateOnly checkOut, DateTimeOffset now)
     {
         NpgsqlRange<DateOnly> requestedRange = new NpgsqlRange<DateOnly>(checkIn, true, checkOut, false);
 
-        List<Guid> blockedUnitIds = await dbContext.UnitAvailabilityHolds.AsNoTracking()
+        // Returned unexecuted so the caller's query carries it (see the contract). No Distinct: the
+        // caller composes it under a Contains/Any, where duplicates cost nothing.
+        return dbContext.UnitAvailabilityHolds.AsNoTracking()
             .Where(h => h.StayRange.Overlaps(requestedRange) &&
                         (h.Status == HoldStatuses.Booked || h.Status == HoldStatuses.PendingPayment ||
                          (h.Status == HoldStatuses.Held && (h.HoldExpiresAt == null || h.HoldExpiresAt > now))))
-            .Select(h => h.UnitId)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-
-        return blockedUnitIds.ToHashSet();
+            .Select(h => h.UnitId);
     }
 
     public Task<bool> HasActiveHoldForUnitAsync(Guid unitId, DateTimeOffset now, CancellationToken cancellationToken)

@@ -48,5 +48,5 @@ Tables follow the boundary too. A raw SQL string naming another module's table i
 - A new cross-module capability costs an interface, an `internal` implementation and a registration. That is the price of the boundary being real.
 - A new module relationship is checked against the direction order before a `ProjectReference` is added: if the target already references the module being edited, directly or transitively, declare the interface on the upstream side instead.
 - A new module that is referenced by another needs its own `Contracts` project and the `Compile Remove` guard.
-- Cross-module reads cost a round trip where a join would not. Stay search materialises a platform-wide blocked set across that boundary; see [ADR-0026](0026-stay-search-materialises-the-platform-wide-blocked-set.md).
+- Cross-module reads cost a round trip where a join would not, unless the contract hands back an `IQueryable` the caller composes - which stay search does for blocked units, on the one context ([ADR-0003](0003-cross-module-writes-commit-in-one-transaction.md)).
 - All modules share one physical Postgres schema, so moving an entity between modules is an EF model change with an empty or idempotent migration, not a data move.

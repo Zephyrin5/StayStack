@@ -1,4 +1,4 @@
-namespace Catalog.Contracts;
+﻿namespace Catalog.Contracts;
 
 /// <summary>
 ///     Lets Catalog ask Availability which units/dates currently have a
@@ -23,32 +23,17 @@ public interface IUnitAvailabilityLookup
         Guid unitId, DateOnly from, DateOnly to, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>
-    ///     Bulk counterpart to GetActiveHoldRangesAsync - every unit id,
-    ///     platform-wide, with an active hold/booking overlapping
-    ///     [<paramref name="checkIn"/>, <paramref name="checkOut"/>). Lets
-    ///     GetPropertiesHandler filter search results down to units genuinely
-    ///     free for the requested stay, without joining against Bookings'
-    ///     table directly and without first materializing a candidate unit id
-    ///     list on Catalog's side to narrow it.
+    ///     Bulk counterpart to GetActiveHoldRangesAsync - the unit ids with an active hold or booking
+    ///     overlapping [<paramref name="checkIn"/>, <paramref name="checkOut"/>), as a query rather than
+    ///     a result.
     ///     <para>
-    ///         <b>This is a known scale boundary, not a bounded read.</b> The
-    ///         result is as large as the number of distinct units booked or
-    ///         held across the requested window, platform-wide - which grows
-    ///         with the platform, not with the request.
-    ///         <see cref="StaySearchPolicyOptions.MaxStayNights"/> bounds the
-    ///         window's time, not the set's cardinality: a one-night search on a
-    ///         large platform can return millions of unit ids, all materialized
-    ///         into a HashSet to filter one page.
-    ///     </para>
-    ///     <para>
-    ///         The fix is a denormalized availability read model, filtering in
-    ///         the database against the candidate page. Not started - see
-    ///         docs/adr/0026 for what triggers it and which cheaper-looking fixes
-    ///         are the wrong axis.
+    ///         Unexecuted deliberately: GetPropertiesHandler composes it into its own search, so the
+    ///         filter runs in the database against that page's candidate units. Executed here it would
+    ///         return every occupied unit on the platform for the window, to filter a page of twenty.
+    ///         Composition requires both sides to be on one context, which they are (docs/adr/0003).
     ///     </para>
     /// </summary>
-    Task<IReadOnlySet<Guid>> GetBlockedUnitIdsAsync(
-        DateOnly checkIn, DateOnly checkOut, DateTimeOffset now, CancellationToken cancellationToken);
+    IQueryable<Guid> BlockedUnitIds(DateOnly checkIn, DateOnly checkOut, DateTimeOffset now);
 
     /// <summary>
     ///     Is a checkout in progress against this unit right now - what

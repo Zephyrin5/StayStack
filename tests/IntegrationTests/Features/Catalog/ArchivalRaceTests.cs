@@ -1,4 +1,4 @@
-// Proves a hold taken while archival is deciding is not lost, by pausing inside the archive's
+﻿// Proves a hold taken while archival is deciding is not lost, by pausing inside the archive's
 // transaction after both checks or at whichever runs first. The header's claim that all three
 // fail with the locks removed has not been re-verified.
 using Bookings;
@@ -89,9 +89,8 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
             Guid unitId, DateOnly from, DateOnly to, DateTimeOffset now, CancellationToken cancellationToken) =>
             inner.GetActiveHoldRangesAsync(unitId, from, to, now, cancellationToken);
 
-        public Task<IReadOnlySet<Guid>> GetBlockedUnitIdsAsync(
-            DateOnly checkIn, DateOnly checkOut, DateTimeOffset now, CancellationToken cancellationToken) =>
-            inner.GetBlockedUnitIdsAsync(checkIn, checkOut, now, cancellationToken);
+        public IQueryable<Guid> BlockedUnitIds(DateOnly checkIn, DateOnly checkOut, DateTimeOffset now) =>
+            inner.BlockedUnitIds(checkIn, checkOut, now);
     }
 
     // Fires once, on whichever of UnitArchival's two checks runs first.
@@ -134,9 +133,8 @@ public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
             Guid unitId, DateOnly from, DateOnly to, DateTimeOffset now, CancellationToken cancellationToken) =>
             inner.GetActiveHoldRangesAsync(unitId, from, to, now, cancellationToken);
 
-        public Task<IReadOnlySet<Guid>> GetBlockedUnitIdsAsync(
-            DateOnly checkIn, DateOnly checkOut, DateTimeOffset now, CancellationToken cancellationToken) =>
-            inner.GetBlockedUnitIdsAsync(checkIn, checkOut, now, cancellationToken);
+        public IQueryable<Guid> BlockedUnitIds(DateOnly checkIn, DateOnly checkOut, DateTimeOffset now) =>
+            inner.BlockedUnitIds(checkIn, checkOut, now);
     }
 
     private sealed class PauseOnBookingCheck(IUnitArchivalGuard inner, FirstCheckGate gate) : IUnitArchivalGuard

@@ -1,4 +1,4 @@
-using Bookings;
+﻿using Bookings;
 using Bookings.Entities;
 using Bogus;
 using BuildingBlocks.Pagination;
@@ -11,14 +11,20 @@ using Catalog.Features.CreateUnit;
 using Catalog.Features.GetProperties;
 using Catalog.Features.GetPropertyById;
 using Identity.Entities;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Identity.Features.BecomeHost;
 using Identity.Features.SignIn;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NpgsqlTypes;
+using Persistence;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
+using System.Data.Common;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -581,5 +587,70 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    // Every statement the search issues, so the assertion can be about how many there are.
+    private sealed class StatementRecorder : DbCommandInterceptor
+    {
+        private readonly List<string> _statements = [];
+
+        public IReadOnlyList<string> Naming(string table)
+        {
+            lock (_statements)
+            {
+                return _statements.Where(text => text.Contains(table, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData,
+            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            lock (_statements)
+            {
+                _statements.Add(command.CommandText);
+            }
+
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task GetProperties_WithDates_ExcludesHeldUnits_InTheSearchStatementItself()
+    {
+        // The availability filter is Bookings' data reached through a Catalog contract, and it used to
+        // arrive as a materialised set of every occupied unit on the platform. It is now an IQueryable
+        // this search composes, so "one statement" is the property that keeps it that way: a second
+        // statement naming unit_availability_holds means the set was pulled back into memory again.
+        (string hostAccessToken, _) = await SeedHostUserAsync();
+        string uniqueCity = $"City-{Guid.NewGuid():N}";
+        Guid propertyId = await CreatePropertyAsync(hostAccessToken, uniqueCity);
+        Guid unitId = await CreateUnitAsync(hostAccessToken, propertyId);
+
+        DateOnly checkIn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(10));
+        DateOnly checkOut = checkIn.AddDays(3);
+        await SeedHoldAsync(unitId, checkIn, checkOut);
+
+        // A host of its own: the interceptor has to be present when the context is configured, and its
+        // empty cache means this search reaches the database rather than a 30s-old entry.
+        StatementRecorder recorder = new StatementRecorder();
+        await using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+                services.ConfigureDbContext<AppDbContext>(options => options.AddInterceptors(recorder))));
+
+        HttpResponseMessage response = await host.CreateClient().GetAsync(
+            $"/api/catalog/properties?City={Uri.EscapeDataString(uniqueCity)}&CheckIn={checkIn:yyyy-MM-dd}&CheckOut={checkOut:yyyy-MM-dd}",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        PagedSliceResponse<PropertySummary>? result = await response.Content
+            .ReadFromJsonAsync<PagedSliceResponse<PropertySummary>>(TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.DoesNotContain(result.Items, p => p.Id == propertyId);
+
+        // Both tables, once: the holds are a subquery of the search rather than a read of their own.
+        string statement = Assert.Single(recorder.Naming("unit_availability_holds"));
+        Assert.Contains("properties", statement, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(recorder.Naming("properties"));
     }
 }

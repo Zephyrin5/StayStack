@@ -1,4 +1,4 @@
-# Architecture Decision Records
+﻿# Architecture Decision Records
 
 This folder records the *why* behind decisions that aren't obvious from the code alone - the kind of thing a comment can point to instead of re-explaining every time it's relevant, and the kind of thing a future maintainer (or a reviewer who wasn't around when the decision was made) would otherwise have to reconstruct from commit history.
 
@@ -50,7 +50,6 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 | [0023](0023-booking-management-sessions.md) | The management token is exchanged once, not carried everywhere | Accepted |
 | [0024](0024-every-memory-cache-entry-declares-its-size.md) | Every IMemoryCache entry declares its size, in bytes | Accepted |
 | [0025](0025-retried-work-is-built-inside-the-retry.md) | The retry protocol | Accepted |
-| [0026](0026-stay-search-materialises-the-platform-wide-blocked-set.md) | Stay search materialises a platform-wide blocked set, and that is a known ceiling | Accepted (records a boundary) |
 | [0027](0027-refunds-are-decided-once-from-a-durable-obligation.md) | Refunds are decided once, from a durable obligation | Accepted |
 | [0028](0028-advisory-locks-and-lock-order.md) | Advisory locks and lock order | Accepted |
 | [0029](0029-atomic-scopes-for-cross-module-work.md) | Atomic scopes for cross-module work | Accepted |
