@@ -98,9 +98,8 @@ public record PaymentStateSnapshot
     public bool AwaitingRefund { get; init; }
 
     /// <summary>
-    ///     When the payment succeeded, null on rows predating that column. The
-    ///     input a caller needs to ask RefundDecision what an outstanding refund
-    ///     will come to, rather than recomputing it by another rule.
+    ///     When the payment succeeded, and the input RefundDecision needs. Null only when nothing
+    ///     succeeded, which is also when this snapshot is null.
     /// </summary>
     public DateTimeOffset? SucceededAt { get; init; }
 }

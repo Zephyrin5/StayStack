@@ -150,7 +150,9 @@ public class CancelBookingHandler(
             ? payment.Amount
             : RefundDecision.For(
                 payment.Amount,
-                payment.SucceededAt,
+                // AwaitingRefund means the payment succeeded, so this is set.
+                payment.SucceededAt ?? throw new InvalidOperationException(
+                    $"Booking {booking.Id} has a payment awaiting a refund with no SucceededAt."),
                 obligation.CancelledAt,
                 Money.Of(obligation.PolicyRefundAmount, obligation.Currency)).Amount;
 

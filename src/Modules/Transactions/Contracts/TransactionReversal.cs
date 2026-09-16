@@ -103,7 +103,12 @@ internal class TransactionReversal(
 
         // Step 4 - how much, from two committed facts. RefundDecision owns the rule, and
         // CancelBookingHandler reports a pending refund from the same call.
-        RefundDecision decision = RefundDecision.For(transaction.Amount, transaction.SucceededAt, obligation);
+        // Step 1 accepted only statuses reached through Succeeded, so SucceededAt is set.
+        RefundDecision decision = RefundDecision.For(
+            transaction.Amount,
+            transaction.SucceededAt ?? throw new InvalidOperationException(
+                $"Transaction {transaction.Id} is {transaction.TransactionStatus} with no SucceededAt."),
+            obligation);
 
         Money amount = decision.Amount;
 
