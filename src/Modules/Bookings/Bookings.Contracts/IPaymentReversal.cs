@@ -1,11 +1,15 @@
 using SeedWork.ValueObjects;
-namespace Transactions.Contracts;
+namespace Bookings.Contracts;
 
 /// <summary>
-///     Lets Bookings resolve the payment behind a cancelled booking without
-///     referencing Transactions' entities or TransactionsDb.
+///     The payment behind a booking, and the refund it is owed.
+///     <para>
+///         Declared by the module that needs it rather than the one that implements it: Transactions
+///         references Bookings.Contracts, so the reverse reference would make the two modules mutually
+///         dependent (docs/adr/0004). Transactions implements this.
+///     </para>
 /// </summary>
-public interface ITransactionReversal
+public interface IPaymentReversal
 {
     /// <summary>
     ///     Everything a caller needs to describe this booking's payment, read
@@ -29,9 +33,8 @@ public interface ITransactionReversal
     ///     </para>
     ///     <para>
     ///         Safe to call repeatedly: it is a no-op unless there is a Succeeded
-    ///         transaction and an unresolved obligation. Runs only inside the
-    ///         caller's atomic scope, with Transactions and Bookings
-    ///         participating; throws InvalidOperationException outside one.
+    ///         transaction and an unresolved obligation. Runs only inside the caller's transaction;
+    ///         throws InvalidOperationException outside one.
     ///     </para>
     ///     <para>
     ///         Returns the amount recorded, or null when there was nothing to
@@ -39,39 +42,6 @@ public interface ITransactionReversal
     ///     </para>
     /// </summary>
     Task<decimal?> ResolveRefundAsync(Guid bookingId, CancellationToken cancellationToken);
-
-    /// <summary>
-    ///     The same decision, for a caller that already knows this payment
-    ///     bought nothing.
-    ///     <para>
-    ///         ResolveRefundAsync treats "no obligation" as "never cancelled,
-    ///         nothing to settle", which is right when the trigger is a
-    ///         cancellation. The payment-confirmation paths arrive from a
-    ///         different fact: the payment could not become a stay. A booking
-    ///         that is gone, or still Pending with its hold released, has no
-    ///         obligation and never will, and is owed the whole amount. Routed
-    ///         through ResolveRefundAsync, those payments would never be refunded.
-    ///     </para>
-    ///     <para>
-    ///         When an obligation exists, this defers to it: RefundDecision
-    ///         chooses between the policy figure and the full amount.
-    ///     </para>
-    /// </summary>
-    Task<decimal?> RefundUnusablePaymentAsync(Guid bookingId, CancellationToken cancellationToken);
-
-    /// <summary>
-    ///     The same as <see cref="RefundUnusablePaymentAsync"/>, for a caller
-    ///     that knows <em>which</em> payment attempt it is talking about.
-    ///     <para>
-    ///         A booking may have several transactions. The active-transaction
-    ///         index constrains Pending and Succeeded to one at a time and says
-    ///         nothing about the rest, so a RefundPending attempt and a
-    ///         Succeeded one can coexist; scoping to the attempt keeps a path that
-    ///         already knows it from choosing between them.
-    ///     </para>
-    /// </summary>
-    Task<decimal?> RefundUnusablePaymentByTransactionAsync(
-        Guid transactionId, CancellationToken cancellationToken);
 }
 
 /// <summary>

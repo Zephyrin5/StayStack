@@ -1,4 +1,4 @@
-// Three tests proving different things - see the header. With BookingPaymentLock removed, the
+﻿// Three tests proving different things - see the header. With BookingPaymentLock removed, the
 // pre-lock cancellation test still passes (it proves the re-read); the in-lock cancellation and
 // expiry tests fail (they prove the lock).
 using Bookings;
@@ -21,7 +21,6 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Transactions;
-using Transactions.Contracts;
 using Transactions.Features.InitiateTransaction;
 namespace IntegrationTests.Features.Transactions;
 

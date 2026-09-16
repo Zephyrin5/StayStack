@@ -1,4 +1,4 @@
-// Proves the refund amount follows the order of payment and cancellation through the real
+﻿// Proves the refund amount follows the order of payment and cancellation through the real
 // handlers, that the sweep refunds an obligation with a payment behind it, that a backlog of unpaid
 // obligations does not starve it, and that a recorded refund is not overwritten. The two
 // concurrency tests pin each interleaving with a barrier on the booking's row lock and assert the
@@ -22,7 +22,6 @@ using NpgsqlTypes;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using Transactions;
-using Transactions.Contracts;
 using Transactions.Entities;
 using Transactions.Features.MarkTransactionSucceeded;
 namespace IntegrationTests.Features.Transactions;

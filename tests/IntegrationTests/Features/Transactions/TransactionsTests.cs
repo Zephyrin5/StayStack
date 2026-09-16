@@ -1,4 +1,4 @@
-using Bogus;
+﻿using Bogus;
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.ConfirmBooking;
@@ -17,12 +17,12 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Transactions;
-using Transactions.Contracts;
 using Transactions.Entities;
 using Transactions.Features.GetTransactions;
 using Transactions.Features.InitiateTransaction;
 using Transactions.Features.MarkTransactionFailed;
 using Bookings.Features.CreateBookingSession;
+using Bookings.Contracts;
 namespace IntegrationTests.Features.Transactions;
 
 // Exercises the full hold -> confirm -> initiate transaction -> succeed

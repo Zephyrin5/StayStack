@@ -1,4 +1,4 @@
-# 0004 - Module boundaries via per-module Contracts projects
+﻿# 0004 - Module boundaries via per-module Contracts projects
 
 **Status:** Accepted
 
@@ -14,7 +14,7 @@ A related question is what belongs in the shared kernel (`SeedWork`, `BuildingBl
 
 **Cross-module access goes through a `<Module>.Contracts` project, never the module's main project.**
 
-- A module referenced by another exposes a sibling `<Module>.Contracts` project, nested in the module's folder but built as a separate assembly: `Catalog.Contracts`, `Bookings.Contracts`, `Hosts.Contracts`, `Promotions.Contracts`, `Transactions.Contracts`.
+- A module referenced by another exposes a sibling `<Module>.Contracts` project, nested in the module's folder but built as a separate assembly: `Catalog.Contracts`, `Bookings.Contracts`, `Hosts.Contracts`, `Promotions.Contracts`. Transactions is last in the order and exposes none: what Bookings needs from it is declared in `Bookings.Contracts`.
 - `Contracts` projects hold only what cross-module calls need: interfaces (`IUnitLookup`, `IUnitAvailabilityLookup`, `IUnitArchivalGuard`, `IBookingLookup`, `IBookingPaymentConfirmation`, `IBookingSessions`, `IPromotionRedemption`, `ITransactionReversal`, `IHostRegistrar`, `IHostAuthorization`, `IHostLookup`), their DTOs, and the options and value types both sides must agree on (`StaySearchPolicyOptions`, `BookingLifecyclePolicyOptions`, `RefundDecision`).
 - The implementation is an `internal` class in the implementing module, registered against the interface in that module's `ServicesRegistration`. Other modules resolve it through DI; the concrete type is invisible outside its assembly.
 - A domain exception thrown or relied on by more than one module lives in the owning module's `Contracts` project - `BookingNotPayableException` in `Bookings.Contracts`, because `Booking` and `InitiateTransactionHandler` both depend on it.
@@ -30,13 +30,11 @@ A `Contracts` reference prevents reaching into internals but says nothing about 
 
 `Identity` depends only on `Hosts.Contracts`; `Reviews` consumes others and exposes nothing. **A module may reference an earlier module's `Contracts`, never a later one's.**
 
-When an upstream module needs a fact a downstream module owns, the interface is declared upstream and implemented downstream. Catalog must refuse to archive a unit with a live booking or hold, which only Bookings knows, so `Catalog.Contracts` declares `IUnitArchivalGuard` and `IUnitAvailabilityLookup`, and Bookings implements both. The downstream module already references the upstream `Contracts`, so this costs no new edge.
+When an upstream module needs a fact a downstream module owns, the interface is declared upstream and implemented downstream. Catalog must refuse to archive a unit with a live booking or hold, which only Bookings knows, so `Catalog.Contracts` declares `IUnitArchivalGuard` and `IUnitAvailabilityLookup`, and Bookings implements both. Cancelling a booking must report and settle the payment behind it, which only Transactions knows, so `Bookings.Contracts` declares `IPaymentReversal` and Transactions implements it. The downstream module already references the upstream `Contracts`, so this costs no new edge.
 
 A shared value follows the same rule. `StaySearchPolicyOptions` is read by Catalog's search and Bookings' hold path, so it lives in `Catalog.Contracts`, the upstream side, rather than where it is enforced.
 
 Tables follow the boundary too. A raw SQL string naming another module's table is invisible to the compiler and is the same violation as a project reference: `GetPriceCalendarHandler` and `GetPropertiesHandler` ask `IUnitAvailabilityLookup` for blocked ranges instead of joining `unit_availability_holds`.
-
-**Known exception:** Bookings references `Transactions.Contracts` (`ITransactionReversal`) and Transactions references `Bookings.Contracts`. Refund resolution and payment confirmation run in both directions, and inverting one side is a larger change than the coupling costs today.
 
 ## Alternatives considered
 

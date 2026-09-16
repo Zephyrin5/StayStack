@@ -1,4 +1,4 @@
-using BuildingBlocks.Identity;
+﻿using BuildingBlocks.Identity;
 using FastEndpoints;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
@@ -9,7 +9,7 @@ namespace Api.Endpoints.Transactions;
 
 // Same Administrator stand-in reasoning as MarkTransactionSucceededEndpoint -
 // resolves the RefundPending state a cancelled booking's Succeeded
-// transaction enters (see CancelBookingHandler/ITransactionReversal).
+// transaction enters (see CancelBookingHandler/IPaymentReversal).
 public class MarkTransactionRefundedEndpoint(IMediator mediator)
     : Endpoint<MarkTransactionRefundedRequest, MarkTransactionRefundedResponse>
 {

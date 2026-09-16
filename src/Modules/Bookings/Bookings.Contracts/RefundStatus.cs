@@ -1,4 +1,4 @@
-namespace Transactions.Contracts;
+namespace Bookings.Contracts;
 
 /// <summary>
 ///     Where a booking's refund stands, as a caller outside Transactions may report it. A status,

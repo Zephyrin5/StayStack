@@ -1,4 +1,4 @@
-<Solution>
+﻿<Solution>
     <Folder Name="/src/" />
     <Folder Name="/src/Core/">
         <Project Path="src/Core/BuildingBlocks/BuildingBlocks.csproj" />
@@ -22,7 +22,6 @@
         <Project Path="src/Modules/Promotions/Promotions.csproj" />
         <Project Path="src/Modules/Transactions/Transactions.csproj" />
         <Project Path="src/Modules/Reviews/Reviews.csproj" />
-        <Project Path="src/Modules/Transactions/Transactions.Contracts/Transactions.Contracts.csproj" />
     </Folder>
     <Folder Name="/src/Web/">
         <Project Path="src/Web/Api/Api.csproj" />

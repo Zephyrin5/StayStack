@@ -1,6 +1,6 @@
-using Bookings.Entities;
+﻿using Bookings.Entities;
 using SeedWork.Enums;
-using Transactions.Contracts;
+using Bookings.Contracts;
 namespace Bookings.Features.CancelBooking;
 
 public record CancelBookingResponse

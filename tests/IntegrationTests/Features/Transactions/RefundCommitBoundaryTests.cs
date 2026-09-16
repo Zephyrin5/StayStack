@@ -1,4 +1,4 @@
-// Proves refund resolution finishes from seeded states it does not produce itself, and from a
+﻿// Proves refund resolution finishes from seeded states it does not produce itself, and from a
 // status flip between the resolver's read and write inside its atomic scope; TwoResolversRacing
 // fails 6/6 with the concurrency catch disabled. APaymentStateRead_DescribesOneMomentRatherThanTwo
 // reads a static row and cannot tell one read from two.
@@ -118,12 +118,11 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
         await ResolveInScopeAsync(scope, reversal => reversal.ResolveRefundAsync(bookingId, TestContext.Current.CancellationToken));
     }
 
-    // The resolver runs only inside an atomic scope, as ResolveOutstandingRefundsJob
-    // calls it.
-    private static Task<decimal?> ResolveInScopeAsync(IServiceScope scope, Func<ITransactionReversal, Task<decimal?>> resolve) =>
+    // The resolver runs only inside a transaction, as ResolveOutstandingRefundsJob calls it.
+    private static Task<decimal?> ResolveInScopeAsync(IServiceScope scope, Func<TransactionReversal, Task<decimal?>> resolve) =>
         scope.ServiceProvider.GetRequiredService<ITransactionRunner>().ExecuteAsync(
             IsolationLevel.ReadCommitted,
-            _ => resolve(scope.ServiceProvider.GetRequiredService<ITransactionReversal>()),
+            _ => resolve(scope.ServiceProvider.GetRequiredService<TransactionReversal>()),
             TestContext.Current.CancellationToken);
 
     private async Task<(Transaction Payment, RefundObligation Obligation)> ReadAsync(
@@ -387,7 +386,7 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
 
         using IServiceScope readScope = factory.Services.CreateScope();
 
-        PaymentStateSnapshot? state = await readScope.ServiceProvider.GetRequiredService<ITransactionReversal>()
+        PaymentStateSnapshot? state = await readScope.ServiceProvider.GetRequiredService<IPaymentReversal>()
             .GetPaymentStateAsync(bookingId, TestContext.Current.CancellationToken);
 
         Assert.NotNull(state);

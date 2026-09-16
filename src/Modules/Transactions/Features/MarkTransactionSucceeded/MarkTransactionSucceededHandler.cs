@@ -1,4 +1,4 @@
-using Bookings.Contracts;
+﻿using Bookings.Contracts;
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Persistence;
 using Mediator;
@@ -13,7 +13,7 @@ public class MarkTransactionSucceededHandler(
     TransactionsDb dbContext,
     ITransactionRunner transactionRunner,
     IBookingPaymentConfirmation bookingPaymentConfirmation,
-    ITransactionReversal transactionReversal,
+    TransactionReversal transactionReversal,
     TimeProvider timeProvider)
     : IRequestHandler<MarkTransactionSucceededRequest, MarkTransactionSucceededResponse>
 {

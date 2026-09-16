@@ -1,10 +1,10 @@
-using BuildingBlocks.Persistence;
+﻿using BuildingBlocks.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using TickerQ.Utilities.Base;
 using TickerQ.Utilities.Models;
-using Transactions.Contracts;
 using System.Data;
+using Bookings.Contracts;
 namespace Bookings.Jobs;
 
 /// <summary>
@@ -17,15 +17,14 @@ namespace Bookings.Jobs;
 ///         (docs/adr/0027).
 ///     </para>
 ///     <para>
-///         Lives in Bookings because the obligations are Bookings' rows. It
-///         calls into Transactions through ITransactionReversal, which this
-///         module already depends on for the cancellation path.
+///         Lives in Bookings because the obligations are Bookings' rows. The payment behind one is
+///         reached through IPaymentReversal, the port the cancellation path already uses.
 ///     </para>
 /// </summary>
 public partial class ResolveOutstandingRefundsJob(
     BookingsDb dbContext,
     ITransactionRunner transactionRunner,
-    ITransactionReversal transactionReversal,
+    IPaymentReversal paymentReversal,
     TimeProvider timeProvider,
     ILogger<ResolveOutstandingRefundsJob> logger)
 {
@@ -110,7 +109,7 @@ public partial class ResolveOutstandingRefundsJob(
                 // belongs after the commit, driven by the recorded RefundPending.
                 decimal? resolved = await transactionRunner.ExecuteAsync(
                 IsolationLevel.ReadCommitted,
-                    token => transactionReversal.ResolveRefundAsync(bookingId, token),
+                    token => paymentReversal.ResolveRefundAsync(bookingId, token),
                     cancellationToken);
 
                 if (resolved is not null)

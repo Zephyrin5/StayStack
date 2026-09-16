@@ -1,4 +1,4 @@
-using Bookings;
+﻿using Bookings;
 using Bookings.Entities;
 using Bookings.Features.CancelBooking;
 using Bookings.Features.ConfirmBooking;
@@ -15,7 +15,6 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Transactions;
-using Transactions.Contracts;
 using Transactions.Entities;
 using Bookings.Contracts;
 using System.Data;
@@ -130,7 +129,7 @@ public class PendingRefundReportingTests(IntegrationTestWebApplicationFactory fa
         {
             await scope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.ITransactionRunner>().ExecuteAsync(
                 IsolationLevel.ReadCommitted,
-                token => scope.ServiceProvider.GetRequiredService<ITransactionReversal>().ResolveRefundAsync(bookingId, token),
+                token => scope.ServiceProvider.GetRequiredService<IPaymentReversal>().ResolveRefundAsync(bookingId, token),
                 TestContext.Current.CancellationToken);
         }
 

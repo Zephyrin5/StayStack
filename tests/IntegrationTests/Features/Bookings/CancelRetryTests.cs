@@ -1,4 +1,4 @@
-// Proves a cancellation retried after a pre-commit failure (CommitFaults.FailBeforeCommit) and
+﻿// Proves a cancellation retried after a pre-commit failure (CommitFaults.FailBeforeCommit) and
 // after a lost acknowledgement (FailAfterCommit) both end Cancelled, read through a fresh scope.
 // Without ChangeTracker.Clear() the first fails; without the already-Cancelled recovery branch
 // the second answers 409.
@@ -19,10 +19,10 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Transactions;
-using Transactions.Contracts;
 using Transactions.Entities;
 using Bookings.Features.CancelBooking;
 using Persistence;
+using Bookings.Contracts;
 namespace IntegrationTests.Features.Bookings;
 
 // A transient failure on COMMIT is the one failure an execution strategy

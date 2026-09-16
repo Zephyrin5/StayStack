@@ -1,22 +1,36 @@
-using Bookings.Contracts;
+﻿using Bookings.Contracts;
 using Microsoft.EntityFrameworkCore;
 using SeedWork.ValueObjects;
 using Transactions.Entities;
 using Transactions.Exceptions;
 namespace Transactions.Contracts;
 
-// Bookings reaches this only through ITransactionReversal, resolved via DI.
-internal class TransactionReversal(
+// Bookings reaches this only through IPaymentReversal, resolved via DI. RefundUnusablePaymentByTransactionAsync
+// is on no contract: it is Transactions' own, called by MarkTransactionSucceededHandler.
+public class TransactionReversal(
     TransactionsDb dbContext,
     IBookingLookup bookingLookup,
-    TimeProvider timeProvider) : ITransactionReversal
+    TimeProvider timeProvider) : IPaymentReversal
 {
     public Task<decimal?> ResolveRefundAsync(Guid bookingId, CancellationToken cancellationToken) =>
         ResolveAsync(bookingId, transactionId: null, refundWithoutAnObligation: false, cancellationToken);
 
-    public Task<decimal?> RefundUnusablePaymentAsync(Guid bookingId, CancellationToken cancellationToken) =>
-        ResolveAsync(bookingId, transactionId: null, refundWithoutAnObligation: true, cancellationToken);
-
+    /// <summary>
+    ///     The refund decision for a caller that already knows which payment attempt bought nothing.
+    ///     <para>
+    ///         <see cref="ResolveRefundAsync"/> treats "no obligation" as "never cancelled, nothing to
+    ///         settle", which is right when the trigger is a cancellation. A payment that could not
+    ///         become a stay arrives from the other direction: a booking that is gone, or still Pending
+    ///         with its hold released, has no obligation and never will, and is owed the whole amount.
+    ///         Where an obligation does exist, RefundDecision still chooses between the policy figure
+    ///         and the full amount.
+    ///     </para>
+    ///     <para>
+    ///         Scoped to the attempt because a booking may have several transactions: the
+    ///         active-transaction index constrains Pending and Succeeded to one at a time and says
+    ///         nothing about the rest, so a RefundPending attempt and a Succeeded one can coexist.
+    ///     </para>
+    /// </summary>
     public async Task<decimal?> RefundUnusablePaymentByTransactionAsync(
         Guid transactionId, CancellationToken cancellationToken)
     {

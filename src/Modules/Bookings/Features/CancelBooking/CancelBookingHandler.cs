@@ -1,4 +1,4 @@
-using Bookings.Contracts;
+﻿using Bookings.Contracts;
 using Bookings.Entities;
 using Bookings.Features.Common;
 using BuildingBlocks.Exceptions;
@@ -13,8 +13,8 @@ using Promotions.Contracts;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using System.Data.Common;
-using Transactions.Contracts;
 using System.Data;
+using Bookings.Contracts;
 namespace Bookings.Features.CancelBooking;
 
 public class CancelBookingHandler(
@@ -22,7 +22,7 @@ public class CancelBookingHandler(
     ITransactionRunner transactionRunner,
     IHoldConfirmation holdConfirmation,
     IPromotionRedemption promotionRedemption,
-    ITransactionReversal transactionReversal,
+    IPaymentReversal paymentReversal,
     ICurrentUserProvider currentUserProvider,
     IBookingSessions bookingSessions,
     TimeProvider timeProvider) : IRequestHandler<CancelBookingRequest, CancelBookingResponse>
@@ -108,7 +108,7 @@ public class CancelBookingHandler(
                     await promotionRedemption.ReverseRedemptionAsync(locked.Id, token);
 
                     // Records the refund decision locally; no provider call may run inside the scope (docs/adr/0027).
-                    await transactionReversal.ResolveRefundAsync(locked.Id, token);
+                    await paymentReversal.ResolveRefundAsync(locked.Id, token);
 
                     return locked;
                 },
@@ -123,7 +123,7 @@ public class CancelBookingHandler(
     // One read of the payment, so the report cannot straddle a Succeeded -> RefundPending transition.
     private async Task<CancelBookingResponse> BuildResponseAsync(Booking booking, CancellationToken cancellationToken)
     {
-        PaymentStateSnapshot? payment = await transactionReversal.GetPaymentStateAsync(booking.Id, cancellationToken);
+        PaymentStateSnapshot? payment = await paymentReversal.GetPaymentStateAsync(booking.Id, cancellationToken);
 
         if (payment?.RefundAmount is { } recorded)
         {

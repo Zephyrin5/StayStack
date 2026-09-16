@@ -1,4 +1,4 @@
-using Bookings;
+﻿using Bookings;
 using BuildingBlocks.Persistence;
 using Bookings.Entities;
 using Dapper;
@@ -17,7 +17,6 @@ using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using Promotions.Contracts;
 using Transactions;
-using Transactions.Contracts;
 using Transactions.Entities;
 using System.Data;
 namespace IntegrationTests.Features.Bookings;

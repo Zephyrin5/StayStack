@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
@@ -33,7 +33,6 @@
         <ProjectReference Include="..\Catalog\Catalog.Contracts\Catalog.Contracts.csproj"/>
         <ProjectReference Include="..\Hosts\Hosts.Contracts\Hosts.Contracts.csproj"/>
         <ProjectReference Include="..\Promotions\Promotions.Contracts\Promotions.Contracts.csproj"/>
-        <ProjectReference Include="..\Transactions\Transactions.Contracts\Transactions.Contracts.csproj"/>
         <ProjectReference Include="Bookings.Contracts\Bookings.Contracts.csproj"/>
     </ItemGroup>
 

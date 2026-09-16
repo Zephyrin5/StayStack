@@ -1,21 +1,10 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
     </PropertyGroup>
-
-    <ItemGroup>
-        <!-- Transactions.Contracts is nested inside this project's folder;
-             without this, SDK-default globbing would compile its files into
-             both projects (the same CS0436 gotcha Catalog.csproj/Hosts.csproj/
-             Bookings.csproj already document for their own nested Contracts
-             projects). -->
-        <Compile Remove="Transactions.Contracts\**"/>
-        <EmbeddedResource Remove="Transactions.Contracts\**"/>
-        <None Remove="Transactions.Contracts\**"/>
-    </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="FastEndpoints"/>
@@ -25,11 +14,10 @@
     </ItemGroup>
 
     <ItemGroup>
-        <!-- Same reasoning as Hosts/Promotions: TransactionReversal is internal
-             so Bookings can only reach it through ITransactionReversal, and the
-             refund decision now lives inside it - a unit test that mocked the
-             interface instead would assert nothing about the behaviour it is
-             named for. -->
+        <!-- Same reasoning as Hosts/Promotions: the refund decision lives inside TransactionReversal,
+             and a unit test that mocked an interface instead would assert nothing about the behaviour it
+             is named for. No module references this project, so nothing outside Transactions can name
+             the class; Bookings reaches it through Bookings.Contracts.IPaymentReversal. -->
         <InternalsVisibleTo Include="UnitTests"/>
     </ItemGroup>
 
@@ -38,7 +26,6 @@
         <ProjectReference Include="..\..\Core\BuildingBlocks\BuildingBlocks.csproj"/>
         <ProjectReference Include="..\..\Infrastructure\Persistence\Persistence.csproj"/>
         <ProjectReference Include="..\Bookings\Bookings.Contracts\Bookings.Contracts.csproj"/>
-        <ProjectReference Include="Transactions.Contracts\Transactions.Contracts.csproj"/>
     </ItemGroup>
 
 </Project>

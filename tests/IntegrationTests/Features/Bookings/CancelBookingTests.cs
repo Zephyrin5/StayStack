@@ -1,4 +1,4 @@
-using Bogus;
+﻿using Bogus;
 using Bookings;
 using Bookings.Entities;
 using Bookings.Features.CancelBooking;
@@ -18,10 +18,10 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Transactions;
-using Transactions.Contracts;
 using Transactions.Entities;
 using Transactions.Features.InitiateTransaction;
 using Bookings.Features.CreateBookingSession;
+using Bookings.Contracts;
 namespace IntegrationTests.Features.Bookings;
 
 // Exercises CancelBookingEndpoint end-to-end - same "seed a Unit directly"
