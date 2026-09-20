@@ -5,11 +5,9 @@ namespace Bookings.Contracts;
 ///     How much a cancelled booking's payment is owed back - the single owner of
 ///     that decision.
 ///     <para>
-///         TransactionReversal records the refund from it, and CancelBookingHandler
-///         reports a pending refund from it; the two must agree exactly, so neither
-///         computes the amount any other way. Guest cancellation policy is applied
-///         once, when the obligation is written, and reaches this only as the
-///         obligation's amount.
+///         TransactionReversal records the refund from it and CancelBookingHandler reports a pending
+///         refund from it, so neither computes the amount any other way. Guest cancellation policy is
+///         applied once, when the obligation is written, and reaches this as the obligation's amount.
 ///     </para>
 ///     <para>
 ///         In Bookings.Contracts because both modules call it: the obligation is

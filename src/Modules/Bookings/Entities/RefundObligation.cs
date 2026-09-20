@@ -6,10 +6,9 @@ namespace Bookings.Entities;
 ///     A durable record that a cancelled booking owes a refund, written in the
 ///     same transaction as the cancellation itself.
 ///     <para>
-///         Persistence-layer construct, not a Domain aggregate: the row is the
-///         work item. A cancellation resolves it in its own scope, and a payment
-///         succeeding afterwards resolves it in the payment's;
-///         ResolveOutstandingRefundsJob sweeps for any left unresolved.
+///         A persistence-layer construct, not a Domain aggregate: the row is the work item.
+///         Cancellation, expiry, payment success and payment failure each resolve it in their own
+///         transaction; ResolveOutstandingRefundsJob sweeps what is left.
 ///     </para>
 ///     <para>
 ///         The cancellation decides nothing about payments. It records that a
@@ -67,20 +66,11 @@ public sealed class RefundObligation
     /// <summary>
     ///     When the sweep should next consider this row.
     ///     <para>
-    ///         Without it the sweep starved under its ordinary workload rather
-    ///         than under any error. Both writers record an obligation whether
-    ///         or not a payment ever succeeded, and for an unpaid booking - the
-    ///         common case by a wide margin - the resolver correctly does
-    ///         nothing, so the row stays unresolved and keeps its place at the
-    ///         front of an ordering by CancelledAt. A thousand of those pin the
-    ///         window permanently and no newer obligation with an actual
-    ///         payment behind it is ever reached.
-    ///     </para>
-    ///     <para>
-    ///         Backing off is right rather than merely cheap: an unpaid
-    ///         cancellation is not an error to retry, it is a row waiting for a
-    ///         payment that may still arrive. Resolving it to clear it would
-    ///         throw away exactly the case the obligation exists for.
+    ///         Without it the sweep starved under its ordinary workload rather than under any error:
+    ///         ordered by CancelledAt, a backlog of rows with nothing to do pinned the window and no
+    ///         newer obligation with a payment behind it was ever reached. A row that is waiting for a
+    ///         payment is not an error to retry, so it backs off rather than being resolved to clear
+    ///         it.
     ///     </para>
     /// </summary>
     public DateTimeOffset NextAttemptAt { get; set; }

@@ -164,23 +164,14 @@ internal class HoldConfirmation(BookingsDb dbContext, TimeProvider timeProvider)
             await dbContext.Database.OpenConnectionAsync(cancellationToken);
         }
 
-        // The only writer of 'booked', driven from the payment-confirmation path
-        // (MarkTransactionSucceededHandler -> IBookingPaymentConfirmation).
-        // booked_at records when the range was sold, which is now.
+        // The only writer of 'booked', driven from payment confirmation. client_key is cleared: a
+        // booked row outlives the hold by years and nothing reads an address past the payment window.
         //
-        // client_key is cleared: nothing reads a network address once the row
-        // is past the payment window, and a booked row outlives the hold by
-        // years. Nothing restores it - ReleaseHoldAsync resets hold_expires_at
-        // to now, putting the row outside the cap's WHERE clause regardless.
+        // Idempotent - 'booked' is accepted alongside 'pending_payment' and reports success, so a
+        // repeat does not fail the payment, and COALESCE keeps the original booked_at.
         //
-        // Idempotent: 'booked' is accepted as well as 'pending_payment' and
-        // reports success, so a repeated call against a hold already sold does
-        // not fail the payment. COALESCE keeps the original booked_at across
-        // repeats.
-        //
-        // 'held' is refused, and that is the value of the return: a hold
-        // released or expired under a late-landing payment is inventory this
-        // platform no longer owns, and the caller must compensate.
+        // 'held' is refused, and that is what the return value is for: a hold released or expired
+        // under a late-landing payment is inventory this platform no longer owns.
         const string sql = $"""
                             UPDATE {BookingsModel.Schema}.unit_availability_holds
                             SET status = '{HoldStatuses.Booked}',

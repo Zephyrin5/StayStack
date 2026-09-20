@@ -157,24 +157,16 @@ public class HoldAvailabilityHandler(
                 transaction.GetDbTransaction(),
                 cancellationToken: cancellationToken));
 
-            // Counts this client network's live holds across every unit -
-            // both the ones still being chosen ('held') and the ones already
-            // taken into a checkout ('pending_payment'). Counting only 'held'
-            // would let a caller escape the cap by submitting checkout without
-            // paying, while the exclusion constraint went on blocking the range.
+            // Counts 'held' and 'pending_payment' together: counting only 'held' would let a caller
+            // escape the cap by submitting checkout without paying, while the exclusion constraint
+            // went on blocking the range. Those rows are finite - PaymentDueAt bounds them - and the
+            // cap gates taking a new hold, never paying for one.
             //
-            // Counting 'pending_payment' does not deny checkout to others behind
-            // one NAT: the cap gates taking a new hold, never paying for one. And
-            // those rows are finite - Booking.PaymentDueAt bounds them and
-            // ExpireUnpaidBookingsJob enforces it.
+            // 'booked' is excluded: nothing clears it, so counting it would cost a customer hold
+            // capacity permanently after their Nth stay.
             //
-            // 'booked' is excluded: nothing clears it, so counting it would cost a
-            // customer hold capacity permanently after their Nth stay.
-            //
-            // hold_expires_at > @Now applies to 'held' rows only.
-            // 'pending_payment' rows are past that clock by construction -
-            // PaymentDueAt governs them - so testing it here would exclude every
-            // one of them and reopen the escape.
+            // hold_expires_at > @Now applies to 'held' only. 'pending_payment' rows are past that
+            // clock by construction, so testing it for them would reopen the escape.
             const string activeHoldCountSql = $"""
                                                SELECT count(*) FROM {BookingsModel.Schema}.unit_availability_holds
                                                WHERE client_key = @ClientKey
@@ -184,23 +176,13 @@ public class HoldAvailabilityHandler(
                                                  );
                                                """;
 
-            // Before the cap, and that ordering is the whole of this check.
+            // Before the cap, and that ordering is the whole of this check: a retry counts the hold
+            // its own previous attempt committed, so a client at the limit is refused with 429 while
+            // the row it cannot see blocks the range for the hold's lifetime. With a cap of one, a
+            // single lost acknowledgement locks the client out until it expires.
             //
-            // Pre-generating holdId let a retry recognise its own committed
-            // insert, but only from the catch below - which the cap never lets
-            // it reach. A retry counts the hold its own previous attempt
-            // committed, so a client at the limit is refused with 429 while the
-            // row it cannot see blocks that range and occupies one of its slots
-            // for the full hold lifetime. With a cap of one, the first lost
-            // acknowledgement locks the client out until the hold expires.
-            //
-            // One indexed read on a primary key, on a path that is otherwise
-            // the hottest write in the system - and it answers a question no
-            // other check can: is this row mine?
-            //
-            // After the stale-hold cleanup above, deliberately. A row that
-            // cleanup would have deleted is expired, and handing an expired
-            // hold back as a live one would be worse than re-inserting.
+            // One indexed read on the primary key, answering a question no other check can: is this
+            // row mine? After the stale-hold cleanup, so an expired row is never handed back as live.
             (DateTimeOffset HoldExpiresAt, string Status)? own =
                 await FindOwnHoldAsync(connection, holdId, transaction.GetDbTransaction(), cancellationToken);
 
@@ -305,17 +287,13 @@ public class HoldAvailabilityHandler(
     /// <summary>
     ///     This operation's own hold, by the id it pre-generated.
     ///     <para>
-    ///         Ids are version-7 GUIDs minted per invocation, so a row under
-    ///         this one can only have been written by an earlier attempt of this
-    ///         same request - which makes a hit an unambiguous "my work
-    ///         committed" rather than anything about another caller.
+    ///         The id is minted per invocation, so a row under it can only be an earlier attempt of
+    ///         this same request: a hit is "my work committed", never anything about another caller.
     ///     </para>
     ///     <para>
-    ///         Status is returned but not filtered on. A row that has since
-    ///         moved to 'pending_payment' or 'booked' was consumed by this
-    ///         guest's own checkout, and "here is the hold you created" stays
-    ///         the truthful answer; refusing it would report failure for two
-    ///         operations that both succeeded.
+    ///         Status is returned but not filtered on. A row that has moved to 'pending_payment' or
+    ///         'booked' was consumed by this guest's own checkout, and refusing it would report
+    ///         failure for two operations that both succeeded.
     ///     </para>
     /// </summary>
     private static Task<(DateTimeOffset HoldExpiresAt, string Status)?> FindOwnHoldAsync(

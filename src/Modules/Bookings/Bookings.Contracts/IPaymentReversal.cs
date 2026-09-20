@@ -26,19 +26,13 @@ public interface IPaymentReversal
     /// <summary>
     ///     Decides and records the refund a cancelled booking is owed, once.
     ///     <para>
-    ///         The single place the amount is chosen (docs/adr/0027). Both inputs
-    ///         are durable by the time this runs - the payment's own status and
-    ///         the obligation the cancellation committed - so the decision reads
-    ///         two committed facts rather than predicting a write.
+    ///         The single place the amount is chosen (docs/adr/0027): both inputs are durable by the
+    ///         time this runs, so it reads two committed facts rather than predicting a write.
     ///     </para>
     ///     <para>
-    ///         Safe to call repeatedly: it is a no-op unless there is a Succeeded
-    ///         transaction and an unresolved obligation. Runs only inside the caller's transaction;
-    ///         throws InvalidOperationException outside one.
-    ///     </para>
-    ///     <para>
-    ///         Returns the amount recorded, or null when there was nothing to
-    ///         do.
+    ///         Safe to call repeatedly - a no-op unless there is a Succeeded transaction and an
+    ///         unresolved obligation. Runs only inside the caller's transaction and throws
+    ///         InvalidOperationException outside one. Returns the amount recorded, or null.
     ///     </para>
     /// </summary>
     Task<decimal?> ResolveRefundAsync(Guid bookingId, CancellationToken cancellationToken);

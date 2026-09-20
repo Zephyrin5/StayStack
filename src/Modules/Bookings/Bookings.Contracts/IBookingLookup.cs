@@ -11,47 +11,32 @@ public interface IBookingLookup
     Task<BookingSummary?> GetBookingAsync(Guid bookingId, CancellationToken cancellationToken);
 
     /// <summary>
-    ///     Lets Reviews authorize a review submission without ever
-    ///     referencing Booking or BookingsDb directly - same
-    ///     ownership proof CancelBookingHandler itself uses (a matching
-    ///     customerId, or a matching guest-checkout management token), via
-    ///     the same internal BookingAccessChecker both go through. Null if
-    ///     the booking doesn't exist or the caller doesn't own it - doesn't
-    ///     distinguish the two, same "doesn't exist and isn't yours must
-    ///     look identical" reasoning as everywhere else this pattern is used.
+    ///     The ownership proof CancelBookingHandler uses - a matching customerId, or a matching
+    ///     management token - through the same BookingAccessChecker. Null for both "does not exist"
+    ///     and "not yours", which must look identical.
     /// </summary>
     Task<BookingAccessResult?> VerifyBookingAccessAsync(
         Guid bookingId, Guid? customerId, CancellationToken cancellationToken);
 
     /// <summary>
     ///     Confirmed bookings for this customer whose checkout falls in
-    ///     <paramref name="checkOutFrom"/>..<paramref name="checkOutTo"/>
-    ///     inclusive - what ListMyReviewableBookingsHandler (Reviews) narrows
-    ///     to not-yet-reviewed, since Reviews has no notion of
-    ///     Booking/CustomerId itself.
+    ///     <paramref name="checkOutFrom"/>..<paramref name="checkOutTo"/> inclusive, which Reviews
+    ///     narrows to not-yet-reviewed.
     ///     <para>
-    ///         The range is a parameter because Bookings has no notion of a review
-    ///         window. It is required because the endpoint has no pagination:
-    ///         bounding the query to the window bounds the response.
-    ///     </para>
-    ///     <para>
-    ///         Callers filtering on a property-local date should widen by a
-    ///         day either side: a local date sits within one day of the UTC
-    ///         date in every timezone, so the range is a safe superset and the
-    ///         exact per-zone check belongs at the call site, which is the
-    ///         only place that knows each booking's zone.
+    ///         The range is a parameter because Bookings has no notion of a review window, and
+    ///         required because the endpoint has no pagination - bounding the query bounds the
+    ///         response. A caller filtering on a property-local date widens it by a day either side: a
+    ///         local date is within one day of the UTC date in every zone, so the range is a safe
+    ///         superset and the exact per-zone check belongs where each booking's zone is known.
     ///     </para>
     /// </summary>
     Task<IReadOnlyList<BookingAccessResult>> GetConfirmedBookingsForCustomerAsync(
         Guid customerId, DateOnly checkOutFrom, DateOnly checkOutTo, CancellationToken cancellationToken);
 
     /// <summary>
-    ///     A raw lookup, no ownership check - what CreateGuestReviewHandler
-    ///     (Reviews) uses, since a host reviewing a guest is authorized by
-    ///     owning the booking's unit (via Catalog.Contracts.IUnitLookup),
-    ///     not by a customerId/managementToken match the way
-    ///     VerifyBookingAccessAsync's two paths are. Null if the booking
-    ///     doesn't exist.
+    ///     A raw lookup with no ownership check: a host reviewing a guest is authorized by owning the
+    ///     booking's unit, not by the customerId or token match the method above tests. Null when the
+    ///     booking does not exist.
     /// </summary>
     Task<BookingAccessResult?> GetBookingDetailsAsync(Guid bookingId, CancellationToken cancellationToken);
 
@@ -59,10 +44,9 @@ public interface IBookingLookup
     ///     The refund this booking's cancellation committed to owing, if it was
     ///     cancelled. Null when it was not.
     ///     <para>
-    ///         Written in the same transaction as the cancellation, so a reader
-    ///         either sees it with a true CancelledAt or sees nothing - never a
-    ///         null timestamp standing in for "committed but not yet visible",
-    ///         which is what made reading CancelledAt off the booking unsafe.
+    ///         Written in the cancellation's own transaction, so a reader either sees it with a true
+    ///         CancelledAt or sees nothing - never a null standing in for "committed but not visible
+    ///         yet", which is what made reading CancelledAt off the booking unsafe.
     ///     </para>
     /// </summary>
     Task<RefundObligationSnapshot?> GetRefundObligationAsync(Guid bookingId, CancellationToken cancellationToken);
@@ -71,10 +55,9 @@ public interface IBookingLookup
     ///     Marks the obligation settled, with how it ended: a refund recorded against the transaction,
     ///     or nothing owed.
     ///     <para>
-    ///         The second of two commits, and the reason the first is safe to
-    ///         repeat: a crash in between leaves this unset, the backstop job
-    ///         tries again, and MarkRefundPending's own first-wins guard makes
-    ///         the repeated write a no-op rather than a second refund.
+    ///         The second of two commits, and why the first is safe to repeat: a crash in between
+    ///         leaves this unset, the sweep tries again, and MarkRefundPending's first-wins guard
+    ///         makes the repeat a no-op rather than a second refund.
     ///     </para>
     /// </summary>
     Task MarkRefundObligationResolvedAsync(

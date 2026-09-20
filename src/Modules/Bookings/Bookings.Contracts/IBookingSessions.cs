@@ -4,15 +4,11 @@ namespace Bookings.Contracts;
 ///     Issues and reads the short-lived sessions a guest exchanges their
 ///     booking-management token for.
 ///     <para>
-///         Declared here and implemented in the Api layer, the same shape as
-///         <c>BuildingBlocks.Identity.ICurrentUserProvider</c> and for the same
-///         reason: minting and validating these tokens needs the signing
-///         configuration and the authentication middleware, both of which live
-///         on the far side of the module graph from Bookings. Bookings does
-///         not reference Identity - nothing does except the Api project - so
-///         the alternative to this interface is a new module edge that
-///         docs/adr/0004's direction rule would have to bless, in order to
-///         express something no part of Bookings actually needs to know.
+///         Declared here and implemented in the Api layer, like
+///         <c>BuildingBlocks.Identity.ICurrentUserProvider</c>: minting and validating these tokens
+///         needs the signing configuration and the authentication middleware, and the alternative is
+///         a module edge docs/adr/0004's direction rule would have to bless for something no part of
+///         Bookings needs to know.
 ///     </para>
 /// </summary>
 public interface IBookingSessions

@@ -67,17 +67,11 @@ internal static class BookingAccessChecker
     ///     The management-token path, reachable from exactly one caller:
     ///     CreateBookingSessionHandler, which trades the token for a session.
     ///     <para>
-    ///         Separated from <see cref="ResolveAsync"/> rather than left as
-    ///         an optional parameter on it, because a parameter every other
-    ///         caller passes null to is an invitation to start passing
-    ///         something. The long-lived credential is validated in one place,
-    ///         and the type system says so.
-    ///     </para>
-    ///     <para>
-    ///         No authenticated-customer path either. A signed-in owner does
-    ///         not need a session - their access token already proves
-    ///         ownership everywhere a session would - so accepting one here
-    ///         would only mean minting a credential nobody uses.
+    ///         Separate from <see cref="ResolveAsync"/> rather than an optional parameter on it: a
+    ///         parameter every other caller passes null to is an invitation to start passing
+    ///         something, and this validates the long-lived credential. There is no
+    ///         authenticated-customer path either - a signed-in owner's access token already proves
+    ///         ownership everywhere a session would.
     ///     </para>
     /// </summary>
     public static async Task<BookingAccess?> ResolveByManagementTokenAsync(
