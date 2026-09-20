@@ -87,7 +87,7 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
             CancellationPolicy.CreateDefault(), "Asia/Kuwait",
             DateTimeOffset.UtcNow.AddMinutes(15));
 
-        booking.Cancel(cancelledAt);
+        booking.Cancel(cancelledAt, new BookingPaymentLockHandle(booking.Id));
         bookings.Bookings.Add(booking);
 
         bookings.RefundObligations.Add(new RefundObligation

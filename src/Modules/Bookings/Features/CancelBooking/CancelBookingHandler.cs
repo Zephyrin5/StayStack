@@ -63,18 +63,10 @@ public class CancelBookingHandler(
                     DbConnection connection = dbContext.Database.GetDbConnection();
 
                     // Advisory lock, booking row, hold, transaction row (docs/adr/0028).
-                    await connection.ExecuteAsync(new CommandDefinition(
-                        AdvisoryLock.AcquireExclusiveSql,
-                        new { LockKey = BookingPaymentLock.KeyFor(request.BookingId) },
-                        transaction,
-                        cancellationToken: token));
+                    BookingPaymentLockHandle heldLock = await BookingPaymentLock.AcquireAsync(
+                        connection, transaction, request.BookingId, token);
 
-                    // FOR UPDATE, not SKIP LOCKED: the caller waits for the committed outcome.
-                    await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
-                        $"""SELECT id FROM {BookingsModel.Schema}.bookings WHERE id = @BookingId FOR UPDATE""",
-                        new { request.BookingId },
-                        transaction,
-                        cancellationToken: token));
+                    await BookingRowClaim.ClaimAsync(connection, transaction, heldLock, token);
 
                     Booking locked = await dbContext.Bookings.SingleOrDefaultAsync(b => b.Id == request.BookingId, token)
                                      ?? throw new NotFoundException(nameof(Booking), request.BookingId);
@@ -91,7 +83,7 @@ public class CancelBookingHandler(
                     }
 
                     DateTimeOffset cancelledAt = timeProvider.GetUtcNow();
-                    locked.Cancel(cancelledAt);
+                    locked.Cancel(cancelledAt, heldLock);
 
                     dbContext.RefundObligations.Add(new RefundObligation
                     {

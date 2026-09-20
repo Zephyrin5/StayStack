@@ -23,6 +23,7 @@ using Transactions.Features.InitiateTransaction;
 using Transactions.Features.MarkTransactionFailed;
 using Bookings.Features.CreateBookingSession;
 using Bookings.Contracts;
+using BuildingBlocks.Persistence;
 namespace IntegrationTests.Features.Transactions;
 
 // Exercises the full hold -> confirm -> initiate transaction -> succeed
@@ -425,7 +426,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         using IServiceScope scope = factory.Services.CreateScope();
         BookingsDb bookingsDb = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         Booking booking = await bookingsDb.Bookings.SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
-        booking.Cancel(DateTimeOffset.UtcNow);
+        booking.Cancel(DateTimeOffset.UtcNow, new BookingPaymentLockHandle(booking.Id));
         await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         // Drives the same reversal CancelBookingEndpoint would - seeded
@@ -574,7 +575,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         {
             BookingsDb bookingsDb = scope.ServiceProvider.GetRequiredService<BookingsDb>();
             Booking booking = await bookingsDb.Bookings.SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
-            booking.Cancel(DateTimeOffset.UtcNow);
+            booking.Cancel(DateTimeOffset.UtcNow, new BookingPaymentLockHandle(booking.Id));
             await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
@@ -598,7 +599,7 @@ public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
         {
             BookingsDb bookingsDb = setupScope.ServiceProvider.GetRequiredService<BookingsDb>();
             Booking booking = await bookingsDb.Bookings.SingleAsync(b => b.Id == bookingId, TestContext.Current.CancellationToken);
-            booking.Cancel(DateTimeOffset.UtcNow);
+            booking.Cancel(DateTimeOffset.UtcNow, new BookingPaymentLockHandle(booking.Id));
             await bookingsDb.SaveChangesAsync(TestContext.Current.CancellationToken);
 
             TransactionsDb transactionsDb = setupScope.ServiceProvider.GetRequiredService<TransactionsDb>();

@@ -1,5 +1,6 @@
 ﻿using Ardalis.GuardClauses;
 using Bookings.Contracts;
+using BuildingBlocks.Persistence;
 using SeedWork.Abstractions;
 using SeedWork.ValueObjects;
 namespace Bookings.Entities;
@@ -158,8 +159,21 @@ public sealed class Booking : Entity
 
     // Idempotent, and deliberately without a date guard: CanBeCancelledOn is the self-service policy
     // over this transition, and ExpireUnpaidBookingsJob cancels on the system's behalf.
-    public void Cancel(DateTimeOffset cancelledAt)
+    /// <summary>
+    ///     Cancels the booking. The lock handle is required because a cancellation that does not hold
+    ///     BookingPaymentLock is invisible to payment initiation, which never touches this row: the two
+    ///     would then race, and a payment could open against a booking already cancelled
+    ///     (docs/adr/0028). Passing a handle for a different booking is the same mistake one step
+    ///     later, so it is checked rather than trusted.
+    /// </summary>
+    public void Cancel(DateTimeOffset cancelledAt, BookingPaymentLockHandle heldLock)
     {
+        if (heldLock.BookingId != Id)
+        {
+            throw new InvalidOperationException(
+                $"BookingPaymentLock is held for booking {heldLock.BookingId}, not {Id}.");
+        }
+
         if (BookingStatus == BookingStatus.Cancelled)
         {
             return;

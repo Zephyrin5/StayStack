@@ -378,7 +378,7 @@ public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory
         BookingsDb bookings = scope.ServiceProvider.GetRequiredService<BookingsDb>();
         Booking booking = await bookings.Bookings
             .SingleAsync(b => b.Id == seeded.BookingId, TestContext.Current.CancellationToken);
-        booking.Cancel(cancelledAt);
+        booking.Cancel(cancelledAt, new BookingPaymentLockHandle(booking.Id));
         bookings.RefundObligations.Add(new RefundObligation
         {
             BookingId = seeded.BookingId,

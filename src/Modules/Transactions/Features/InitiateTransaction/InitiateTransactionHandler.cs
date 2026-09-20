@@ -40,12 +40,13 @@ public class InitiateTransactionHandler(
                 IsolationLevel.ReadCommitted,
             async token =>
             {
-                // Excludes a cancellation committing between the payability check and the insert (docs/adr/0028).
-                await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
-                    AdvisoryLock.AcquireExclusiveSql,
-                    new { LockKey = BookingPaymentLock.KeyFor(request.BookingId) },
+                // Excludes a cancellation committing between the payability check and the insert
+                // (docs/adr/0028). Nothing here cancels, so the handle is not needed.
+                await BookingPaymentLock.AcquireAsync(
+                    dbContext.Database.GetDbConnection(),
                     dbContext.Database.CurrentTransaction!.GetDbTransaction(),
-                    cancellationToken: token));
+                    request.BookingId,
+                    token);
 
                 // Before the checks below, which would otherwise judge the request against its own committed row.
                 Transaction? committed = await dbContext.Transactions.AsNoTracking()

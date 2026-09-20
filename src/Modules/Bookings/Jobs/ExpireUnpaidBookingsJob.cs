@@ -1,5 +1,6 @@
 using Bookings.Contracts;
 using Bookings.Entities;
+using Bookings.Features.Common;
 using BuildingBlocks.Persistence;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
@@ -76,24 +77,10 @@ public partial class ExpireUnpaidBookingsJob(
                 DbConnection connection = dbContext.Database.GetDbConnection();
 
                 // Advisory lock, then the row (docs/adr/0028). Both non-blocking: a contended booking waits for the next run.
-                bool paymentLockTaken = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
-                    AdvisoryLock.TryAcquireExclusiveSql,
-                    new { LockKey = BookingPaymentLock.KeyFor(bookingId) },
-                    transaction,
-                    cancellationToken: token));
+                BookingPaymentLockHandle? heldLock = await BookingPaymentLock.TryAcquireAsync(
+                    connection, transaction, bookingId, token);
 
-                if (!paymentLockTaken)
-                {
-                    return false;
-                }
-
-                Guid? claimedId = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
-                    $"""SELECT id FROM {BookingsModel.Schema}.bookings WHERE id = @BookingId FOR UPDATE SKIP LOCKED""",
-                    new { BookingId = bookingId },
-                    transaction,
-                    cancellationToken: token));
-
-                if (claimedId is null)
+                if (heldLock is null || !await BookingRowClaim.TryClaimAsync(connection, transaction, heldLock, token))
                 {
                     return false;
                 }
@@ -112,7 +99,7 @@ public partial class ExpireUnpaidBookingsJob(
                 await holdConfirmation.ReleaseHoldAsync(booking.HoldId, token);
 
                 DateTimeOffset cancelledAt = timeProvider.GetUtcNow();
-                booking.Cancel(cancelledAt);
+                booking.Cancel(cancelledAt, heldLock);
 
                 // At the full price: the platform reclaimed the inventory, the guest did not cancel (docs/adr/0027).
                 dbContext.RefundObligations.Add(new RefundObligation
