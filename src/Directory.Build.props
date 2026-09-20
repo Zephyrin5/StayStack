@@ -9,5 +9,14 @@
         <BaseOutputPath>$(MSBuildThisFileDirectory)artifacts\bin\$(MSBuildProjectName)\</BaseOutputPath>
         <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)artifacts\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
         <InterceptorsPreviewNamespaces>$(InterceptorsPreviewNamespaces);Dapper.AOT</InterceptorsPreviewNamespaces>
+        <!-- A banned API is a build break, not a warning: it replaces a test that failed the suite. -->
+        <WarningsAsErrors>$(WarningsAsErrors);RS0030</WarningsAsErrors>
     </PropertyGroup>
+
+    <!-- BannedSymbols.txt states which APIs are unavailable and why. The compiler refusing them is
+         what replaces the source-scanning tests that used to look for them. -->
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
+        <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" />
+    </ItemGroup>
 </Project>

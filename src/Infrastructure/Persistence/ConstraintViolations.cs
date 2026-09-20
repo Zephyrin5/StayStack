@@ -20,6 +20,9 @@ namespace Persistence;
 ///         uses for indexes and constraints.
 ///     </para>
 /// </summary>
+// The one file allowed to read a PostgresException's ConstraintName and SqlState: src/BannedSymbols.txt
+// bans both everywhere else, so a catch on SQLSTATE alone cannot be written outside this file.
+#pragma warning disable RS0030
 public static class ConstraintViolations
 {
     public static bool IsViolationOf(this Exception exception, string constraintName) =>
@@ -48,3 +51,4 @@ public static class ConstraintViolations
             ? postgres
             : null;
 }
+#pragma warning restore RS0030

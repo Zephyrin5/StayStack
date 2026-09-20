@@ -4,6 +4,8 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+        <!-- A banned API is a build break, not a warning: it replaces a test that failed the suite. -->
+        <WarningsAsErrors>$(WarningsAsErrors);RS0030</WarningsAsErrors>
         <ArtifactsPivots>$(MSBuildProjectName)</ArtifactsPivots>
         <BaseOutputPath>$(MSBuildThisFileDirectory)artifacts\bin\$(MSBuildProjectName)\</BaseOutputPath>
         <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)artifacts\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>

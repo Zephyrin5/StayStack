@@ -26,6 +26,8 @@ public class PagedSliceTests(IntegrationTestWebApplicationFactory factory)
 {
     // Counts round trips rather than inspecting SQL text: the claim is about
     // how many times the database is asked, which is the thing that costs.
+    // Observes only - it throws nothing, so it is not a fault seam (see BannedSymbols.txt).
+#pragma warning disable RS0030
     private sealed class CommandCountingInterceptor : DbCommandInterceptor
     {
         public int Count { get; private set; }
@@ -225,3 +227,4 @@ public class PagedSliceTests(IntegrationTestWebApplicationFactory factory)
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
     }
 }
+#pragma warning restore RS0030

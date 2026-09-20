@@ -590,6 +590,8 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
     }
 
     // Every statement the search issues, so the assertion can be about how many there are.
+    // Observes only - it throws nothing, so it is not a fault seam (see BannedSymbols.txt).
+#pragma warning disable RS0030
     private sealed class StatementRecorder : DbCommandInterceptor
     {
         private readonly List<string> _statements = [];
@@ -654,3 +656,4 @@ public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
         Assert.Single(recorder.Naming("properties"));
     }
 }
+#pragma warning restore RS0030

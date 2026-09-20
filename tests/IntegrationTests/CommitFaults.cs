@@ -35,6 +35,9 @@ namespace IntegrationTests;
 ///         identify the commit under test.
 ///     </para>
 /// </summary>
+// The one place allowed to hook a commit: BannedSymbols.txt keeps every other test out of the
+// interceptors, so "which side of the commit" is always stated by the entry point a test calls.
+#pragma warning disable RS0030
 public static class CommitFaults
 {
     /// <summary>
@@ -210,3 +213,4 @@ public sealed class CommitFault<TContext> where TContext : DbContext
                 : Task.CompletedTask;
     }
 }
+#pragma warning restore RS0030

@@ -1,0 +1,4 @@
+T:Microsoft.EntityFrameworkCore.Diagnostics.DbTransactionInterceptor; Inject failures through CommitFaults, whose entry points state which side of the commit a fault lands on (FailBeforeCommit, FailAfterCommit, FailAfterAutocommit).
+T:Microsoft.EntityFrameworkCore.Diagnostics.IDbTransactionInterceptor; Inject failures through CommitFaults, whose entry points state which side of the commit a fault lands on.
+T:Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor; A command hook is a fault seam as well as a way to count round trips - inject failures through CommitFaults, and suppress this where a test only observes.
+T:Microsoft.EntityFrameworkCore.Diagnostics.IDbCommandInterceptor; A command hook is a fault seam as well as a way to count round trips - inject failures through CommitFaults, and suppress this where a test only observes.
