@@ -27,14 +27,14 @@ jobs:
       - name: Build
         run: dotnet build StayStack.slnx --no-restore -c Release
 
-      # Advisory: keeps IL2xxx/IL3xxx trimming and Native AOT diagnostics
-      # visible on every change without a native toolchain, and without failing
-      # CI on the known EF Core gaps (docs/adr/0001).
+      # Blocking: a new IL2xxx/IL3xxx is a build failure, not a line in a log nobody reads. It runs
+      # the trim and AOT analysers without a native toolchain, so it costs a rebuild rather than a
+      # publish. The two EF Core puts on DbContext's own constructor are suppressed in AppDbContext
+      # with the reason; everything else has to be fixed or argued for in docs/aot-migration.md.
       - name: Analyze trimming and Native AOT compatibility
-        continue-on-error: true
         run: >
           dotnet build src/Web/Api/Api.csproj --no-restore -c Release -t:Rebuild
-          -p:PublishAot=true -p:PublishTrimmed=true
+          -p:PublishAot=true -p:PublishTrimmed=true -warnaserror
 
       # Neither test project uses "dotnet test" - the .NET 10 SDK's testing
       # platform (Microsoft.Testing.Platform, what xunit v3 builds on here)

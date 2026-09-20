@@ -6,6 +6,10 @@
              rest of src inherits do not apply to it. -->
         <TargetFramework>netstandard2.0</TargetFramework>
         <IsAotCompatible>false</IsAotCompatible>
+        <!-- CI builds the Api with PublishAot to run the trim analysers; that flows down every
+             project reference, and this one cannot be AOT-published (NETSDK1207). -->
+        <PublishAot>false</PublishAot>
+        <PublishTrimmed>false</PublishTrimmed>
         <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
         <IncludeBuildOutput>false</IncludeBuildOutput>
         <LangVersion>latest</LangVersion>

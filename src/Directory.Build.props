@@ -27,6 +27,7 @@
         <ProjectReference Include="$(MSBuildThisFileDirectory)Analyzers\StayStack.Analyzers\StayStack.Analyzers.csproj"
                           OutputItemType="Analyzer"
                           ReferenceOutputAssembly="false"
-                          PrivateAssets="all" />
+                          PrivateAssets="all"
+                          AdditionalProperties="PublishAot=false;PublishTrimmed=false" />
     </ItemGroup>
 </Project>

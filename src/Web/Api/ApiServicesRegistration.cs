@@ -132,6 +132,9 @@ public static class ApiServicesRegistration
         // silently never fire (a request reaches the handler with
         // unvalidated data instead of failing with 400 - caught via a
         // Bookings HTTP test expecting 400, getting 500).
+        // CS8620: the generated lists are List<Type>, and FastEndpoints' params parameter is
+        // List<Type>[] with different nullability on the element type. Nothing here can satisfy both.
+#pragma warning disable CS8620
         services.AddFastEndpoints(
             IdentityDiscoveredTypes.All,
             CatalogDiscoveredTypes.All,
@@ -140,6 +143,7 @@ public static class ApiServicesRegistration
             ReviewsDiscoveredTypes.All,
             TransactionsDiscoveredTypes.All,
             DiscoveredTypes.All);
+#pragma warning restore CS8620
         // The combined source-generated resolver (each module's own DTOs
         // plus a reflection fallback) is wired onto Config.Serializer.Options
         // in Program.cs's UseFastEndpoints call instead of here - that's an

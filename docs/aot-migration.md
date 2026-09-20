@@ -3,9 +3,10 @@
 `src/Directory.Build.props` sets `IsAotCompatible=true`, which turns on the
 trim/AOT analyzers (`IL2xxx`/`IL3xxx`) for every project under `src/`. CI's
 "Analyze trimming and Native AOT compatibility" step (`.github/workflows/ci.yml`)
-rebuilds `Api.csproj` with `-p:PublishAot=true -p:PublishTrimmed=true` on every
-push and is `continue-on-error: true` - it's advisory, not a gate, until this
-list is empty. This doc is the log of *why* each currently-suppressed site is
+rebuilds `Api.csproj` with `-p:PublishAot=true -p:PublishTrimmed=true
+-warnaserror` on every push, and **it is a gate**: a new IL2xxx/IL3xxx fails the
+build. The suppression below is the one exception, and it is EF Core's own
+annotation rather than anything app code does. This doc is the log of *why* each currently-suppressed site is
 suppressed, so CI going green isn't mistaken for "already AOT-clean," and a
 place to note things that aren't warnings yet but will matter as the app grows.
 

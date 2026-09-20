@@ -93,7 +93,7 @@ Context: every cancellation and expiry writes a `RefundObligation`. When no paym
 
 Starts after Phase 1. Runs alongside Phases 2 and 3.
 
-- [ ] **A.1** Make the AOT analysis CI step blocking with warnings as errors.
+- [x] **A.1** Make the AOT analysis CI step blocking with warnings as errors. (done after A.3, which removed the warnings that would have failed it)
 - [ ] **A.2** JSON coverage test: every FastEndpoints request and response type resolves through `ApiJsonTypeInfoResolver.Combined`.
 - [x] **A.3** Per-entity query filters replace `ApplySoftDeleteQueryFilter`; model-based test; update `docs/aot-migration.md`.
 - [ ] **A.4** Compiled model (STOP if a feature in use is unsupported), `UseModel` outside Development, drift test, `scripts/regen-compiled-model.sh`.
