@@ -19,6 +19,28 @@ place to note things that aren't warnings yet but will matter as the app grows.
 The remaining suppression is EF Core's own annotation on a constructor this app
 has to call, not something app code can rewrite.
 
+## Blocked upstream
+
+### Compiled model, and precompiled queries (EF Core 10.0.11)
+
+`dotnet ef dbcontext optimize` refuses:
+
+> The entity type 'Booking' has a query filter configured. Compiled model can't
+> be generated, because query filters are not supported.
+
+It refuses with `--precompile-queries --nativeaot` too, and for the same reason -
+the model is scaffolded first, so query precompilation never starts.
+
+Every entity here has a soft-delete query filter, and that is the point of it:
+the alternative is every query site remembering `AND status <> archived`, which
+is the mistake the filter exists to make impossible (`SoftDeleteFilterTests`
+requires one on each entity). Trading it for a compiled model would buy startup
+time at the cost of the guarantee.
+
+Nothing to do in application code. Re-run the command on each EF Core upgrade;
+if the restriction lifts, the remaining work is generating the model, calling
+`UseModel` outside Development, and a drift test that regenerates and compares.
+
 ## Already addressed
 
 - `ApplySoftDeleteQueryFilter` built a query-filter `Expression` per CLR type
