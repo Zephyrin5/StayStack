@@ -104,10 +104,10 @@ Starts after Phase 1. Runs alongside Phases 2 and 3.
 
 Starts after Phase 1. Investigate first, then report findings at the STOP before changing code.
 
-- [ ] **B.1** TickerQ across instances: does a cron occurrence run once; is each job safe concurrently; two-host test if feasible.
-- [ ] **B.2** Cache consistency: every HybridCache/IMemoryCache entry, its invalidation, cross-instance staleness, proposed TTL or backplane.
-- [ ] **B.3** Connection budget: configurable pool size; PgBouncer transaction-mode compatibility; required connection string settings.
-- [ ] **B.4** Rate limiting across instances: report options.
-- [ ] **B.5** Load test plan: tool and scenarios for hold, confirm and search at 1, 2 and 4 instances.
+- [x] **B.1** TickerQ across instances: does a cron occurrence run once; is each job safe concurrently; two-host test if feasible.
+- [x] **B.2** Cache consistency: every HybridCache/IMemoryCache entry, its invalidation, cross-instance staleness, proposed TTL or backplane.
+- [x] **B.3** Connection budget: configurable pool size; PgBouncer transaction-mode compatibility; required connection string settings.
+- [x] **B.4** Rate limiting across instances: options reported; decision pending.
+- [x] **B.5** Load test plan: tool and scenarios reported; decision pending.
 
 **STOP: decisions on B.4 and B.5 before implementing.**
