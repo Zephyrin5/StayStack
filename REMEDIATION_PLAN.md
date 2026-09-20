@@ -98,7 +98,7 @@ Starts after Phase 1. Runs alongside Phases 2 and 3.
 - [x] **A.3** Per-entity query filters replace `ApplySoftDeleteQueryFilter`; model-based test; update `docs/aot-migration.md`.
 - [x] **A.4** Compiled model - **BLOCKED upstream, STOP raised.** EF Core 10.0.11 refuses to generate one for a model with query filters, which every entity has. Recorded in docs/aot-migration.md; nothing to change in application code.
 - [x] **A.5** Trialled: fails with the same query-filter refusal, since the model is scaffolded before queries are precompiled. Recorded in docs/aot-migration.md.
-- [ ] **A.6** Scheduled AOT publish trial in CI against Postgres; record blockers in `docs/aot-migration.md`.
+- [x] **A.6** AOT publish trial in CI against Postgres. Manual-trigger only and unverified (the schedule is commented out) while A.4 is blocked; `docs/aot-migration.md` says so.
 
 ## Track B: Scale-out readiness
 

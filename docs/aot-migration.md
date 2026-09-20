@@ -41,6 +41,18 @@ Nothing to do in application code. Re-run the command on each EF Core upgrade;
 if the restriction lifts, the remaining work is generating the model, calling
 `UseModel` outside Development, and a drift test that regenerates and compares.
 
+### The publish trial
+
+`.github/workflows/aot-publish-trial.yml` publishes the API as a native binary,
+migrates a Postgres service container, starts the binary and asks for readiness -
+the point at which everything reflective in EF Core, Npgsql and the JSON path has
+had to run.
+
+It is **manual only and has never run**. It is expected to fail while the
+compiled model is blocked, and a weekly job that always fails is one everyone
+learns to ignore, so the schedule is commented out rather than enabled. Its run
+log is uploaded as an artifact; every blocker it names belongs in this file.
+
 ## Already addressed
 
 - `ApplySoftDeleteQueryFilter` built a query-filter `Expression` per CLR type
