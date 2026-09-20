@@ -74,7 +74,7 @@ Context: every cancellation and expiry writes a `RefundObligation`. When no paym
 - [x] **2.3 Resolve on payment failure.** In `MarkTransactionFailedHandler`, inside the runner: if the booking is cancelled and its obligation is unresolved, run the resolver.
 - [x] **2.4 Narrow the sweep.** Select only unresolved obligations whose booking has a Pending transaction, composing an `IQueryable<Guid>` from the payments contract. Keep the backoff. Warn once attempts pass a configurable threshold.
 - [x] **2.5 Integration tests.** 50 expired unpaid bookings leave 50 `NothingOwed`; cancelling unpaid resolves `NothingOwed` immediately; cancel with Pending then fail: `NothingOwed`; cancel with Pending then succeed: full refund, `RefundRecorded`; the sweep's candidate query excludes resolved obligations and those with no open payment; `RefundDeterminismTests` and `RefundCommitBoundaryTests` still pass.
-- [ ] **2.6 Rewrite ADR-0027 and the expiry section of ADR-0020.**
+- [x] **2.6 Rewrite ADR-0027 and the expiry section of ADR-0020.**
 
 **STOP: end of Phase 2.**
 

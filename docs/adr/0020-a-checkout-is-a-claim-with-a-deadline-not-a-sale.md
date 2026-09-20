@@ -23,7 +23,7 @@ held ──confirm checkout──▶ pending_payment ──payment succeeds─�
 ```
 
 - `pending_payment` blocks its range exactly as the other statuses do: the claim is real inventory, and search must not offer it.
-- `Booking.PaymentDueAt` carries the deadline, and `ExpireUnpaidBookingsJob` enforces it: it cancels the booking, releases the hold, writes a refund obligation ([ADR-0027](0027-refunds-are-decided-once-from-a-durable-obligation.md)), and reverses any promo redemption.
+- `Booking.PaymentDueAt` carries the deadline, and `ExpireUnpaidBookingsJob` enforces it: it cancels the booking, releases the hold, reverses any promo redemption, and writes a refund obligation and settles it ([ADR-0027](0027-refunds-are-decided-once-from-a-durable-obligation.md)) - `NothingOwed` unless a payment is still `Pending`, which is the only way one can still arrive.
 - `booked` is written only by `IHoldConfirmation.MarkHoldPaidAsync`, from the payment-confirmation path.
 - A `pending_payment` claim counts against the client's hold cap ([ADR-0021](0021-availability-is-part-of-bookings.md)).
 
@@ -41,7 +41,7 @@ A hold released or expired before payment lands also returns `false`: a payment 
 
 `ExpireUnpaidBookingsJob` locks the booking with `FOR UPDATE SKIP LOCKED` and re-checks its status under the lock; `ConfirmPaymentAsync` takes `FOR UPDATE` and re-reads inside it. `Booking` carries no concurrency token, so an unlocked read followed by an update would overwrite a committed `Cancelled` with `Confirmed`. The modes differ because the needs do: a sweep steps over a row someone else holds and revisits it next run, while a payment in hand must wait to observe the committed outcome, which is how it learns a refund is owed. Lock order with `BookingPaymentLock` is [ADR-0028](0028-advisory-locks-and-lock-order.md).
 
-The job does not ask Transactions whether the booking was paid. Payment success confirms the booking in the commit that marks the payment `Succeeded`, under this booking's row lock, so a booking still `Pending` under the expiry's lock has no succeeded payment. A payment succeeding after the expiry commits is refunded in full from the expiry's obligation ([ADR-0027](0027-refunds-are-decided-once-from-a-durable-obligation.md)).
+The job does not ask Transactions whether the booking was paid *before* deciding to expire it. Payment success confirms the booking in the commit that marks the payment `Succeeded`, under this booking's row lock, so a booking still `Pending` under the expiry's lock has no succeeded payment. It does ask afterwards, through the resolver, and for one thing only: whether a payment is still `Pending` and could yet arrive. One that succeeds after the expiry commits is refunded in full from the expiry's obligation ([ADR-0027](0027-refunds-are-decided-once-from-a-durable-obligation.md)).
 
 ## Alternatives considered
 
