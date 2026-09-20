@@ -14,7 +14,6 @@ using SeedWork.Enums;
 using SeedWork.ValueObjects;
 using System.Data.Common;
 using System.Data;
-using Bookings.Contracts;
 namespace Bookings.Features.CancelBooking;
 
 public class CancelBookingHandler(

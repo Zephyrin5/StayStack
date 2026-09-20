@@ -179,8 +179,10 @@ public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
             })));
 
         // The host is built lazily, so the throw surfaces on first resolution.
-        InvalidOperationException exception =
-            Assert.Throws<InvalidOperationException>(() => misconfigured.CreateClient());
+        // OptionsValidationException, not InvalidOperationException: the rule is an IValidateOptions
+        // checked by ValidateOnStart, so the host refuses to start the way every other invalid setting does.
+        OptionsValidationException exception =
+            Assert.Throws<OptionsValidationException>(() => misconfigured.CreateClient());
 
         Assert.Contains("SameSite is None but RequireSecure is false", exception.Message);
     }

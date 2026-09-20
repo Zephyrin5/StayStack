@@ -15,7 +15,7 @@ namespace Api.RateLimiting;
 ///         and, for the calendar, a generate_series cross join.
 ///     </para>
 /// </summary>
-public class ReadRateLimitOptions
+public class ReadRateLimitOptions : IFixedWindowLimit
 {
     // Its own section - see AuthRateLimitOptions.SectionName.
     public const string SectionName = "RateLimiting:Reads";

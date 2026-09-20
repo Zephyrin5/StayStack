@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 namespace IntegrationTests.Features.Configuration;
 
 // Behind a proxy at any non-loopback address, an empty KnownProxies means
@@ -30,8 +31,10 @@ public class ForwardedHeadersStartupTests(IntegrationTestWebApplicationFactory f
     {
         using WebApplicationFactory<Program> host = HostWith((NoDeclaration, "false"));
 
-        InvalidOperationException exception =
-            Assert.Throws<InvalidOperationException>(() => host.CreateClient());
+        // OptionsValidationException, not InvalidOperationException: the rule is an IValidateOptions
+        // checked by ValidateOnStart, so the host refuses to start the way every other invalid setting does.
+        OptionsValidationException exception =
+            Assert.Throws<OptionsValidationException>(() => host.CreateClient());
 
         Assert.Contains("KnownProxies", exception.Message);
     }

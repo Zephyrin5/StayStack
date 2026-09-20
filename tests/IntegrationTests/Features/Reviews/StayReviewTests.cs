@@ -207,8 +207,10 @@ public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
                 o.ManagementTokenLifetimeDaysAfterCheckOut = 90;
             })));
 
-        InvalidOperationException exception =
-            Assert.Throws<InvalidOperationException>(() => misconfigured.CreateClient());
+        // OptionsValidationException, not InvalidOperationException: the rule is an IValidateOptions
+        // checked by ValidateOnStart, so the host refuses to start the way every other invalid setting does.
+        OptionsValidationException exception =
+            Assert.Throws<OptionsValidationException>(() => misconfigured.CreateClient());
 
         Assert.Contains("shorter than", exception.Message);
     }

@@ -7,7 +7,7 @@ namespace Api.RateLimiting;
 ///     the inventory they can hold at once is HoldCapOptions, not this. See
 ///     docs/adr/0016.
 /// </summary>
-public class HoldRateLimitOptions
+public class HoldRateLimitOptions : IFixedWindowLimit
 {
     // Its own section - see AuthRateLimitOptions.SectionName.
     public const string SectionName = "RateLimiting:Holds";
