@@ -19,6 +19,7 @@ public class RefundObligationConfiguration : IEntityTypeConfiguration<RefundObli
         // safe against the underlying values being reordered.
         builder.Property(o => o.Currency).HasConversion<string>().HasMaxLength(3).IsRequired();
         builder.Property(o => o.Cause).HasConversion<string>().HasMaxLength(20).IsRequired();
+        builder.Property(o => o.Outcome).HasConversion<string>().HasMaxLength(20);
 
         // The backstop job's entire query: unresolved obligations that are due,
         // soonest first. On NextAttemptAt rather than CancelledAt, because an

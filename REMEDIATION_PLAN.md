@@ -69,7 +69,7 @@ Goal: one `AppDbContext`. Module boundaries are enforced by the project graph, p
 
 Context: every cancellation and expiry writes a `RefundObligation`. When no payment exists the resolver returns null and `ResolveOutstandingRefundsJob` retries the row forever at a 6-hour ceiling. Once a cancellation commits no new payment can start, so the only payment that can still succeed is a Pending transaction that already existed.
 
-- [ ] **2.1 Add an outcome column.** `RefundObligationOutcome` (`NothingOwed`, `RefundRecorded`), nullable, set together with `ResolvedAt`. Migration.
+- [x] **2.1 Add an outcome column.** `RefundObligationOutcome` (`NothingOwed`, `RefundRecorded`), nullable, set together with `ResolvedAt`. Migration.
 - [ ] **2.2 Resolve obligations for every caller.** Succeeded payment: record the refund, `RefundRecorded`. Refund already recorded: `RefundRecorded`. Any Pending payment: leave unresolved. None, or only Failed: `NothingOwed`. `CancelBookingHandler` and `ExpireUnpaidBookingsJob` both call it inside their transactions.
 - [ ] **2.3 Resolve on payment failure.** In `MarkTransactionFailedHandler`, inside the runner: if the booking is cancelled and its obligation is unresolved, run the resolver.
 - [ ] **2.4 Narrow the sweep.** Select only unresolved obligations whose booking has a Pending transaction, composing an `IQueryable<Guid>` from the payments contract. Keep the backoff. Warn once attempts pass a configurable threshold.

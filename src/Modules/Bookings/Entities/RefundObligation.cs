@@ -58,6 +58,13 @@ public sealed class RefundObligation
     public DateTimeOffset? ResolvedAt { get; set; }
 
     /// <summary>
+    ///     How it ended, set with <see cref="ResolvedAt"/> and never without it. Distinguishes a refund
+    ///     that was recorded from an obligation nothing was owed against, which the sweep would
+    ///     otherwise keep re-examining forever.
+    /// </summary>
+    public RefundObligationOutcome? Outcome { get; set; }
+
+    /// <summary>
     ///     When the sweep should next consider this row.
     ///     <para>
     ///         Without it the sweep starved under its ordinary workload rather
