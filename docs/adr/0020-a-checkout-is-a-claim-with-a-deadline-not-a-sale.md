@@ -31,7 +31,7 @@ The deadline and the sweep belong to Bookings, which owns both the booking and t
 
 ### Payment confirmation
 
-`MarkTransactionSucceededHandler` calls `IBookingPaymentConfirmation.ConfirmPaymentAsync` inside its atomic scope ([ADR-0003](0003-cross-module-writes-commit-in-one-transaction.md)). That endpoint is admin-reachable today, so the final transition is exercised by integration tests before a provider exists.
+`MarkTransactionSucceededHandler` calls `IBookingPaymentConfirmation.ConfirmPaymentAsync` inside its transaction ([ADR-0003](0003-cross-module-writes-commit-in-one-transaction.md)). That endpoint is admin-reachable today, so the final transition is exercised by integration tests before a provider exists.
 
 `ConfirmPaymentAsync` locks the booking row, returns `false` if the booking is cancelled, marks the hold paid and confirms the booking, and all of it commits with the transaction's `Succeeded`. A booking is never confirmed with its inventory released, nor a hold sold against a booking left `Pending`. `MarkHoldPaidAsync` accepts an already-`booked` hold, so a repeated call succeeds.
 

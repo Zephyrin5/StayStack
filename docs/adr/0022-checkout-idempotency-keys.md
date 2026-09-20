@@ -35,7 +35,7 @@ A new table, `checkout_idempotency_records`, keyed by the pre-generated booking 
 
 ### The record commits with the booking
 
-It is written in the confirmation's atomic scope, with the hold transition and the `Booking`. Three properties follow:
+It is written in the confirmation's transaction, with the hold transition and the `Booking`. Three properties follow:
 
 - **The record exists if and only if the booking does.** A committed booking whose replay record never landed would be a guest stranded by the mechanism meant to rescue them.
 - **A rollback frees the key.** A key burned by a failed attempt is worse than no key: the client's retry, the entire reason for sending one, would be refused.

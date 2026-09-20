@@ -52,4 +52,4 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 | [0025](0025-retried-work-is-built-inside-the-retry.md) | The retry protocol | Accepted |
 | [0027](0027-refunds-are-decided-once-from-a-durable-obligation.md) | Refunds are decided once, from a durable obligation | Accepted |
 | [0028](0028-advisory-locks-and-lock-order.md) | Advisory locks and lock order | Accepted |
-| [0029](0029-atomic-scopes-for-cross-module-work.md) | Atomic scopes for cross-module work | Accepted |
+| [0029](0029-one-context-and-the-transaction-runner.md) | One DbContext, and the transaction runner | Accepted |

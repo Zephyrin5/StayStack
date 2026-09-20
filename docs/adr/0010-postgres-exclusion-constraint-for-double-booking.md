@@ -31,7 +31,7 @@ Supporting details:
 
 ## Consequences
 
-- The guarantee lives in raw migration SQL, which a migration squash regenerated from the model would lose. `SchemaInvariantsTests` asserts the constraint exists in the live schema.
+- The guarantee lives in hand-written SQL in `Database`'s `Initial` migration, with nothing in the C# model to regenerate it from. `SchemaInvariantsTests` asserts the constraint exists in the live schema.
 - `HoldExclusionConstraintTests` drives concurrent inserts at the database directly: through the handler's lock protocol it requires one winner and clean rejections for every loser, and with no lock it requires that two overlapping holds never both commit. `HoldAvailabilityConcurrencyTests` covers the same invariant through the handler.
 - The constraint bounds overlap, not how much inventory a caller can hold. Stay-length and lead-time caps and the per-client hold cap bound that; see [ADR-0016](0016-trust-model-for-anonymous-endpoints.md).
 - If npgsql/efcore.pg#1975 is implemented, the constraint can move into the model, as [ADR-0011](0011-prefer-model-config-over-migration-sql.md) did for the transactions partial unique index.

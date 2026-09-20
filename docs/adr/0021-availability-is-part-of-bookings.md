@@ -19,9 +19,9 @@ Every question worth asking about a hold - should it be released, is the claim s
 
 ## Decision
 
-**Holds belong to the Bookings module.** `UnitAvailabilityHold` is mapped in `AppBookingsDbContext`, and each row of the table above is one transaction.
+**Holds belong to the Bookings module.** `UnitAvailabilityHold` is mapped by `BookingsModel` into the `bookings` schema, and each row of the table above is one transaction.
 
-- **`ConfirmBookingHandler`** commits the hold transition with the `Booking`, in one atomic scope that also carries any promotion redemption ([ADR-0003](0003-cross-module-writes-commit-in-one-transaction.md)).
+- **`ConfirmBookingHandler`** commits the hold transition with the `Booking`, in one transaction that also carries any promotion redemption ([ADR-0003](0003-cross-module-writes-commit-in-one-transaction.md)).
 - **`ExpireUnpaidBookingsJob`** and **`CancelBookingHandler`** release the hold in the cancelling transaction.
 - **`BookingPaymentConfirmation`** marks the hold paid and confirms the booking under the booking's row lock ([ADR-0020](0020-a-checkout-is-a-claim-with-a-deadline-not-a-sale.md)).
 
@@ -43,14 +43,14 @@ Hold writes are Dapper ([ADR-0014](0014-ef-core-vs-dapper-decision-rule.md)), an
 
 ## Alternatives considered
 
-- **A separate Availability module upstream of Bookings, joined by atomic scopes.** Rejected: an atomic scope would make each state change commit together, but under [ADR-0004](0004-module-boundaries-via-contracts-projects.md)'s direction rule the hold module still could not name the booking every hold decision depends on.
+- **A separate Availability module upstream of Bookings.** Rejected: one transaction would make each state change commit together, but under [ADR-0004](0004-module-boundaries-via-contracts-projects.md)'s direction rule the hold module still could not name the booking every hold decision depends on.
 - **Counting only `held` toward the cap.** Rejected above.
 
 ## Consequences
 
-- **Provider-specific mapping lives on the `DbContext`, not in an `IEntityTypeConfiguration`.** `StayRange` is `NpgsqlRange<DateOnly>` over `daterange`, and unit tests build `AppBookingsDbContext` on SQLite, where that mapping fails validation. A configuration class cannot see the provider; `Database.IsNpgsql()` on the context can. `xmin` concurrency tokens use the same shape.
+- **`StayRange` is `NpgsqlRange<DateOnly>` over `daterange`**, mapped in `BookingsModel` where the provider is known, as are the `xmin` concurrency tokens. Only Postgres is targeted, and the exclusion constraint below is the reason.
 - **`IHoldConfirmation` is public although only Bookings uses it.** Internal would force `ConfirmBookingHandler` and the jobs internal with it, types Mediator, TickerQ and DI discover.
 - **A retried `ConfirmBookingHandler` does not touch the hold again.** After a lost acknowledgement it finds its own committed `Booking` by the pre-generated id and returns it; `ConfirmHoldAsync` would fail its `held` guard ([ADR-0025](0025-retried-work-is-built-inside-the-retry.md)).
-- **Cross-module effects of a hold state change commit with it.** `ExpireUnpaidBookingsJob` reverses the redemption inside the expiry's atomic scope, so a rollback takes the reversal with it.
+- **Cross-module effects of a hold state change commit with it.** `ExpireUnpaidBookingsJob` reverses the redemption inside the expiry's transaction, so a rollback takes the reversal with it.
 - **Payment never marks a cancelled booking's hold sold.** The cancelled-booking check runs under the row lock before the hold transition.
 - **Migration `AddAvailabilityToBookingsModel` is idempotent rather than empty.** It adds the table's `client_key`, its partial index and the status `CHECK`, and drops `holder_token`, each guarded (`IF EXISTS` / `IF NOT EXISTS`, a `pg_constraint` lookup), so a database migrated from empty matches the model. Only a fresh-database migration exposes an error of this kind.

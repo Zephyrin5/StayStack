@@ -2,11 +2,11 @@
 
 **Status:** Accepted
 
-Owns how work behaves under the execution strategy's retries. Cross-module work commits in one atomic scope ([ADR-0029](0029-atomic-scopes-for-cross-module-work.md)); refund resolution is [ADR-0027](0027-refunds-are-decided-once-from-a-durable-obligation.md); lock order is [ADR-0028](0028-advisory-locks-and-lock-order.md).
+Owns how work behaves under the execution strategy's retries. Cross-module work commits in one transaction ([ADR-0029](0029-one-context-and-the-transaction-runner.md)); refund resolution is [ADR-0027](0027-refunds-are-decided-once-from-a-durable-obligation.md); lock order is [ADR-0028](0028-advisory-locks-and-lock-order.md).
 
 ## Context
 
-Every module's `DbContext` is configured with `EnableRetryOnFailure`, including `40P01` (deadlock) and `40001` (serialization failure). The execution strategy re-runs a delegate - or a bare `SaveChangesAsync`, which it wraps too - after any transient failure. It cannot distinguish two outcomes that need opposite handling:
+`AppDbContext` is configured with `EnableRetryOnFailure`, including `40P01` (deadlock) and `40001` (serialization failure). The execution strategy re-runs a delegate - or a bare `SaveChangesAsync`, which it wraps too - after any transient failure. It cannot distinguish two outcomes that need opposite handling:
 
 - **The commit failed.** Nothing was written; the retry must write it.
 - **The commit landed and its acknowledgement was lost.** Everything was written; the retry meets a database its own first attempt already changed.
@@ -18,14 +18,14 @@ A handler correct for only the first reports failure, or a false conflict, for w
 ### 1. Retried work is built inside the retry
 
 - **Construct the entities a delegate saves inside that delegate.** `SaveChangesAsync` accepts its changes when it returns, before `CommitAsync` runs. Work built outside and saved again on a retry is seen as unchanged: the save writes nothing, the commit succeeds, and the handler reports success over rows that were never written.
-- **Clear the change tracker at the top of the delegate** (an atomic scope does this for every participant), so an attempt never inherits a previous attempt's accepted or tracked entities. `Add` of a fresh instance is re-inserted after `Clear()`; a *loaded* instance mutated again is not.
+- **Clear the change tracker at the top of the delegate** (the runner does this on every attempt), so an attempt never inherits a previous attempt's accepted or tracked entities. `Add` of a fresh instance is re-inserted after `Clear()`; a *loaded* instance mutated again is not.
 - **Reload and re-lock state inside the delegate**, and build the response from the reloaded entity. An instance read before the transaction is stale on the first attempt and may describe a world a previous attempt changed.
-- **Only the owner of a transaction clears its tracker.** A component running inside someone else's transaction - `TransactionReversal` inside `MarkTransactionSucceededHandler`'s scope - shares that context, and `Clear()` there detaches the caller's entities: the handler's response would be built from a detached `Transaction`. Such a component discards the one entity it needs to (`Entry(entity).ReloadAsync()`).
-- **A cross-module write joins the caller's atomic scope** ([ADR-0003](0003-cross-module-writes-commit-in-one-transaction.md)). A cross-module call on the other module's own connection commits on its own and survives the caller's rollback.
+- **Only the owner of a transaction clears its tracker.** A component running inside someone else's transaction - `TransactionReversal` inside `MarkTransactionSucceededHandler`'s - shares the context, and `Clear()` there detaches the caller's entities: the handler's response would be built from a detached `Transaction`. Such a component discards the one entity it needs to (`Entry(entity).ReloadAsync()`).
+- **A cross-module write runs in the caller's transaction** ([ADR-0003](0003-cross-module-writes-commit-in-one-transaction.md)), through the other module's contract on the one context. A write that opened a transaction of its own would commit separately and survive the caller's rollback.
 
 ### 2. A retry recognises its own committed work
 
-- **Identity is minted outside the retried scope.** Every entity factory takes a caller-supplied `Guid id`; the creating handler mints it on the first line of `Handle`. The same applies to any identity a retry must recognise that is not an entity id - `IssuedRefreshToken` carries a replacement refresh token's id and plaintext, chosen before the retry. `Entity.SetCreated` deliberately does not assign `Id`: the audit interceptor runs inside every retried delegate.
+- **Identity is minted outside the retried delegate.** Every entity factory takes a caller-supplied `Guid id`; the creating handler mints it on the first line of `Handle`. The same applies to any identity a retry must recognise that is not an entity id - `IssuedRefreshToken` carries a replacement refresh token's id and plaintext, chosen before the retry. `Entity.SetCreated` deliberately does not assign `Id`: the audit interceptor runs inside every retried delegate.
 - **A write creating a row under a caller-known identity recognises a collision on that identity as its own committed attempt** and returns that row. Two shapes:
   - With an explicit delegate, look for the row by id first, before any check that would judge the request against a table already holding it - `CreateUnitHandler`, `CreatePricingRuleHandler`, `InitiateTransactionHandler`, `HoldAvailabilityHandler`, `ConfirmBookingHandler`. Ordering matters: the hold-cap count, the pricing overlap check and the active-transaction check each reject the request's own row if they run first.
   - With a bare `SaveChangesAsync`, EF sends a single-row insert with no transaction; a lost acknowledgement retries into the primary key. Catch a violation of the entity's own primary key and read the row back through `Persistence.CommittedInsertRecovery` - `CreateProperty`, `AdminCreateProperty`, `CreateHost`, the promotion and review creates, `HostRegistrar`.
@@ -54,4 +54,4 @@ Primary-key recovery depends on two database facts: the key carries the model's 
 - **Enforced behaviourally** by lost-acknowledgement tests for each recovering path (`CreationAmbiguityTests`, `CatalogRetryTests`, `CancelRetryTests`, `ConfirmRetryTests`, `BecomeHostTests`, `RefreshTokenRetryTests`, `CommitAmbiguitySpecTests`' payment test, the create-handler tests) and by `PrimaryKeyConstraintTests`, which pins the primary-key name and ordering facts against the live schema.
 - **Failure injection goes through `CommitFaults`**, whose entry points name the case: `FailBeforeCommit` (the commit fails), `FailAfterCommit` (an explicit transaction's commit lands, its acknowledgement is lost), `FailAfterAutocommit` (the same for a statement EF sent without a transaction, which never reaches a commit hook). A hook on the wrong side of a commit proves the other case; `FaultInjectionProtocolTests` fails any integration test that names a transaction or command interceptor directly.
 - **Faults are targeted at the commit under test.** Test hosts run TickerQ, whose jobs commit on their own schedule and would otherwise take the injection while the test still passes.
-- **Committed state is asserted through a fresh scope.** A context that accepted its changes and failed to commit reads exactly like success.
+- **Committed state is asserted through a fresh context.** A context that accepted its changes and failed to commit reads exactly like success.
