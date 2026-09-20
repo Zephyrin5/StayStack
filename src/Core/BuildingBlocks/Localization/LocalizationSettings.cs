@@ -3,36 +3,22 @@ using System.Diagnostics.CodeAnalysis;
 namespace BuildingBlocks.Localization;
 
 /// <summary>
-///     Bound from the "Localization" config section (see appsettings.json),
-///     same pattern as AuthTokenConfiguration. This is the platform-wide
-///     answer to "which language is required" that LocalizedText.Create
-///     needs from every caller - Domain/SeedWork deliberately has no
-///     opinion on this itself (see LocalizedText's own doc comment), so
-///     every module's create/update handlers resolve it from here instead.
+///     Bound from the "Localization" section: the platform-wide answer to "which language is
+///     required" that LocalizedText.Create needs from every caller, since SeedWork deliberately has no
+///     opinion of its own.
 /// </summary>
 public class LocalizationSettings
 {
     public const string SectionName = "Localization";
 
-    // set, not init, and that is load-bearing rather than stylistic. This
-    // project sets EnableConfigurationBindingGenerator, and the generated
-    // binder assigns properties directly - which it cannot do to an init-only
-    // setter outside an object initializer, so it skips them without
-    // complaint. Bound against init, both of these silently kept the defaults
-    // below.
+    // set, not init: the generated binder assigns properties directly, and silently skips init-only
+    // ones - bound against init, both of these kept their defaults.
     [Required(AllowEmptyStrings = false)]
     public string DefaultCulture { get; set; } = "en";
     /// <summary>
-    ///     No default value, deliberately. The binder appends to a collection
-    ///     that already has elements rather than replacing it, so an initializer
-    ///     of ["en", "ar"] plus a configured ["ar", "fr"] yields
-    ///     ["en", "ar", "ar", "fr"]: a deployment could add cultures but never
-    ///     remove one.
-    ///     <para>
-    ///         So MinLength carries the requirement: a deployment that clears or
-    ///         misspells this section is misconfigured, not defaulted, and refuses
-    ///         to start - the same treatment as DefaultCulture above.
-    ///     </para>
+    ///     No default: the binder appends to a collection that already has elements rather than
+    ///     replacing it, so a deployment could add cultures but never remove one. MinLength carries the
+    ///     requirement instead - a cleared or misspelled section refuses to start.
     /// </summary>
     // MinLengthAttribute is flagged for trimming because its IsValid reflects
     // over a Count property on types that are not collections. It is validated

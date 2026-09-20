@@ -9,10 +9,9 @@ namespace BuildingBlocks.Time;
 ///         calendar, not the server's or the browser's. See docs/adr/0018.
 ///     </para>
 ///     <para>
-    ///     <para>
-    ///         An unusable zone is an error, never a guess: nothing falls back to UTC, because under a
-    ///         UTC+3 market that skew is permissive and loses money.
-    ///     </para>
+///         An unusable zone is an error, never a guess: nothing falls back to UTC, because under a
+///         UTC+3 market that skew is permissive and loses money.
+///     </para>
 /// </summary>
 public static class PropertyTimeZone
 {

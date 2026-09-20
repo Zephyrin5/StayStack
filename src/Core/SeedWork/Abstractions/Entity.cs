@@ -6,29 +6,20 @@ public abstract class Entity
     public Guid Id { get; protected set; }
     public Guid? CreatedBy { get; protected set; }
 
-    // No default here, deliberately - SetCreated always overwrites this with
-    // TimeProvider's own value before commit (see the interceptor below), so
-    // a DateTime.UtcNow initializer would be dead on every save and a wasted
-    // syscall on every entity EF materializes from a query.
+    // No initializer: SetCreated overwrites it before every commit, and one here would also cost a
+    // syscall per entity EF materializes.
     public DateTimeOffset CreatedAt { get; protected set; }
     public Guid? ModifiedBy { get; protected set; }
     public DateTimeOffset? ModifiedAt { get; protected set; }
     public EntityStatus Status { get; protected set; } = EntityStatus.Active;
 
-    // Called only by AuditableEntitySaveChangesInterceptor - kept off each
-    // entity's own business API. Internal, not private: the interceptor
-    // lives in a different project (Persistence) and needs access without
-    // exposing these publicly (see InternalsVisibleTo in Domain.csproj).
+    // Called only by AuditableEntitySaveChangesInterceptor, which lives in another project: internal
+    // rather than private, and off each entity's business API.
     //
-    // Id is deliberately not set here. CreatedAt and CreatedBy are facts about
-    // the save, unknown until SavingChanges. Id is a fact about the operation:
-    // it has to exist before the first attempt, so a retry after a lost
-    // acknowledgement can find the row that attempt committed. The interceptor
-    // runs inside every retried delegate, where RetryIdentityProtocolTests
-    // cannot see it. Factories take the id from the caller instead
-    // (docs/adr/0025, EntityIdentityProtocolTests) and guard it against
-    // Guid.Empty - which also keeps EF from generating a Guid key of its own on
-    // Add.
+    // Id is deliberately not set here. CreatedAt and CreatedBy are facts about the save, unknown until
+    // SavingChanges; an id is a fact about the operation, which must exist before the first attempt so
+    // a retry can find what that attempt committed. Factories take it from the caller (docs/adr/0025,
+    // SS0001) and guard against Guid.Empty, which also stops EF generating one on Add.
     internal void SetCreated(DateTimeOffset createdAt, Guid? createdBy)
     {
         CreatedAt = createdAt;
