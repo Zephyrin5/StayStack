@@ -4,20 +4,13 @@ using System.Diagnostics.CodeAnalysis;
 namespace Persistence;
 
 /// <summary>
-///     Recognises a PostgreSQL integrity violation by the constraint that raised
-///     it. The only code in src that inspects one; ConstraintViolationProtocolTests
-///     enforces that.
+///     Recognises a PostgreSQL integrity violation by the constraint that raised it, which is the
+///     only way to tell them apart: constraints on one table share a SQLSTATE and mean different
+///     things - this operation's own committed row, another row's unique index, a transient
+///     collision - so a catch on SQLSTATE alone gives one answer to all of them.
 ///     <para>
-///         Matching is by constraint name because constraints on one table share a
-///         SQLSTATE and mean different things: a primary key colliding with this
-///         operation's own committed row, a unique index held by another row, an
-///         index whose collision is transient. A catch on SQLSTATE alone gives one
-///         answer to all of them.
-///     </para>
-///     <para>
-///         Callers pass names from a shared source - the EF model for primary
-///         keys, and constants that the entity configuration or migration also
-///         uses for indexes and constraints.
+///         Callers pass names from a shared source: the EF model for primary keys, and the constants
+///         the entity configuration and migration use for indexes and constraints.
 ///     </para>
 /// </summary>
 // The one file allowed to read a PostgresException's ConstraintName and SqlState: src/BannedSymbols.txt

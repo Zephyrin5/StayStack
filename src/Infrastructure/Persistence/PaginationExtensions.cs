@@ -54,16 +54,11 @@ public static class PaginationExtensions
     ///     discarded. That makes the "is there more" answer a property of the
     ///     page query rather than a second full execution of the filter.
     ///     <para>
-    ///         The saving is the entire count. On a cheap filter that is a
-    ///         rounding error and <see cref="ToPagedListAsync{T}"/> is worth
-    ///         its extra information; on GetProperties, whose WHERE clause
-    ///         includes an EXISTS over a candidate-unit id array, it halves the
-    ///         work of every cache miss.
-    ///     </para>
-    ///     <para>
-    ///         One row over is deliberate rather than one page over: the extra
-    ///         row rides along in the same index scan Postgres was already
-    ///         doing for the page, so the marginal cost is a row, not a query.
+    ///         The saving is the entire count: a rounding error on a cheap filter, where
+    ///         <see cref="ToPagedListAsync{T}"/> is worth its extra information, and half the work of
+    ///         every cache miss on GetProperties, whose WHERE clause carries an EXISTS over units.
+    ///         One row over rather than one page: it rides along in the scan Postgres was already
+    ///         doing.
     ///     </para>
     /// </remarks>
     public static async Task<(List<T> Items, bool HasNextPage)> ToPagedSliceAsync<T>(

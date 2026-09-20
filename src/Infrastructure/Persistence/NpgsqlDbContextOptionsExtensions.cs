@@ -4,19 +4,14 @@ namespace Persistence;
 public static class NpgsqlDbContextOptionsExtensions
 {
     /// <summary>
-    ///     Every module's ServicesRegistration calls this instead of
-    ///     repeating UseNpgsql/UseSnakeCaseNamingConvention/sensitive logging
-    ///     by hand. moduleName becomes part of the migrations history table
-    ///     name so each module's history stays independent despite sharing
-    ///     one physical database.
+    ///     One place for UseNpgsql, the snake_case convention, the retry policy and sensitive logging.
+    ///     <paramref name="moduleName"/> names the migrations history table, keeping the application's
+    ///     ("app") and TickerQ's ("jobs") independent in one database.
     ///     <para>
-    ///         Pool sizing: every module resolves the same literal
-    ///         "AppConnection" string unmodified, so Npgsql pools all of them
-    ///         together (default Maximum Pool Size=100) as one shared pool,
-    ///         not one per module. Don't "fix" this with a per-module
-    ///         distinguishing connection-string param - that multiplies the
-    ///         connection count instead of sharing it. Tune pool size via
-    ///         "Maximum Pool Size=N" on the AppConnection secret itself.
+    ///         Every caller passes the same "AppConnection" string unmodified, so Npgsql pools them
+    ///         together rather than once per caller - a distinguishing parameter would multiply the
+    ///         connection count instead of sharing it. The size is set on the connection string, which
+    ///         AddAppDbContext requires outside Development (docs/scale-out-findings.md).
     ///     </para>
     /// </summary>
     public static void ConfigureStayStackDefaults(

@@ -7,12 +7,10 @@ namespace Persistence;
 /// <summary>
 ///     Recovering an insert that committed and lost its acknowledgement.
 ///     <para>
-///         A bare <c>SaveChangesAsync</c> runs under the execution strategy too,
-///         so a retry re-inserts the same caller-chosen id and collides with its
-///         own committed row. That surfaces as a unique violation - and handlers
-///         that translated every unique violation into a domain error ("code
-///         already in use", "already reviewed") answered confidently and wrongly
-///         for a row that exists, while those without a catch answered 500.
+///         A bare <c>SaveChangesAsync</c> runs under the execution strategy too, so a retry
+///         re-inserts the same caller-chosen id and collides with its own committed row. Handlers that
+///         read every unique violation as a domain error ("code already in use", "already reviewed")
+///         then answered confidently and wrongly for a row that exists.
 ///     </para>
 ///     <para>
 ///         Only a violation of the entity's own primary key means "our row is
