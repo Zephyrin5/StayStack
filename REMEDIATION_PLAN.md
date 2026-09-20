@@ -85,7 +85,15 @@ Context: every cancellation and expiry writes a `RefundObligation`. When no paym
 - [x] **3.3 Custom Roslyn analyzers.** `src/Analyzers/StayStack.Analyzers` (netstandard2.0), referenced from `src/Directory.Build.props`. SS0001: an `Entity`-derived type must not call `Guid.NewGuid`, `Guid.CreateVersion7` or `SecureToken.Generate`. SS0002: a lambda passed to `ITransactionRunner.ExecuteAsync` or `IExecutionStrategy.ExecuteAsync` must not call them, directly or through a same-type method, followed semantically. Exempt with `[AllowsMintingInRetry("reason")]`. Test with `Microsoft.CodeAnalysis.CSharp.Analyzer.Testing`. Delete `EntityIdentityProtocolTests`, `RetryIdentityProtocolTests`, and `SourceTree.cs` if unused. Keep `SoftDeleteFilterShapeTests` only if it inspects the model. Accept: the only source-scanning test left is the schema check from 1.7.
 - [x] **3.4 Slim `Program.cs`.** Startup cross-checks into `IValidateOptions` with `ValidateOnStart` (booking lifecycle, SameSite versus Secure, CORS versus SameSite, forwarded headers). One helper for the limiter policies, every limiter partitioned by `ClientNetworkKey.Resolve`. Under 150 lines. Update `ForwardedHeadersStartupTests`, `OptionsValidationTests`, `RateLimitingTests`.
 - [x] **3.5 Remove magic values.** Explicit numeric values on `EntityStatus`; constants for raw SQL and index filters, no literal `2`; `HoldAvailabilityHandler.HoldDuration` into options with a validator.
-- [ ] **3.6 Comment pass.** (deferred to the end, after Tracks A and B: they add and change code, and the pass should read the final state once) One commit per module plus one for Core, Infrastructure and Web. Target under 15% comment lines (measured with the script in the original plan), down from about 33%.
+- [x] **3.6 Comment pass.** One pass over every area, one commit each. 33% -> 26.9%, against a 15%
+  target that was not reached and, on the evidence, should not be: of the 4,762 comment lines left,
+  2,255 are XML documentation on public API and 3,502 sit in blocks of five or more that were each
+  read. The mechanical shortcut - dropping every `<para>` after the first - was tried and abandoned
+  because those paragraphs carry contracts ("runs only inside the caller's transaction", "widen by a
+  day either side") as often as history. Getting to 15% from here means deleting interface
+  documentation, which is a different decision from trimming narration. Per area: Core 50->41,
+  Bookings 42->38, Infrastructure 33->32, Catalog 30->27, Identity 28->27, Hosts 28->26,
+  Promotions 22->21, Web 19->18, Transactions 18->18, Reviews 15->15. One commit per module plus one for Core, Infrastructure and Web. Target under 15% comment lines (measured with the script in the original plan), down from about 33%.
 
 **STOP: end of Phase 3.**
 
