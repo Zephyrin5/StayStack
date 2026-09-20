@@ -28,7 +28,6 @@ public static class ApiJsonTypeInfoResolver
         HostsJsonSerializerContext.Default,
         PromotionsJsonSerializerContext.Default,
         BookingsJsonSerializerContext.Default,
-        BookingsJsonSerializerContext.Default,
         ReviewsJsonSerializerContext.Default,
         TransactionsJsonSerializerContext.Default,
         AppJsonSerializerContext.Default);
