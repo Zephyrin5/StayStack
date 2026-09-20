@@ -21,30 +21,16 @@ public class ReadRateLimitOptions : IFixedWindowLimit
     public const string SectionName = "RateLimiting:Reads";
 
     /// <summary>
-    ///     Far more generous than the auth (10) and hold (20) policies,
-    ///     deliberately, because the failure modes are not symmetric.
+    ///     Far more generous than the auth (10) and hold (20) policies, because the failure modes are
+    ///     not symmetric: the partition is a client network, so tripping this breaks browsing for
+    ///     every guest behind one NAT who has done nothing wrong, invisibly from their side.
     ///     <para>
-    ///         The partition is the caller's IP, so everyone behind one NAT
-    ///         or corporate proxy shares a budget. Tripping this breaks
-    ///         browsing for real guests who have done nothing wrong, which is
-    ///         a worse outcome than the abuse it prevents, and it breaks it
-    ///         invisibly from their side.
+    ///         Set where no plausible browsing session reaches it - a property page fetches a
+    ///         calendar, reviews and the listing, so a busy minute is tens of requests - while still
+    ///         turning "as fast as the network allows" into a bounded number. A ceiling, not a quota.
     ///     </para>
-    ///     <para>
-    ///         Program.cs refuses to start outside Development unless the
-    ///         deployment declares its proxies, its trusted networks, or that it
-    ///         has none, so the worst case this is sized against is one shared
-    ///         office rather than every caller behind the deployment's own proxy.
-    ///     </para>
-    ///     <para>
-    ///         So it is set where no plausible human browsing session reaches
-    ///         it - a property page fetches a calendar, reviews and the
-    ///         listing itself, so a busy minute is tens of requests, not
-    ///         hundreds - while still turning "as fast as the network allows"
-    ///         into a bounded number. This is a ceiling, not a quota.
-    ///     </para>
+    ///     <para>Per instance, not per deployment - see FixedWindowPolicies.</para>
     /// </summary>
-    /// <summary>Per instance, not per deployment - see FixedWindowPolicies.</summary>
     [Range(1, int.MaxValue)]
     public int PermitLimit { get; set; } = 300;
 

@@ -39,27 +39,15 @@ public static class ApiServicesRegistration
     {
         services.AddScoped<ICurrentLanguageProvider, CultureInfoLanguageProvider>();
 
-        // AllowCredentials() is required for the browser to send/receive
-        // the httpOnly refresh-token cookie (see Api.Security.AuthCookies,
-        // cookie-mode auth) - incompatible with AllowAnyOrigin(), which is
-        // fine since origins are already an explicit config list, never a
-        // wildcard. Origins come from config rather than being hardcoded
-        // so prod can set a different list without a code change.
+        // AllowCredentials() is what lets the browser carry the httpOnly refresh-token cookie, and it
+        // is incompatible with AllowAnyOrigin() - fine, since origins are an explicit config list.
         //
-        // CONSTRAINT worth knowing before adding an origin here: CORS and
-        // SameSite are answering different questions, and only CORS is about
-        // origins. An origin that differs only by port or path is still the
-        // same *site*, so the SameSite=Lax cookie is sent normally - that is
-        // exactly the dev setup (localhost:3000 -> localhost:5277), which
-        // needs AllowCredentials precisely because it IS cross-origin.
-        //
-        // An origin on a different registrable domain, or a different scheme,
-        // is cross-*site*. CORS will happily allow it and the browser will
-        // still refuse to attach a Lax cookie, so cookie-mode auth fails with
-        // no error visible anywhere - refresh simply 401s. Such a deployment
-        // has to set Cookies:SameSite to None (which requires
-        // Cookies:RequireSecure, enforced at startup) and accept the CSRF
-        // exposure that comes with it. See CookieSecurityOptions.SameSite.
+        // CONSTRAINT before adding an origin: CORS and SameSite answer different questions, and only
+        // CORS is about origins. An origin differing by port or path is the same *site*, so a Lax
+        // cookie is still sent - that is the dev setup. An origin on another registrable domain or
+        // scheme is cross-*site*: CORS allows it, the browser still refuses to attach the cookie, and
+        // cookie auth fails with no error visible anywhere. That deployment sets Cookies:SameSite to
+        // None and takes the CSRF exposure (CookieSecurityOptions.SameSite).
         string[] allowedOrigins = configuration.AppSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
         services.AddCors(options =>
         {
@@ -152,34 +140,17 @@ public static class ApiServicesRegistration
 
         services.AddMediator(options => { options.ServiceLifetime = ServiceLifetime.Scoped; });
 
-        // In-process (L1) cache only, no L2 registered. Wraps the
-        // GetPriceCalendarHandler/GetPropertiesHandler/GetPropertyByIdHandler
-        // read paths.
+        // In-process (L1) only, wrapping Catalog's three read paths. Bounded explicitly because each
+        // is anonymous and keyed on query parameters, so the number of distinct entries is chosen by
+        // the caller rather than by this application.
         //
-        // Bounded explicitly rather than left on defaults, because every one
-        // of those read paths is anonymous, unthrottled, and keyed on query
-        // parameters - so the number of distinct cache entries is chosen by
-        // the caller, not by this application. The per-request validators cap
-        // how many keys can exist (see GetPriceCalendarRequestValidator's date
-        // bounds and PaginationDefaults.MaxOffset); these cap what the cache
-        // costs even if a future endpoint arrives without such a cap.
+        // SizeLimit is in bytes, which is what HybridCache writes as each entry's Size; with
+        // MaximumPayloadBytes bounding one entry, the pair bounds the whole L1.
         //
-        // SizeLimit is in bytes: HybridCache sets each L1 entry's Size to its
-        // serialized length. That pairs with MaximumPayloadBytes below, which
-        // bounds one entry, to bound the whole L1 as well - a limit on entry
-        // size alone still admits unlimited entries. Nothing else in this
-        // application resolves IMemoryCache today, so this budget is
-        // HybridCache's alone.
-        //
-        // THE RULE THIS LINE CREATES (docs/adr/0024): with SizeLimit set,
-        // *every* entry must specify a Size, or MemoryCache throws "Cache
-        // entry must specify a value for Size when SizeLimit is set" - on the
-        // first request that writes the entry, not at startup. And Size must
-        // be a byte count, because HybridCache is already writing byte counts
-        // here and a budget counting two different units means nothing. A
-        // component that caches anything through IMemoryCache inherits both
-        // halves; MemoryCacheSizeRuleTests fails if one arrives without
-        // having read them.
+        // THE RULE THIS LINE CREATES (docs/adr/0024): with SizeLimit set, *every* IMemoryCache entry
+        // must specify a Size in bytes, or MemoryCache throws on the first request that writes one -
+        // not at startup. MemoryCacheSizeRuleTests fails if a component arrives without having read
+        // this.
         services.AddMemoryCache(options => options.SizeLimit = 64 * 1024 * 1024);
 
         services.AddHybridCache(options =>

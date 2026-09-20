@@ -11,16 +11,10 @@ namespace Api.Security;
 ///         refresh-token cookie would go out without Secure.
 ///     </para>
 ///     <para>
-///         Defaults to true so the failure mode is a cookie a browser refuses
-///         over plain HTTP - loud and local - rather than a session token
-///         travelling in the clear. The two environments that genuinely serve
-///         over HTTP turn it off in their own appsettings files: Development
-///         (plain HTTP, avoiding dev-cert trust problems with Node's fetch)
-///         and Testing (TestServer's in-memory transport is HTTP whatever the
-///         environment is named). Configuration, not an IsDevelopment() check
-///         in the request path, so production code isn't deciding whether it's
-///         under test - and so a real HTTP-only deployment is a config choice
-///         someone has to make deliberately.
+///         Defaults to true, so the failure is a cookie a browser refuses over plain HTTP - loud and
+///         local - rather than a session token in the clear. Development and Testing turn it off in
+///         their own appsettings files. Configuration rather than an IsDevelopment() check, so
+///         production code is not deciding whether it is under test.
 ///     </para>
 /// </summary>
 public class CookieSecurityOptions
@@ -59,23 +53,12 @@ public class CookieSecurityOptions
     ///     vector an attacker page auto-submitting a form POST would otherwise
     ///     reopen, so it is the right default to keep.
     ///     <para>
-    ///         A deployment that puts the SPA on a *different* registrable
-    ///         domain from the API - or on a different scheme, under schemeful
-    ///         same-site - is genuinely cross-site, and a browser will not
-    ///         attach a Lax cookie to those requests at all. Cookie auth then
-    ///         fails with no error anywhere: the cookie is simply never sent
-    ///         and refresh returns 401. That deployment must set this to None,
-    ///         and accept that None is a CSRF exposure Lax was preventing.
-    ///     </para>
-    ///     <para>
-    ///         This is configuration rather than a fixed value because the
-    ///         answer depends on a topology the code cannot see: it lives in
-    ///         Cors:AllowedOrigins and in whatever hostname the API is served
-    ///         under. Making it a setting is what turns "silently broken" into
-    ///         a decision someone records. None with
-    ///         <see cref="RequireSecure"/> false is rejected at startup - every
-    ///         browser refuses that combination, so it is never a deployment,
-    ///         only a mistake.
+    ///         An SPA on a different registrable domain or scheme is genuinely cross-site, and a
+    ///         browser attaches no Lax cookie to those requests: cookie auth then fails with no error
+    ///         anywhere, refresh simply returning 401. Such a deployment sets None and takes on the
+    ///         CSRF exposure Lax was preventing. None with <see cref="RequireSecure"/> false is
+    ///         refused at startup - every browser rejects that pair, so it is a mistake, not a
+    ///         deployment.
     ///     </para>
     /// </summary>
     public SameSiteMode SameSite { get; set; } = SameSiteMode.Lax;
