@@ -1,4 +1,4 @@
-<Project>
+﻿<Project>
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <IsAotCompatible>true</IsAotCompatible>
@@ -18,5 +18,15 @@
     <ItemGroup>
         <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
         <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" />
+    </ItemGroup>
+
+    <!-- SS0001 and SS0002, the identity rules from docs/adr/0025, enforced by the compiler.
+         The analyzer project cannot analyse itself, and Database's generated migrations are not
+         hand-written code this applies to. -->
+    <ItemGroup Condition="'$(MSBuildProjectName)' != 'StayStack.Analyzers'">
+        <ProjectReference Include="$(MSBuildThisFileDirectory)Analyzers\StayStack.Analyzers\StayStack.Analyzers.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false"
+                          PrivateAssets="all" />
     </ItemGroup>
 </Project>

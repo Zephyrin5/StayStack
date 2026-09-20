@@ -7,6 +7,9 @@
         <PackageReference Include="FluentValidation"/>
         <PackageReference Include="Microsoft.Bcl.TimeProvider"/>
         <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing"/>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing"/>
+        <!-- The testing package asks for Roslyn 1.0.1 otherwise, restored against .NET Framework. -->
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces"/>
         <PackageReference Include="Microsoft.NET.Test.Sdk"/>
         <PackageReference Include="Moq"/>
         <PackageReference Include="xunit.v3.assert"/>
@@ -18,6 +21,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\..\src\Analyzers\StayStack.Analyzers\StayStack.Analyzers.csproj"/>
         <ProjectReference Include="..\..\src\Core\SeedWork\SeedWork.csproj"/>
         <ProjectReference Include="..\..\src\Infrastructure\Database\Database.csproj"/>
         <ProjectReference Include="..\..\src\Infrastructure\Persistence\Persistence.csproj"/>
