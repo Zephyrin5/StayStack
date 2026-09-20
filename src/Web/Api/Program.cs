@@ -35,8 +35,11 @@ builder.Services.ConfigureIdentityServices(builder.Configuration, builder.Enviro
 //builder.Services.ConfigureObservabilityServices(builder.Configuration);
 builder.Services.ConfigurePersistenceServices();
 builder.Services.AddAppDbContext(
-    builder.Configuration.GetConnectionString("AppConnection")
-    ?? throw new InvalidOperationException("Connection string AppConnection not found."),
+    builder.Configuration.GetConnectionString("AppConnection") is { Length: > 0 } appConnection
+        ? appConnection
+        : throw new InvalidOperationException(
+            "Connection string AppConnection is missing or empty. appsettings.json ships it empty on " +
+            "purpose, so every environment has to supply its own."),
     builder.Environment.IsDevelopment());
 builder.Services.ConfigureApiServices(builder.Configuration);
 builder.Services.ConfigureCatalogServices(builder.Configuration, builder.Environment);

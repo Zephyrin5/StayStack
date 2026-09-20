@@ -126,9 +126,18 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
         await context.Database.MigrateAsync();
     }
 
+    // With a stated pool size, because AddAppDbContext refuses to start without one outside
+    // Development and these tests run the production registration path. 50 is far above what the
+    // suite uses; the pool-exhaustion measurements set their own.
+    private string TestConnectionString => $"{_dbContainer.GetConnectionString()};Maximum Pool Size=50";
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+
+        // UseSetting, not only ConfigureAppConfiguration: host configuration is what Program reads
+        // when it registers services, and a layered configuration source arrives after that.
+        builder.UseSetting("ConnectionStrings:AppConnection", TestConnectionString);
 
         // TickerQDbContext can't go through the RemoveAll<DbContextOptions<...>>
         // + fresh AddDbContext override every other module's context uses
@@ -142,7 +151,7 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
         builder.ConfigureAppConfiguration((_, configBuilder) =>
         {
             configBuilder.AddInMemoryCollection([
-                new KeyValuePair<string, string?>("ConnectionStrings:AppConnection", _dbContainer.GetConnectionString())
+                new KeyValuePair<string, string?>("ConnectionStrings:AppConnection", TestConnectionString)
             ]);
         });
 

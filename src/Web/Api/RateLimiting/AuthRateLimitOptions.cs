@@ -12,6 +12,7 @@ public class AuthRateLimitOptions : IFixedWindowLimit
     // namespace rather than a name prefix nothing enforces.
     public const string SectionName = "RateLimiting:Auth";
 
+    /// <summary>Per instance, not per deployment - see FixedWindowPolicies.</summary>
     [Range(1, int.MaxValue)]
     public int PermitLimit { get; set; } = 10;
 

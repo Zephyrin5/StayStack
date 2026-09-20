@@ -44,6 +44,7 @@ public class ReadRateLimitOptions : IFixedWindowLimit
     ///         into a bounded number. This is a ceiling, not a quota.
     ///     </para>
     /// </summary>
+    /// <summary>Per instance, not per deployment - see FixedWindowPolicies.</summary>
     [Range(1, int.MaxValue)]
     public int PermitLimit { get; set; } = 300;
 

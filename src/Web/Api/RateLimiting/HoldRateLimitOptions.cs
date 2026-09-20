@@ -12,6 +12,7 @@ public class HoldRateLimitOptions : IFixedWindowLimit
     // Its own section - see AuthRateLimitOptions.SectionName.
     public const string SectionName = "RateLimiting:Holds";
 
+    /// <summary>Per instance, not per deployment - see FixedWindowPolicies.</summary>
     [Range(1, int.MaxValue)]
     public int PermitLimit { get; set; } = 20;
 

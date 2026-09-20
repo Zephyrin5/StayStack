@@ -85,9 +85,11 @@ cache). No change proposed now.
   connection ceiling against a Postgres whose own `max_connections` is typically
   100-200. **This is the first thing that breaks on scale-out**, and it breaks as
   connection refusals under load rather than gradually.
-- **Set `Maximum Pool Size` explicitly** in the connection string for any
-  multi-instance deployment: instances × pool ≤ `max_connections` minus
-  headroom for migrations, psql and the dashboard.
+- **Done: the registration now refuses to start without it** outside Development
+  (`AddAppDbContext`), with the arithmetic in the message: instances × pool ≤
+  `max_connections` minus headroom for migrations, psql and the dashboard.
+  Development keeps the default, where one process and one developer make the
+  question moot. `ConnectionPoolSizeTests` covers all three cases.
 - **PgBouncer in transaction mode is compatible**, as far as the code goes:
   - Advisory locks are all `pg_advisory_xact_lock`/`_shared`/`pg_try_advisory_xact_lock`
     (`AdvisoryLock`), which are transaction-scoped. Session-scoped advisory locks
@@ -134,11 +136,18 @@ Four options:
    configure, but it makes the limit depend on the balancer's hashing and breaks
    on rescale.
 
-**Recommendation: 2 at the edge, keeping the in-process limiter as a floor.** The
-application limits stay as a backstop for anything that reaches an instance
-directly, and the edge carries the real budget. That needs no code change now -
-only a decision, and a note in the limiter options that the numbers are
-per-instance.
+**Decided: 2, the edge carries the budget and the in-process limiter stays as a
+floor** for anything that reaches an instance directly. Redis was rejected -
+these are coarse abuse controls, nothing in the system reads them, and the
+control that actually protects inventory (`MaxActiveHoldsPerClient`) counts
+database rows and is already exact across instances; paying a network hop per
+guarded request to make a coarse control exact is a bad exchange. Sticky sessions
+were rejected because the limit would then depend on the balancer's hashing and
+re-partition on every rescale.
+
+The code change this needed was honesty: `FixedWindowPolicies` and each options
+type now say the counters are per instance, because the numbers read as global
+and are not.
 
 ## B.5 Load test plan - decision needed
 
@@ -160,8 +169,12 @@ Measurements to record for each: p50/p95/p99 latency, error rate by status code,
 `xact_rollback` delta (the retry signal the Phase 1 harness already uses), peak
 `pg_stat_activity` backends, and cache hit ratio.
 
-**The decision needed**: whether to add k6 to the repository with these
-scenarios, and where they run - locally on demand, or in CI against a
-docker-compose topology with N replicas. My recommendation is the repository with
-a `workflow_dispatch` job, matching the AOT publish trial: committed, runnable,
-and off by default.
+**Decided: not yet.** A load test without a target ("300 holds/sec at p95 under
+300 ms") produces numbers nobody can act on, and there is no deployment topology
+to run it against. A committed k6 suite - scripts, a compose topology, seed data,
+a runbook - that nobody runs is the same failure as a scheduled job that always
+fails.
+
+The concrete defect a first load test would have found is already fixed above:
+nothing set the pool size. Write these scenarios when there is a topology and a
+number to hold; the plan does not expire.

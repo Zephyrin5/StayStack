@@ -12,6 +12,13 @@ namespace Api.RateLimiting;
 ///         (docs/adr/0016): derived from the peer address and never from anything the caller supplies,
 ///         and narrowed to a network so one client cannot spread a budget across addresses it owns.
 ///     </para>
+///     <para>
+///         <b>The counters are per instance.</b> Nothing is shared, so N instances admit N times the
+///         configured number, and which instance a caller lands on decides whose budget they spend.
+///         These stay as a floor for anything reaching an instance directly; the real budget belongs
+///         at the edge, which also sees the client address without depending on forwarded headers
+///         (docs/scale-out-findings.md). The per-client hold cap is unaffected - it counts rows.
+///     </para>
 /// </summary>
 internal static class FixedWindowPolicies
 {
