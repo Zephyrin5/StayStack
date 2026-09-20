@@ -1,42 +1,18 @@
 namespace Bookings.Entities;
 
 /// <summary>
-///     Lets a client retry <c>POST /api/bookings</c> after a lost
-///     acknowledgement and receive the original answer instead of a second
-///     booking or a dead end.
+///     Lets a client retry <c>POST /api/bookings</c> after a lost acknowledgement and receive the
+///     original answer instead of a second booking or a dead end.
 ///     <para>
-///         The dead end is the reason this exists. A confirmation's plaintext
-///         management token is generated in memory and returned in the
-///         response; only its hash is persisted
-///         (<see cref="BookingManagementToken.TokenHash"/>). So a connection
-///         dropped after the commit leaves an anonymous guest with a real
-///         booking they cannot reach, cancel, or prove is theirs - they never
-///         learned its id either. Retrying does not help: the hold has already
-///         moved to 'pending_payment', so the retry fails
-///         ConfirmHoldAsync's <c>status = 'held'</c> guard and returns 404.
-///         The booking then blocks its range until the payment window lapses.
-///         Nobody is charged today, and that is exactly the property that
-///         stops being true when payment is wired up.
+///         The dead end is the reason this exists: the plaintext management token is returned in the
+///         response and only its hash is persisted, so a dropped connection leaves an anonymous guest
+///         with a booking they cannot reach and never learned the id of. Retrying does not help - the
+///         hold has moved to 'pending_payment' and the retry fails ConfirmHoldAsync's guard.
 ///     </para>
 ///     <para>
-///         Written in the same atomic scope as the booking, keyed by its
-///         pre-generated id. It outlives the checkout because it carries the
-///         one thing that exists nowhere else once the response is lost.
-///     </para>
-///     <para>
-///         It stores no credential. Replay mints a fresh management token and
-///         persists only its hash, exactly as the original checkout did, so
-///         this table cannot produce a working one - see
-///         ConfirmBookingHandler.ReplayAsync.
-///     </para>
-///     <para>
-///         How long it stays replayable is
-///         BookingLifecyclePolicyOptions.CheckoutReplayWindowHours, not a
-///         constant here. The request path enforces it and
-///         PurgeReplayedCheckoutsJob cleans up behind it, so a value two
-///         things must agree on belongs where both can read it and startup can
-///         validate it - the same drift the duplicated MaxLeadTimeDays
-///         constants had before StaySearchPolicyOptions consolidated them.
+///         It stores no credential: a replay mints a fresh token and persists only its hash, exactly
+///         as the original checkout did. Written in the booking's own transaction, keyed by its
+///         pre-generated id, and replayable for BookingLifecyclePolicyOptions.CheckoutReplayWindowHours.
 ///     </para>
 /// </summary>
 public sealed class CheckoutIdempotencyRecord

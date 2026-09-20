@@ -18,33 +18,17 @@ public record ConfirmBookingRequest : IRequest<ConfirmBookingResponse>
     [Sensitive] public string? PromoCode { get; init; }
 
     /// <summary>
-    ///     The client's retry key, taken from the <c>Idempotency-Key</c>
-    ///     request header. Optional - omitting it gives exactly the previous
-    ///     behaviour, so no existing caller breaks - but a client that takes
-    ///     payment or checkout seriously should always send one.
+    ///     The client's retry key, from the <c>Idempotency-Key</c> header. Optional, but a client that
+    ///     takes checkout seriously always sends one.
     ///     <para>
-    ///         Header rather than body, following the usual convention: it is
-    ///         metadata about the delivery of the request, not part of what is
-    ///         being asked for. Keeping it out of the body also keeps it out
-    ///         of the request fingerprint by construction, which matters -
-    ///         the fingerprint has to identify the checkout, and a value that
-    ///         differs on every attempt cannot be part of it.
+    ///         Header rather than body keeps it out of the request fingerprint by construction: the
+    ///         fingerprint identifies the checkout, and a value that differs per attempt cannot be
+    ///         part of it. Assigned by the endpoint after binding and bindable from nowhere else, so a
+    ///         caller cannot contradict the header through a second channel.
     ///     </para>
     ///     <para>
-    ///         Not bindable from body, query, route or form, and assigned
-    ///         unconditionally by the endpoint after binding - the same shape
-    ///         as HoldAvailabilityRequest.ClientKey, for the same reason. A
-    ///         caller who could set it through a second channel could
-    ///         contradict the header, and nothing here could tell which one
-    ///         the retry meant.
-    ///     </para>
-    ///     <para>
-    ///         Its length rule therefore lives in ConfirmBookingHandler, not
-    ///         in ConfirmBookingRequestValidator. Validators run against the
-    ///         bound request before the endpoint body executes, so a value the
-    ///         endpoint assigns afterwards is invisible to them - a rule put
-    ///         there would pass on every request, including the ones it exists
-    ///         to reject.
+    ///         Its length rule is therefore in ConfirmBookingHandler, not the validator: validators
+    ///         run before the endpoint body, so a rule there would pass on every request.
     ///     </para>
     /// </summary>
     [JsonIgnore]

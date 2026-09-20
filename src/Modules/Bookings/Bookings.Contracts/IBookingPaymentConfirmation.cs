@@ -9,27 +9,18 @@ namespace Bookings.Contracts;
 public interface IBookingPaymentConfirmation
 {
     /// <summary>
-    ///     Turns a succeeded payment into a sold stay: marks the hold
-    ///     'booked' and the booking Confirmed, and returns true.
+    ///     Turns a succeeded payment into a sold stay: marks the hold 'booked' and the booking
+    ///     Confirmed, and returns true.
     ///     <para>
-    ///         Returns false when the payment cannot be turned into a stay at
-    ///         all - the booking was cancelled while this payment was still
-    ///         in flight at the gateway, or its hold was released or expired
-    ///         before the payment resolved and the range is no longer this
-    ///         booking's to sell. A webhook reporting a payment succeeded is
-    ///         a fact about something that already happened externally, not a
-    ///         request that can be rejected, so both cases are reported
-    ///         rather than thrown: the caller's answer to either is the same
-    ///         refund. Throwing would retry an outcome that will never
+    ///         False when the payment cannot become a stay - the booking was cancelled while it was in
+    ///         flight, or its hold was released or expired. A payment succeeding is a fact, not a
+    ///         request that can be refused, so both are reported rather than thrown: the caller's
+    ///         answer to either is the same refund, and throwing would retry an outcome that cannot
     ///         improve.
     ///     </para>
     ///     <para>
-    ///         Runs only inside the caller's atomic scope, with Bookings
-    ///         participating, so both halves commit with the payment. Throws
-    ///         InvalidOperationException outside one.
-    ///     </para>
-    ///     <para>
-    ///         Throws NotFoundException if the booking doesn't exist.
+    ///         Runs only inside the caller's transaction, so both halves commit with the payment;
+    ///         throws InvalidOperationException outside one, and NotFoundException for no such booking.
     ///     </para>
     /// </summary>
     Task<bool> ConfirmPaymentAsync(Guid bookingId, CancellationToken cancellationToken);

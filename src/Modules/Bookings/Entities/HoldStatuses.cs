@@ -1,27 +1,18 @@
 namespace Bookings.Entities;
 
 /// <summary>
-///     The closed set of values <c>unit_availability_holds.status</c> may
-///     take, and the lifecycle they form.
+///     The closed set of values <c>unit_availability_holds.status</c> may take.
 ///     <para>
-///         <c>Held</c> → <c>PendingPayment</c> → <c>Booked</c>, with a
-///         release from either of the last two returning the row to
-///         <c>Held</c> with its timer reset (so the ordinary expiry sweep
-///         reclaims it). Every one of these blocks its range: the exclusion
-///         constraint on (unit_id, stay_range) carries no status predicate,
-///         so a row in any state is inventory held against a guest.
+///         <c>Held</c> → <c>PendingPayment</c> → <c>Booked</c>, and a release from either of the last
+///         two returns the row to <c>Held</c> with its timer reset. Every one blocks its range: the
+///         exclusion constraint carries no status predicate.
 ///     </para>
 ///     <para>
-///         Constants rather than literals because the status is a plain
-///         varchar compared in raw SQL, EF expressions and partial-index
-///         filters alike - nothing type-checks it, and a predicate left
-///         behind when the set grows fails silently rather than loudly. That
-///         is not hypothetical: introducing <c>PendingPayment</c> while
-///         <c>ReleaseHoldAsync</c> still matched only <c>Booked</c> would
-///         have turned every compensating release into a zero-row no-op.
-///         The migration also carries a CHECK constraint over this set, which
-///         catches a stale <em>write</em> even though nothing can catch a
-///         stale read predicate.
+///         Constants rather than literals because the status is a varchar compared in raw SQL, EF
+///         expressions and index filters alike, and a predicate left behind when the set grows fails
+///         silently - adding <c>PendingPayment</c> while ReleaseHoldAsync matched only <c>Booked</c>
+///         would have made every compensating release a zero-row no-op. The schema's CHECK constraint
+///         catches a stale write; nothing catches a stale read.
 ///     </para>
 /// </summary>
 internal static class HoldStatuses

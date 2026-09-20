@@ -41,24 +41,12 @@ internal class HoldConfirmation(BookingsDb dbContext, TimeProvider timeProvider)
     private DbTransaction? AmbientTransaction => dbContext.Database.CurrentTransaction?.GetDbTransaction();
 
     /// <summary>
-    ///     The caller's transaction, required.
+    ///     The caller's transaction, required. Each statement that changes a hold's status is half of
+    ///     a decision whose other half is a Bookings row, and the two must commit together.
     ///     <para>
-    ///         The three statements that change a hold's status are each half
-    ///         of a decision whose other half is a Bookings row: the transition
-    ///         and the booking, the payment and the confirmation, the release and
-    ///         the cancellation. The two halves must commit together.
-    ///     </para>
-    ///     <para>
-    ///         Required so that "participates in your transaction" versus "commits
-    ///         immediately" is not decided silently by whoever opened a
-    ///         transaction several frames up; a caller without one finds out here
-    ///         rather than through a hold released beneath a cancellation that
-    ///         rolled back.
-    ///     </para>
-    ///     <para>
-    ///         A throw rather than opening one: a transaction opened on the
-    ///         caller's behalf would make each statement atomic with nothing but
-    ///         itself.
+    ///         A throw rather than opening one: a transaction opened here would make each statement
+    ///         atomic with nothing but itself, and the caller would find out through a hold released
+    ///         beneath a cancellation that rolled back.
     ///     </para>
     /// </summary>
     private DbTransaction RequiredTransaction([System.Runtime.CompilerServices.CallerMemberName] string? caller = null) =>
