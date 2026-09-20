@@ -42,6 +42,18 @@ public interface IPaymentReversal
     ///     </para>
     /// </summary>
     Task<decimal?> ResolveRefundAsync(Guid bookingId, CancellationToken cancellationToken);
+
+    /// <summary>
+    ///     The bookings whose payments have not finished having a say: any transaction that is not
+    ///     Failed. Unexecuted, so the sweep composes it into its own candidate query.
+    ///     <para>
+    ///         Wider than "a payment could still succeed", which is Pending alone, because the sweep is
+    ///         also the backstop for the two-commit resolution: a refund recorded against a Succeeded
+    ///         payment whose obligation marker did not commit leaves a row only this sweep will finish,
+    ///         and Pending alone would hide it forever (docs/adr/0027).
+    ///     </para>
+    /// </summary>
+    IQueryable<Guid> BookingIdsWithAnUnsettledPayment();
 }
 
 /// <summary>

@@ -208,6 +208,11 @@ public class TransactionReversal(
             or TransactionStatus.Refunded
             or TransactionStatus.RefundFailed;
 
+    public IQueryable<Guid> BookingIdsWithAnUnsettledPayment() =>
+        dbContext.Transactions.AsNoTracking()
+            .Where(t => t.TransactionStatus != TransactionStatus.Failed)
+            .Select(t => t.BookingId);
+
     public async Task<PaymentStateSnapshot?> GetPaymentStateAsync(
         Guid bookingId, CancellationToken cancellationToken)
     {

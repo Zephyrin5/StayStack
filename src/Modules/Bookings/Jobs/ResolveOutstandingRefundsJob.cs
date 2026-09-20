@@ -1,6 +1,7 @@
 ﻿using BuildingBlocks.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using TickerQ.Utilities.Base;
 using TickerQ.Utilities.Models;
 using System.Data;
@@ -25,6 +26,7 @@ public partial class ResolveOutstandingRefundsJob(
     BookingsDb dbContext,
     ITransactionRunner transactionRunner,
     IPaymentReversal paymentReversal,
+    IOptions<BookingLifecyclePolicyOptions> policy,
     TimeProvider timeProvider,
     ILogger<ResolveOutstandingRefundsJob> logger)
 {
@@ -70,8 +72,14 @@ public partial class ResolveOutstandingRefundsJob(
         // newer obligation with an actual payment was never reached. That is
         // the ordinary workload, not an error condition: most cancellations are
         // of bookings nobody paid for.
+        // Only obligations a payment can still change. Every other unresolved row was settled at
+        // cancellation, expiry or payment failure (docs/adr/0027), so what is left here is genuinely
+        // waiting on money: a payment still Pending, or one whose refund was recorded in a commit that
+        // did not reach the obligation's marker. Composed rather than fetched - one statement.
+        IQueryable<Guid> unsettled = paymentReversal.BookingIdsWithAnUnsettledPayment();
+
         var candidates = await dbContext.RefundObligations.AsNoTracking()
-            .Where(o => o.ResolvedAt == null && o.NextAttemptAt <= cutoff)
+            .Where(o => o.ResolvedAt == null && o.NextAttemptAt <= cutoff && unsettled.Contains(o.BookingId))
             .OrderBy(o => o.NextAttemptAt)
             .Take(MaxResultsPerRun)
             .Select(o => new { o.BookingId, o.Attempts })
@@ -80,6 +88,15 @@ public partial class ResolveOutstandingRefundsJob(
         if (candidates.Count == 0)
         {
             return;
+        }
+
+        // A row that has been looked at this many times is waiting on a payment that is not coming:
+        // not an error, and not something the sweep can fix, but the one signal that says so.
+        int stalled = candidates.Count(o => o.Attempts >= policy.Value.RefundSweepStalledAfterAttempts);
+
+        if (stalled > 0)
+        {
+            LogStalledObligations(logger, stalled, policy.Value.RefundSweepStalledAfterAttempts);
         }
 
         if (candidates.Count == MaxResultsPerRun)
@@ -167,6 +184,10 @@ public partial class ResolveOutstandingRefundsJob(
     [LoggerMessage(LogLevel.Error,
         "Failed to resolve the refund obligation for booking {BookingId}; the batch continued and the next run will retry it. A row failing every run is money owed and needs a look")]
     private static partial void LogResolveFailed(ILogger logger, Guid bookingId, Exception exception);
+
+    [LoggerMessage(LogLevel.Warning,
+        "{Count} refund obligations have been swept {Threshold} times or more without settling. Each is waiting on a payment that has neither succeeded nor failed, which the sweep cannot resolve on its own")]
+    private static partial void LogStalledObligations(ILogger logger, int count, int threshold);
 
     [LoggerMessage(LogLevel.Warning,
         "ResolveOutstandingRefunds hit its per-run cap of {MaxResultsPerRun} obligations, the most-retried at {MaxAttempts} attempts. A high attempt count means rows waiting on payments that may never arrive; a low one means refunds are genuinely falling behind")]

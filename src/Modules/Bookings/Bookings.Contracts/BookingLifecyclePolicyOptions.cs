@@ -102,4 +102,18 @@ public class BookingLifecyclePolicyOptions
     /// </summary>
     [Range(1, 168)]
     public int CheckoutReplayWindowHours { get; set; } = 24;
+
+    /// <summary>
+    ///     How many sweep attempts an unresolved refund obligation may take before it is logged as
+    ///     stalled.
+    ///     <para>
+    ///         Every obligation with nothing owed is settled where it is written, so a row the sweep
+    ///         keeps seeing is waiting on a payment that has neither succeeded nor failed. The backoff
+    ///         reaches its six-hour ceiling around the eighth attempt; the default of 12 is therefore
+    ///         "still open a day and a half later", which is an operational question about the payment
+    ///         provider rather than about this job.
+    ///     </para>
+    /// </summary>
+    [Range(1, 1000)]
+    public int RefundSweepStalledAfterAttempts { get; set; } = 12;
 }
