@@ -1,3 +1,4 @@
+using Persistence;
 using Catalog.Contracts;
 using Catalog.Domain;
 using Catalog.Entities;
@@ -102,14 +103,14 @@ public class GetPriceCalendarHandler(
         // EntityStatus.Status is stored as a raw integer ordinal, so
         // ArchivedStatus is passed as a parameter derived from the enum rather
         // than a hardcoded `2` literal.
-        const string sql = $"""
+        string sql = $"""
                            SELECT
                                d::date AS "Date",
                                u.base_price AS "BasePrice",
                                u.currency AS "Currency"
                            FROM generate_series(@From::date, @To::date - interval '1 day', interval '1 day') AS d
                            CROSS JOIN {CatalogModel.Schema}.units u
-                           WHERE u.id = @UnitId AND u.status <> @ArchivedStatus
+                           WHERE u.id = @UnitId AND {SoftDelete.NotArchivedOn("u")}
                            ORDER BY d;
                            """;
 
@@ -119,8 +120,7 @@ public class GetPriceCalendarHandler(
             {
                 request.UnitId,
                 request.From,
-                request.To,
-                ArchivedStatus = (int)EntityStatus.Archived
+                request.To
             },
             cancellationToken: cancellationToken);
 

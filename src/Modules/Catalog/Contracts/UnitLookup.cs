@@ -1,4 +1,5 @@
-﻿using Catalog.Domain;
+﻿using Persistence;
+using Catalog.Domain;
 using Catalog.Entities;
 using Catalog.Exceptions;
 using Dapper;
@@ -27,8 +28,8 @@ internal class UnitLookup(CatalogDb dbContext) : IUnitLookup
         // filter restated by hand; SoftDeleteFilterShapeTests fails if the filter grows past what this
         // copy matches.
         return await dbContext.Database.GetDbConnection().ExecuteScalarAsync<int?>(new CommandDefinition(
-            $"SELECT 1 FROM {CatalogModel.Schema}.units WHERE id = @UnitId AND status <> @ArchivedStatus FOR SHARE",
-            new { UnitId = unitId, ArchivedStatus = (int)EntityStatus.Archived },
+            $"SELECT 1 FROM {CatalogModel.Schema}.units WHERE id = @UnitId AND {SoftDelete.NotArchived} FOR SHARE",
+            new { UnitId = unitId },
             transaction.GetDbTransaction(),
             cancellationToken: cancellationToken)) is not null;
     }

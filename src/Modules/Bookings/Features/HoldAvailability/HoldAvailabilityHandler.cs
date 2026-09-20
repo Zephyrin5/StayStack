@@ -25,8 +25,6 @@ public class HoldAvailabilityHandler(
     IOptions<StaySearchPolicyOptions> staySearchPolicy)
     : IRequestHandler<HoldAvailabilityRequest, HoldAvailabilityResponse>
 {
-    private static readonly TimeSpan HoldDuration = TimeSpan.FromMinutes(15);
-
     // Enforced here, not in the validator, since it needs "today" - same
     // reasoning as the CheckIn-in-the-past guard below. Without it an
     // anonymous caller could hold a unit for [today, today+3650), and the
@@ -224,7 +222,7 @@ public class HoldAvailabilityHandler(
                 throw new TooManyActiveHoldsException();
             }
 
-            DateTimeOffset holdExpiresAt = now.Add(HoldDuration);
+            DateTimeOffset holdExpiresAt = now.AddMinutes(holdCapOptions.Value.HoldWindowMinutes);
 
             const string sql = $"""
                                INSERT INTO {BookingsModel.Schema}.unit_availability_holds (id, unit_id, stay_range, status, hold_expires_at, created_at, guest_count, total_price, subtotal, currency, length_of_stay_discount_amount, client_key)

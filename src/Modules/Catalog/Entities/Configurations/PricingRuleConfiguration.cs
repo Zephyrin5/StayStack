@@ -1,3 +1,4 @@
+using Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 namespace Catalog.Entities.Configurations;
@@ -53,15 +54,12 @@ public class PricingRuleConfiguration : IEntityTypeConfiguration<PricingRule>
         // order. That is a data invariant, so it belongs in the schema rather
         // than resting on every writer remembering to call the checker.
         //
-        // Partial on status <> 2 (EntityStatus.Archived - Postgres only sees
-        // the stored int), same pattern as ix_promotions_code: an archived
-        // rule must not block creating its replacement.
-        //
-        // rule_type is compared as text because it is stored via
-        // HasConversion<string>(), unlike status.
+        // Partial on the soft-delete predicate, same pattern as ix_promotions_code: an archived rule
+        // must not block creating its replacement. rule_type is compared as text because it is stored
+        // via HasConversion<string>(), unlike status.
         builder.HasIndex(r => r.UnitId, LengthOfStayIndex)
             .IsUnique()
-            .HasFilter("rule_type = 'LengthOfStayDiscount' AND status <> 2")
+            .HasFilter($"rule_type = 'LengthOfStayDiscount' AND {SoftDelete.NotArchived}")
             .HasDatabaseName(LengthOfStayIndex);
 
         // "At most one active day-of-week multiplier per unit per weekday" - the
@@ -90,7 +88,7 @@ public class PricingRuleConfiguration : IEntityTypeConfiguration<PricingRule>
 
             builder.HasIndex(r => r.UnitId, name)
                 .IsUnique()
-                .HasFilter($"rule_type = 'DayOfWeekMultiplier' AND status <> 2 AND days_of_week @> ARRAY[{day}]")
+                .HasFilter($"rule_type = 'DayOfWeekMultiplier' AND {SoftDelete.NotArchived} AND days_of_week @> ARRAY[{day}]")
                 .HasDatabaseName(name);
         }
 

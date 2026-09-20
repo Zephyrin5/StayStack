@@ -88,19 +88,18 @@ internal class PromotionRedemption(
         // the soft-delete query filter, so a promotion deleted a moment later
         // would still be redeemable without this predicate.
         //
-        // status <> 2 is EntityStatus.Archived; Postgres only ever sees
-        // the stored int, same predicate PromotionConfiguration's partial
-        // unique index already uses.
+        // The soft-delete predicate restated, the same one PromotionConfiguration's partial unique
+        // index uses.
         //
         // Host ownership is deliberately NOT here, and that is not an
         // omission: Promotion.HostId is set in the constructor and has no
         // mutator, so the value the snapshot read saw is the value this
         // row will always have. There is nothing to race.
-        const string capSql = $"""
+        string capSql = $"""
                               UPDATE {PromotionsModel.Schema}.promotions
                               SET redemption_count = redemption_count + 1
                               WHERE id = @PromotionId
-                                AND status <> 2
+                                AND {SoftDelete.NotArchived}
                                 AND (expires_at IS NULL OR expires_at > @Now)
                                 AND (max_redemptions IS NULL OR redemption_count < max_redemptions);
                               """;
@@ -231,7 +230,7 @@ internal class PromotionRedemption(
             return $"Promo code '{code}' does not exist.";
         }
 
-        if (state.Status == (int)EntityStatus.Archived)
+        if (state.Status == SoftDelete.ArchivedStatus)
         {
             return $"Promo code '{code}' does not exist.";
         }

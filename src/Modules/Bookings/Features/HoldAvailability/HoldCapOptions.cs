@@ -26,4 +26,16 @@ public class HoldCapOptions
     /// </summary>
     [Range(1, int.MaxValue)]
     public int MaxActiveHoldsPerClient { get; set; } = 25;
+
+    /// <summary>
+    ///     How long a hold blocks its range before it expires and the unit returns to inventory.
+    ///     <para>
+    ///         Long enough to choose dates and fill in a checkout form, short enough that an abandoned
+    ///         tab does not cost an evening's availability. The upper bound is deliberately tight:
+    ///         this is an availability control, and a deployment able to set it to a day could quietly
+    ///         restore the unbounded claim it exists to prevent (docs/adr/0020).
+    ///     </para>
+    /// </summary>
+    [Range(1, 120)]
+    public int HoldWindowMinutes { get; set; } = 15;
 }

@@ -23,9 +23,11 @@ public class HoldAvailabilityEndpoint(IMediator mediator)
         Summary(s =>
         {
             s.Summary = "Hold a unit for a stay range, ahead of completing a booking";
+            // The window is configuration (HoldCapOptions.HoldWindowMinutes), so the response says what
+            // this deployment does rather than what the default is.
             s.Description = "Public - holding a room is a pre-checkout action that must work for guests, not " +
-                            "just signed-in customers. Holds expire after 15 minutes if never confirmed into " +
-                            "a booking.";
+                            "just signed-in customers. A hold expires if it is never confirmed into a booking; " +
+                            "the response carries the instant it expires.";
             s.Response<HoldAvailabilityResponse>(200, "Hold created.");
             s.Response<ValidationProblemDetails>(400, "Validation failed.");
             s.Response(404, "Unit not found.");

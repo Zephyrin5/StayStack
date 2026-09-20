@@ -1,3 +1,4 @@
+using Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 namespace Promotions.Entities.Configurations;
@@ -33,8 +34,7 @@ public class PromotionConfiguration : IEntityTypeConfiguration<Promotion>
         // so a plain unique index suffices. Named explicitly per ADR-0011's
         // gotcha.
         //
-        // Partial on status <> 2 (EntityStatus.Archived - Postgres only
-        // sees the stored int) - an unfiltered unique index would let an
+        // Partial on the soft-delete predicate - an unfiltered unique index would let an
         // archived promotion permanently reserve its code:
         // CreatePromotionHandler would keep hitting UniqueViolation for a
         // code nobody can see or redeem. Safe to let multiple archived rows
@@ -42,7 +42,7 @@ public class PromotionConfiguration : IEntityTypeConfiguration<Promotion>
         // invisible to every ordinary lookup.
         builder.HasIndex(p => p.Code, CodeIndex)
             .IsUnique()
-            .HasFilter("status <> 2")
+            .HasFilter(SoftDelete.NotArchived)
             .HasDatabaseName(CodeIndex);
 
         builder.HasIndex(p => p.HostId, "ix_promotions_host_id")
