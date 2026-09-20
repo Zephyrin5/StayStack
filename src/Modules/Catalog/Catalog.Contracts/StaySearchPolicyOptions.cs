@@ -2,47 +2,21 @@ using System.ComponentModel.DataAnnotations;
 namespace Catalog.Contracts;
 
 /// <summary>
-///     How far ahead a stay can start, and how long it can run. One value
-///     each, shared by the search path and the hold path, because a search
-///     that returns a property the guest then cannot hold is a dead end they
-///     only discover after picking dates and clicking through.
+///     How far ahead a stay can start, and how long it can run. One value each, shared by search and
+///     the hold path: separate values fail asymmetrically, and one direction is silent - search
+///     looser than hold is a 400 at the moment of booking, search tighter hides bookable inventory.
 ///     <para>
-///         With separate values the failure is asymmetric and one direction is
-///         silent: search looser than hold means a 400 at the moment of booking,
-///         search tighter means bookable inventory is invisible.
+///         In <c>Catalog.Contracts</c>, the upstream side of the pair (docs/adr/0004): Bookings
+///         already references it, and the reverse reference would make the modules mutually
+///         dependent.
 ///     </para>
 ///     <para>
-///         Lives in <c>Catalog.Contracts</c>, the upstream side of the pair
-///         (docs/adr/0004): Bookings already references it for
-///         <c>IUnitLookup.ResolveStayPricingAsync</c>, while the reverse reference
-///         would make the modules mutually dependent. Not
-///         <c>BuildingBlocks</c>, which is limited to things with no business
-///         meaning.
-///     </para>
-///     <para>
-///         No startup guard on the relationship between the two numbers,
-///         unlike <c>BookingLifecyclePolicyOptions</c>' deadline ordering.
-///         There is no relationship: lead time and stay length are
-///         independent bounds, and the agreement that actually matters - the
-///         one between search and hold - is structural here rather than
-///         something a check could catch drifting.
-///     </para>
-///     <para>
-///         One residual asymmetry a shared value does not remove: the two
-///         paths anchor "today" differently, and must. The hold path uses the
-///         property's own time zone (docs/adr/0018); search uses UTC, because
-///         it spans every property's zone at once. Near the boundary the two
-///         disagree by a day, in a direction that depends on the property's
-///         offset.
-///     </para>
-///     <para>
-///         Search picks its direction: <c>GetPropertiesRequestValidator</c>
-///         allows one day past <see cref="MaxLeadTimeDays"/>, so search is never
-///         stricter than the hold path. Search stricter would silently hide a
-///         bookable property; search looser gives a clear 400 from the hold. The
-///         extra day cannot escape the bound: a local date is within one day of
-///         the UTC date in every zone, so anything search admits, the
-///         property's own clock rejects at most a day later.
+///         One asymmetry a shared value cannot remove: the hold path anchors "today" in the
+///         property's own time zone (docs/adr/0018) and search anchors it in UTC, because search spans
+///         every zone at once. Near the boundary they disagree by a day, in a direction that depends
+///         on the property's offset, so <c>GetPropertiesRequestValidator</c> allows one day past
+///         <see cref="MaxLeadTimeDays"/> - search is then never stricter than the hold, which turns
+///         the silent failure (bookable inventory invisible) into the loud one (a clear 400).
 ///     </para>
 /// </summary>
 public class StaySearchPolicyOptions
@@ -56,13 +30,9 @@ public class StaySearchPolicyOptions
     ///     damage bound in docs/adr/0016, and a product rule about how far
     ///     ahead this platform sells.
     ///     <para>
-    ///         Purely those two things. It is *not* what bounds the
-    ///         blocked-unit set <c>GetPropertiesHandler</c> materializes,
-    ///         though it is easy to assume from where the two are enforced:
-    ///         this bounds where a window starts, and a window's distance
-    ///         from today says nothing about how many bookings fall inside
-    ///         it. See <see cref="MaxStayNights"/>, which is the one that
-    ///         does.
+    ///         It bounds where a window starts, not how wide it is: a window's distance from today
+    ///         says nothing about how many bookings fall inside it. <see cref="MaxStayNights"/> is the
+    ///         one that bounds the set search has to consider.
     ///     </para>
     /// </summary>
     [Range(1, 3650)]

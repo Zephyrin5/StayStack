@@ -32,21 +32,14 @@ public interface IUnitLookup
     ///     included - for callers asking what a unit <em>was</em> rather than
     ///     whether it can be sold.
     ///     <para>
-    ///         The distinction is not cosmetic. Reviews resolve the unit to
-    ///         record which property and host a completed stay belonged to,
-    ///         and they went through the sellable lookup: a host archiving a
-    ///         unit therefore silently took away the right to review every
-    ///         stay that had ever happened in it, answering "Unit not found"
-    ///         to a guest who had slept there. Archival is a decision about
-    ///         future bookings and must not reach backwards into finished
-    ///         ones.
+    ///         Not cosmetic: Reviews went through the sellable lookup, so archiving a unit silently
+    ///         took away the right to review every stay that had ever happened in it. Archival is a
+    ///         decision about future bookings and must not reach backwards into finished ones.
     ///     </para>
     ///     <para>
-    ///         A separate method rather than a flag on GetUnitAsync so each
-    ///         call site states which question it is asking. Sellable paths -
-    ///         confirming a booking, redeeming a promotion against a unit,
-    ///         pricing a stay - must keep using the filtered one, or an
-    ///         archived unit becomes bookable again.
+    ///         A separate method rather than a flag, so each call site states which question it asks.
+    ///         Sellable paths - confirming, redeeming, pricing - keep the filtered one, or an archived
+    ///         unit becomes bookable again.
     ///     </para>
     /// </summary>
     Task<UnitSummary?> GetUnitIncludingArchivedAsync(Guid unitId, CancellationToken cancellationToken);

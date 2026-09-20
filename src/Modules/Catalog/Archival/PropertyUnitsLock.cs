@@ -4,36 +4,20 @@ namespace Catalog.Archival;
 /// <summary>
 ///     Mutual exclusion between archiving a property and adding a unit to it.
 ///     <para>
-///         Archiving a property archives every unit under it, and it finds
-///         those units by reading them. A unit created after that read is
-///         neither checked nor archived, which leaves a live unit under an
-///         archived property - the orphan state <c>UnitLookup</c> throws
-///         <c>OrphanedUnitException</c> for, arrived at without anyone doing
-///         anything wrong.
+///         Archiving a property archives the units it read. A unit created after that read is neither
+///         checked nor archived, leaving a live unit under an archived property - the orphan state
+///         <c>UnitLookup</c> throws for, reached without anyone doing anything wrong.
 ///     </para>
 ///     <para>
-///         <see cref="UnitAvailabilityLock"/> cannot cover this. Per-unit locks
-///         are taken over the units the archiver read, and the whole problem is
-///         a unit that was not in that set. An <c>INSERT</c> has no row to
-///         lock, so the thing both sides can agree on has to be the property
-///         they are both talking about.
+///         <see cref="UnitAvailabilityLock"/> cannot cover it: per-unit locks are taken over the units
+///         the archiver read, and the problem is a unit that was not in that set. An INSERT has no row
+///         to lock, so both sides agree on the property instead.
 ///     </para>
 ///     <para>
-///         <b>Archiving the property takes it exclusively</b>; <b>creating a
-///         unit takes it shared</b>, so concurrent creation under one property
-///         is not serialised - it only blocks against the archive. Creation
-///         must also re-read the property under the lock: ordering the two says
-///         nothing about what the other did, and a creation that resolved its
-///         property before the lock would otherwise insert under one that has
-///         since been archived.
-///     </para>
-///     <para>
-///         Unlike <see cref="UnitAvailabilityLock"/> this is entirely within
-///         Catalog - both sides could have used a row lock on <c>properties</c>
-///         instead. An advisory lock is still the better fit: the creating side
-///         would have to take that row lock <c>FOR UPDATE</c> purely as a
-///         signal, blocking unrelated property edits, and the two mechanisms
-///         would then disagree about what "the property is busy" means.
+///         <b>Archiving takes it exclusively, creating a unit takes it shared</b>, so concurrent
+///         creation is not serialised - it only blocks against an archive. Creation re-reads the
+///         property under the lock: ordering two operations says nothing about what the other did, and
+///         a property resolved before the lock may have been archived since.
 ///     </para>
 /// </summary>
 public static class PropertyUnitsLock

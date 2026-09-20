@@ -15,26 +15,17 @@ public class GetPropertiesHandler(
 {
     public async ValueTask<PagedSliceResponse<PropertySummary>> Handle(GetPropertiesRequest request, CancellationToken cancellationToken)
     {
-        // No stay-window guard here - GetPropertiesRequestValidator owns both
-        // halves of that rule, so an out-of-range window is refused before
-        // this handler runs at all, and before a cache key is ever computed
-        // for it. The hold path keeps its own lead-time check in the handler
-        // because that one needs the property's time zone; this one only
-        // needs a clock. See StaySearchPolicyOptions.
+        // No stay-window guard here: GetPropertiesRequestValidator owns both halves, so an
+        // out-of-range window is refused before a cache key is ever computed (StaySearchPolicyOptions).
         //
-        // Every filter/pagination field that changes the result has to be
-        // part of the key - an incomplete key would serve one search's
-        // results back for another. A 30s staleness window only means a
-        // listing briefly under/over-represents availability, never a
-        // double-booking - the exclusion constraint HoldAvailabilityHandler
-        // writes through guarantees that, not this cache. Same tradeoff as
-        // GetPriceCalendarHandler's own cache.
+        // Every field that changes the result is part of the key, or one search's results are served
+        // for another. The 30s staleness means a listing briefly under- or over-represents
+        // availability, never a double-booking - the exclusion constraint guarantees that, not this
+        // cache.
         //
-        // City is normalized the same way the ILIKE query below normalizes
-        // it, and the same value is used for both - otherwise "Kuwait City"
-        // and "kuwait city" fragment across separate cache entries for what
-        // the query treats as identical, and an unnormalized freeform field
-        // is unbounded cache-key cardinality for no reason.
+        // City is normalised the same way the ILIKE below normalises it, and the same value feeds
+        // both: otherwise "Kuwait City" and "kuwait city" fragment into separate entries for what the
+        // query treats as identical, on an unbounded freeform field.
         string? normalizedCity = request.City?.Trim().ToLowerInvariant();
         string cacheKey = $"properties:{normalizedCity}:{request.PropertyType}:{request.Guests}:" +
                           $"{request.CheckIn:yyyyMMdd}:{request.CheckOut:yyyyMMdd}:{request.Page}:{request.PageSize}";

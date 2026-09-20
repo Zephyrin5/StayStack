@@ -40,21 +40,14 @@ public interface IUnitAvailabilityLookup
     ///     DeleteUnitHandler/DeletePropertyHandler ask alongside
     ///     IUnitArchivalGuard's booking check before archiving a unit.
     ///     <para>
-    ///         Strictly the claims the booking check cannot yet see: a live
-    ///         unexpired hold, or one claimed by a checkout awaiting payment. Both
-    ///         are time-bounded and resolve on their own.
+    ///         Strictly the claims the booking check cannot see yet: a live unexpired hold, or one
+    ///         claimed by a checkout awaiting payment. Both are time-bounded and resolve on their own.
     ///     </para>
     ///     <para>
-    ///         Not sold ('booked') holds: nothing deletes a booked row, so
-    ///         counting them would make a unit with one completed stay, and its
-    ///         property, impossible to archive. Whether a booking blocks archival
-    ///         depends on its dates, which IUnitArchivalGuard answers
-    ///         (BookingStatus != Cancelled and CheckOut >= today).
-    ///     </para>
-    ///     <para>
-    ///         Not expired-but-unswept 'held' rows either: ConfirmHoldAsync
-    ///         requires hold_expires_at > now, so such a hold cannot become a
-    ///         booking.
+    ///         Not 'booked' holds: nothing deletes those, so counting them would make a unit with one
+    ///         completed stay impossible to archive - whether a booking blocks archival depends on its
+    ///         dates, which IUnitArchivalGuard answers. Not expired-but-unswept 'held' rows either:
+    ///         ConfirmHoldAsync requires hold_expires_at > now, so one cannot become a booking.
     ///     </para>
     /// </summary>
     Task<bool> HasActiveHoldForUnitAsync(Guid unitId, DateTimeOffset now, CancellationToken cancellationToken);

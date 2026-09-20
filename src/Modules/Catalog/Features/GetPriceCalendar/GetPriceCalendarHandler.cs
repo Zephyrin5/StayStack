@@ -96,13 +96,9 @@ public class GetPriceCalendarHandler(
         // names exactly - Dapper matches case-insensitively but does NOT
         // strip underscores.
         //
-        // Raw SQL against `units` (Entity-derived, soft-delete-governed)
-        // bypasses the entity's query filter, so the status predicate
-        // is restated by hand (docs/adr/0014's Tier 3 rule); without it an
-        // archived unit's calendar is returned and priced.
-        // EntityStatus.Status is stored as a raw integer ordinal, so
-        // ArchivedStatus is passed as a parameter derived from the enum rather
-        // than a hardcoded `2` literal.
+        // Raw SQL bypasses the entity's query filter, so the soft-delete predicate is restated
+        // through Persistence.SoftDelete (docs/adr/0014's Tier 3 rule). Without it an archived unit's
+        // calendar is returned and priced.
         string sql = $"""
                            SELECT
                                d::date AS "Date",

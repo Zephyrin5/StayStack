@@ -62,26 +62,19 @@ public class PricingRuleConfiguration : IEntityTypeConfiguration<PricingRule>
             .HasFilter($"rule_type = 'LengthOfStayDiscount' AND {SoftDelete.NotArchived}")
             .HasDatabaseName(LengthOfStayIndex);
 
-        // "At most one active day-of-week multiplier per unit per weekday" - the
-        // third overlap invariant, and until these the only one with nothing in
-        // the database behind it. EnsureNoDayOfWeekConflict is a read-then-insert:
-        // with the handlers' Serializable isolation lowered to ReadCommitted, six
-        // concurrent overlapping Saturday multipliers all committed.
-        // PricingCalculator takes the first matching multiplier per night, so
-        // that is a price decided by row order.
+        // "At most one active day-of-week multiplier per unit per weekday". EnsureNoDayOfWeekConflict
+        // is a read-then-insert: at ReadCommitted, six concurrent overlapping Saturday multipliers all
+        // committed, and PricingCalculator takes the first match per night - a price decided by row
+        // order.
         //
-        // One partial unique index per weekday rather than an exclusion
-        // constraint over the array. The exclusion form needs intarray, which is
-        // not enabled here and which, once installed, redefines &&, @> and <@ for
-        // every int4[] in the database with semantics that differ from the
-        // built-ins. The domain is seven fixed values, so "no two active rules
-        // share a day" is exactly "each day is in at most one active rule", and
-        // the built-in @> expresses that with plain btree indexes. A violation
-        // also names the day that collided.
+        // One partial unique index per weekday rather than an exclusion constraint over the array: the
+        // exclusion form needs intarray, which redefines &&, @> and <@ for every int4[] in the
+        // database. The domain is seven fixed values, so "no two active rules share a day" is "each
+        // day is in at most one active rule", which the built-in @> expresses over btree - and a
+        // violation names the day that collided.
         //
-        // The indexes only hold if days_of_week stays inside 0..6 - a 7 would
-        // fall outside every one of them - so the domain is checked here too
-        // rather than resting on PricingRule.ValidateDaysOfWeek alone.
+        // The indexes only hold while days_of_week stays inside 0..6, so the domain is checked here
+        // too rather than resting on PricingRule.ValidateDaysOfWeek alone.
         for (int day = 0; day <= 6; day++)
         {
             string name = DayOfWeekIndexName(day);
