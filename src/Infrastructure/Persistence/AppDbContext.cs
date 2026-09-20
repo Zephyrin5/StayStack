@@ -25,8 +25,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, IEnumer
             module.Configure(modelBuilder);
         }
 
-        // Last, so no module can be configured without it.
-        modelBuilder.ApplySoftDeleteQueryFilter();
     }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)

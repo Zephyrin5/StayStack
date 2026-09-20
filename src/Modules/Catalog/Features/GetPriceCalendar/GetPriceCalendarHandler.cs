@@ -97,7 +97,7 @@ public class GetPriceCalendarHandler(
         // strip underscores.
         //
         // Raw SQL against `units` (Entity-derived, soft-delete-governed)
-        // bypasses EF's ApplySoftDeleteQueryFilter, so the status predicate
+        // bypasses the entity's query filter, so the status predicate
         // is restated by hand (docs/adr/0014's Tier 3 rule); without it an
         // archived unit's calendar is returned and priced.
         // EntityStatus.Status is stored as a raw integer ordinal, so

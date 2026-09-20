@@ -95,7 +95,7 @@ Starts after Phase 1. Runs alongside Phases 2 and 3.
 
 - [ ] **A.1** Make the AOT analysis CI step blocking with warnings as errors.
 - [ ] **A.2** JSON coverage test: every FastEndpoints request and response type resolves through `ApiJsonTypeInfoResolver.Combined`.
-- [ ] **A.3** Per-entity query filters replace `ApplySoftDeleteQueryFilter`; model-based test; update `docs/aot-migration.md`.
+- [x] **A.3** Per-entity query filters replace `ApplySoftDeleteQueryFilter`; model-based test; update `docs/aot-migration.md`.
 - [ ] **A.4** Compiled model (STOP if a feature in use is unsupported), `UseModel` outside Development, drift test, `scripts/regen-compiled-model.sh`.
 - [ ] **A.5** Trial `--precompile-queries` and report failures. No application code changes.
 - [ ] **A.6** Scheduled AOT publish trial in CI against Postgres; record blockers in `docs/aot-migration.md`.

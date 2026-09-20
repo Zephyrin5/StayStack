@@ -12,6 +12,7 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
     public void Configure(EntityTypeBuilder<Transaction> builder)
     {
         builder.ToTable("transactions", TransactionsModel.Schema);
+        builder.HasSoftDeleteFilter();
 
         builder.HasKey(t => t.Id);
 

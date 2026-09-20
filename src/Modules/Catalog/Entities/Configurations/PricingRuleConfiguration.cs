@@ -95,6 +95,8 @@ public class PricingRuleConfiguration : IEntityTypeConfiguration<PricingRule>
         builder.ToTable("pricing_rules", CatalogModel.Schema, t => t.HasCheckConstraint(
             "ck_pricing_rules_days_of_week_domain",
             "rule_type <> 'DayOfWeekMultiplier' OR (cardinality(days_of_week) > 0 AND days_of_week <@ ARRAY[0,1,2,3,4,5,6])"));
+
+        builder.HasSoftDeleteFilter();
     }
 
     /// <summary>

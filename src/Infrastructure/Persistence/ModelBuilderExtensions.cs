@@ -1,52 +1,28 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SeedWork.Abstractions;
 using SeedWork.Enums;
 using SeedWork.ValueObjects;
-using System.Linq.Expressions;
 namespace Persistence;
 
 public static class ModelBuilderExtensions
 {
     /// <summary>
-    ///     Every entity deriving from Entity is automatically excluded from
-    ///     normal queries once archived (soft-deleted) - callers never need
-    ///     to remember "AND status != archived" on every query by hand, and
-    ///     a new entity type gets this filter for free just by inheriting
-    ///     from Entity, no per-type configuration required.
+    ///     Excludes archived rows from every query for this entity. Called by each entity's
+    ///     configuration rather than applied to every <see cref="Entity"/> subtype by convention: the
+    ///     convention built its predicate as an <c>Expression</c> over a CLR type discovered at
+    ///     runtime, which is reflection the trimmer cannot follow (docs/aot-migration.md).
     ///     <para>
-    ///         <b>This predicate is restated by hand in raw SQL.</b> A query
-    ///         filter is an EF construct, so Dapper never sees it - the Tier 3
-    ///         statement in <c>GetPriceCalendarHandler</c> carries its own
-    ///         <c>u.status &lt;&gt; @ArchivedStatus</c> because of that, and
-    ///         once returned an archived unit's priced calendar when it
-    ///         didn't. If this filter ever gains a condition, that copy is
-    ///         wrong from the moment yours is right, and nothing about the
-    ///         change will point at it - the two agree today only because
-    ///         both are a single status comparison.
-    ///         <c>SoftDeleteFilterShapeTests</c> fails if that stops being
-    ///         true, so the divergence is caught rather than discovered.
+    ///         <b>This predicate is restated by hand in raw SQL</b>, as <see cref="SoftDelete"/>: a
+    ///         query filter is an EF construct, so Dapper never sees it, and GetPriceCalendarHandler
+    ///         once priced an archived unit's calendar because of that. The two agree only because
+    ///         both are a single status comparison, which SoftDeleteFilterTests pins - along with the
+    ///         fact that every entity has one, which is what the convention used to guarantee.
     ///     </para>
     /// </summary>
-    public static void ApplySoftDeleteQueryFilter(this ModelBuilder modelBuilder)
-    {
-        foreach (IMutableEntityType entityType in modelBuilder.Model.GetEntityTypes())
-        {
-            if (!typeof(Entity).IsAssignableFrom(entityType.ClrType))
-            {
-                continue;
-            }
-
-            ParameterExpression parameter = Expression.Parameter(entityType.ClrType, "e");
-            MemberExpression statusProperty = Expression.Property(parameter, nameof(Entity.Status));
-            ConstantExpression archivedValue = Expression.Constant(EntityStatus.Archived);
-            BinaryExpression notArchived = Expression.NotEqual(statusProperty, archivedValue);
-            LambdaExpression filter = Expression.Lambda(notArchived, parameter);
-
-            entityType.SetQueryFilter(filter);
-        }
-    }
+    public static EntityTypeBuilder<TEntity> HasSoftDeleteFilter<TEntity>(this EntityTypeBuilder<TEntity> builder)
+        where TEntity : Entity =>
+        builder.HasQueryFilter(entity => entity.Status != EntityStatus.Archived);
 
     /// <summary>
     ///     Maps a Money-typed complex property onto the same two plain

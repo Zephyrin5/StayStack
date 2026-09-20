@@ -8,6 +8,7 @@ public class BookingConfiguration : IEntityTypeConfiguration<Booking>
     public void Configure(EntityTypeBuilder<Booking> builder)
     {
         builder.ToTable("bookings", BookingsModel.Schema);
+        builder.HasSoftDeleteFilter();
 
         builder.HasKey(b => b.Id);
 

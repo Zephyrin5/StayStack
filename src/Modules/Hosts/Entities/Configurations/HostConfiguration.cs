@@ -1,3 +1,4 @@
+﻿using Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 namespace Hosts.Entities.Configurations;
@@ -7,6 +8,7 @@ public class HostConfiguration : IEntityTypeConfiguration<Host>
     public void Configure(EntityTypeBuilder<Host> builder)
     {
         builder.ToTable("hosts", HostsModel.Schema);
+        builder.HasSoftDeleteFilter();
 
         builder.HasKey(o => o.Id);
 

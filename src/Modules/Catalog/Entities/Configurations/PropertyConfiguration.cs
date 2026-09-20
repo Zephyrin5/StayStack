@@ -1,3 +1,4 @@
+using Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 namespace Catalog.Entities.Configurations;
@@ -7,6 +8,7 @@ public class PropertyConfiguration : IEntityTypeConfiguration<Property>
     public void Configure(EntityTypeBuilder<Property> builder)
     {
         builder.ToTable("properties", CatalogModel.Schema);
+        builder.HasSoftDeleteFilter();
 
         builder.HasKey(p => p.Id);
 

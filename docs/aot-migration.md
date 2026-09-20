@@ -1,4 +1,4 @@
-# Native AOT migration tracking
+﻿# Native AOT migration tracking
 
 `src/Directory.Build.props` sets `IsAotCompatible=true`, which turns on the
 trim/AOT analyzers (`IL2xxx`/`IL3xxx`) for every project under `src/`. CI's
@@ -13,15 +13,22 @@ place to note things that aren't warnings yet but will matter as the app grows.
 
 | Site | Warnings | Root cause | Why deferred |
 |---|---|---|---|
-| `Persistence/ModelBuilderExtensions.cs` - `ApplySoftDeleteQueryFilter` | IL2026, IL3050 | Builds a query-filter `Expression` for each `Entity`-derived CLR type discovered at runtime via `modelBuilder.Model.GetEntityTypes()`. IL2026 (`Expression.Property(Expression, string)`) is fixable in isolation - swap for the `PropertyInfo` overload via a cached `typeof(Entity).GetProperty(nameof(Entity.Status))`. IL3050 (`Expression.Lambda(Expression, ParameterExpression[])`, the untyped overload) is structural: the CLR type is only known at runtime, so there's no compile-time generic parameter to build a typed `Expression<Func<TEntity,bool>>` from. | The only fully AOT-clean fix drops the "every `Entity` subtype gets the filter automatically" convention in favor of one explicit `modelBuilder.Entity<T>().HasQueryFilter(...)` call per entity type - real boilerplate traded for a warning that's currently harmless (app isn't AOT-published). Revisit if/when AOT publishing becomes real. |
-| `Persistence/StayStackDbContext.cs` - base constructor | IL2026, IL3050 | `DbContext(DbContextOptions)` itself is annotated `RequiresUnreferencedCode`/`RequiresDynamicCode` inside EF Core - not something app code causes or can silence by rewriting call sites. | Tracks EF Core's own Native AOT support level for the relational/Npgsql provider, not app code. Re-check against the EF Core version in use each time it's upgraded. |
+| `Persistence/AppDbContext.cs` - base constructor | IL2026, IL3050 | `DbContext(DbContextOptions)` itself is annotated `RequiresUnreferencedCode`/`RequiresDynamicCode` inside EF Core - not something app code causes or can silence by rewriting call sites. | Tracks EF Core's own Native AOT support level for the relational/Npgsql provider, not app code. Re-check against the EF Core version in use each time it's upgraded. |
 
-Both were suppressed with `Justification = "<Pending>"` rather than
-`"Not utilizing Native AOT execution"` for the query-filter one specifically
-because a real fix (the per-entity `HasQueryFilter<T>` rewrite) exists and is
-just deferred, not accepted as permanent.
+The remaining suppression is EF Core's own annotation on a constructor this app
+has to call, not something app code can rewrite.
 
 ## Already addressed
+
+- `ApplySoftDeleteQueryFilter` built a query-filter `Expression` per CLR type
+  discovered through `modelBuilder.Model.GetEntityTypes()` - IL2026 for
+  `Expression.Property(Expression, string)` and IL3050 for the untyped
+  `Expression.Lambda`, the second of which had no fix short of dropping the
+  convention. Each entity's configuration now calls
+  `HasSoftDeleteFilter<TEntity>()`, which is generic and builds nothing at
+  runtime. What the convention guaranteed - that no entity is missed - is
+  `SoftDeleteFilterTests`, which reads the assembled model and fails if any
+  `Entity`-derived type has no filter or a filter of another shape.
 
 - `ApiJsonTypeInfoResolver` used to fall back to `new DefaultJsonTypeInfoResolver()`
   (reflection-based) for any type not covered by a module's source-generated

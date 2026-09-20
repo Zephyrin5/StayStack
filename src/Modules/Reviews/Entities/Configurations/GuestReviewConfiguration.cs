@@ -1,3 +1,4 @@
+using Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 namespace Reviews.Entities.Configurations;
@@ -10,6 +11,7 @@ public class GuestReviewConfiguration : IEntityTypeConfiguration<GuestReview>
     public void Configure(EntityTypeBuilder<GuestReview> builder)
     {
         builder.ToTable("guest_reviews", ReviewsModel.Schema);
+        builder.HasSoftDeleteFilter();
 
         builder.HasKey(r => r.Id);
 
