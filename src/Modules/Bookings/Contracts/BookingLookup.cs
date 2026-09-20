@@ -100,14 +100,16 @@ internal class BookingLookup(
     }
 
     public Task MarkRefundObligationResolvedAsync(
-        Guid bookingId, DateTimeOffset resolvedAt, CancellationToken cancellationToken) =>
+        Guid bookingId, DateTimeOffset resolvedAt, RefundObligationOutcome outcome, CancellationToken cancellationToken) =>
         // ExecuteUpdate filtered on still-unresolved, so a repeat is a zero-row
         // no-op rather than a rewritten timestamp - the first resolution is the
         // one that happened, and moving the marker would hide a retry that
         // should be visible.
         dbContext.RefundObligations
             .Where(o => o.BookingId == bookingId && o.ResolvedAt == null)
-            .ExecuteUpdateAsync(o => o.SetProperty(row => row.ResolvedAt, resolvedAt), cancellationToken);
+            .ExecuteUpdateAsync(
+                o => o.SetProperty(row => row.ResolvedAt, resolvedAt).SetProperty(row => row.Outcome, outcome),
+                cancellationToken);
 
     public Task<BookingAccessResult?> GetBookingDetailsAsync(Guid bookingId, CancellationToken cancellationToken)
     {

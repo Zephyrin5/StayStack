@@ -122,8 +122,8 @@ public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory fac
             inner.GetRefundObligationAsync(bookingId, cancellationToken);
 
         public Task MarkRefundObligationResolvedAsync(
-            Guid bookingId, DateTimeOffset resolvedAt, CancellationToken cancellationToken) =>
-            inner.MarkRefundObligationResolvedAsync(bookingId, resolvedAt, cancellationToken);
+            Guid bookingId, DateTimeOffset resolvedAt, RefundObligationOutcome outcome, CancellationToken cancellationToken) =>
+            inner.MarkRefundObligationResolvedAsync(bookingId, resolvedAt, outcome, cancellationToken);
     }
 
     [Fact]
@@ -309,6 +309,7 @@ public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory fac
                     jobScope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.ITransactionRunner>(),
                     jobScope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
                     jobScope.ServiceProvider.GetRequiredService<global::Promotions.Contracts.IPromotionRedemption>(),
+                    jobScope.ServiceProvider.GetRequiredService<IPaymentReversal>(),
                     TimeProvider.System,
                     NullLogger<ExpireUnpaidBookingsJob>.Instance)
                 .ExpireAsync(null!, TestContext.Current.CancellationToken)

@@ -173,6 +173,7 @@ public class PendingRefundReportingTests(IntegrationTestWebApplicationFactory fa
                     jobScope.ServiceProvider.GetRequiredService<BuildingBlocks.Persistence.ITransactionRunner>(),
                     jobScope.ServiceProvider.GetRequiredService<IHoldConfirmation>(),
                     jobScope.ServiceProvider.GetRequiredService<global::Promotions.Contracts.IPromotionRedemption>(),
+                    jobScope.ServiceProvider.GetRequiredService<IPaymentReversal>(),
                     TimeProvider.System,
                     NullLogger<ExpireUnpaidBookingsJob>.Instance)
                 .ExpireAsync(null!, TestContext.Current.CancellationToken);

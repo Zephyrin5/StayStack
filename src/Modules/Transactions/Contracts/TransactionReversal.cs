@@ -81,14 +81,14 @@ public class TransactionReversal(
 
         if (transaction is null)
         {
-            return null;
+            return await ResolveWithoutAPaymentAsync(bookingId, transactionId, cancellationToken);
         }
 
         // Step 2 - a refund exists, so only the obligation's bookkeeping can be outstanding.
         if (HasRecordedARefund(transaction.TransactionStatus))
         {
             await bookingLookup.MarkRefundObligationResolvedAsync(
-                bookingId, timeProvider.GetUtcNow(), cancellationToken);
+                bookingId, timeProvider.GetUtcNow(), RefundObligationOutcome.RefundRecorded, cancellationToken);
 
             return null;
         }
@@ -153,16 +153,53 @@ public class TransactionReversal(
             }
 
             await bookingLookup.MarkRefundObligationResolvedAsync(
-                bookingId, timeProvider.GetUtcNow(), cancellationToken);
+                bookingId, timeProvider.GetUtcNow(), RefundObligationOutcome.RefundRecorded, cancellationToken);
 
             return null;
         }
 
         // Filtered on ResolvedAt == null, so a repeat is a zero-row no-op.
         await bookingLookup.MarkRefundObligationResolvedAsync(
-            bookingId, timeProvider.GetUtcNow(), cancellationToken);
+            bookingId, timeProvider.GetUtcNow(), RefundObligationOutcome.RefundRecorded, cancellationToken);
 
         return amount.Amount;
+    }
+
+    /// <summary>
+    ///     No payment this obligation could be refunded from. Whether that is final or merely current
+    ///     is the whole question: a cancellation stops new payments from starting (InitiateTransaction
+    ///     refuses a cancelled booking), so the only payment that can still succeed is one already
+    ///     Pending. With none, nothing is owed and never will be, and saying so is what stops the sweep
+    ///     re-reading the row forever (docs/adr/0027).
+    /// </summary>
+    private async Task<decimal?> ResolveWithoutAPaymentAsync(
+        Guid bookingId, Guid? transactionId, CancellationToken cancellationToken)
+    {
+        // Scoped to one attempt, so this says nothing about the booking's other transactions.
+        if (transactionId is not null)
+        {
+            return null;
+        }
+
+        RefundObligationSnapshot? obligation = await bookingLookup.GetRefundObligationAsync(bookingId, cancellationToken);
+
+        if (obligation is null || obligation.IsResolved)
+        {
+            return null;
+        }
+
+        bool aPaymentCanStillSucceed = await dbContext.Transactions
+            .AnyAsync(t => t.BookingId == bookingId && t.TransactionStatus == TransactionStatus.Pending, cancellationToken);
+
+        if (aPaymentCanStillSucceed)
+        {
+            return null;
+        }
+
+        await bookingLookup.MarkRefundObligationResolvedAsync(
+            bookingId, timeProvider.GetUtcNow(), RefundObligationOutcome.NothingOwed, cancellationToken);
+
+        return null;
     }
 
     /// <summary>Whether a refund has been recorded, settled or not. Failed produced no refund.</summary>

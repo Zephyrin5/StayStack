@@ -20,6 +20,7 @@ public partial class ExpireUnpaidBookingsJob(
     ITransactionRunner transactionRunner,
     IHoldConfirmation holdConfirmation,
     IPromotionRedemption promotionRedemption,
+    IPaymentReversal paymentReversal,
     TimeProvider timeProvider,
     ILogger<ExpireUnpaidBookingsJob> logger)
 {
@@ -126,6 +127,12 @@ public partial class ExpireUnpaidBookingsJob(
                 await dbContext.SaveChangesAsync(token);
 
                 await promotionRedemption.ReverseRedemptionAsync(booking.Id, token);
+
+                // Settles the obligation here rather than leaving it to the sweep. An expiry only fires
+                // on an unpaid booking, so the usual outcome is NothingOwed and the row is finished the
+                // moment it is written; a payment already Pending leaves it open, which is the case the
+                // obligation exists for (docs/adr/0027).
+                await paymentReversal.ResolveRefundAsync(booking.Id, token);
 
                 return true;
             },

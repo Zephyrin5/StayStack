@@ -68,8 +68,8 @@ public interface IBookingLookup
     Task<RefundObligationSnapshot?> GetRefundObligationAsync(Guid bookingId, CancellationToken cancellationToken);
 
     /// <summary>
-    ///     Marks the obligation settled, once a refund has been recorded
-    ///     against the transaction.
+    ///     Marks the obligation settled, with how it ended: a refund recorded against the transaction,
+    ///     or nothing owed.
     ///     <para>
     ///         The second of two commits, and the reason the first is safe to
     ///         repeat: a crash in between leaves this unset, the backstop job
@@ -78,7 +78,7 @@ public interface IBookingLookup
     ///     </para>
     /// </summary>
     Task MarkRefundObligationResolvedAsync(
-        Guid bookingId, DateTimeOffset resolvedAt, CancellationToken cancellationToken);
+        Guid bookingId, DateTimeOffset resolvedAt, RefundObligationOutcome outcome, CancellationToken cancellationToken);
 }
 
 public record RefundObligationSnapshot

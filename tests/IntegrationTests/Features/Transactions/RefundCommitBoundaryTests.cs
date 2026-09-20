@@ -153,7 +153,8 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
         {
             await scope.ServiceProvider.GetRequiredService<IBookingLookup>()
                 .MarkRefundObligationResolvedAsync(
-                    bookingId, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
+                    bookingId, DateTimeOffset.UtcNow, RefundObligationOutcome.RefundRecorded,
+                    TestContext.Current.CancellationToken);
         }
 
         // Act
@@ -254,8 +255,8 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
             inner.GetBookingDetailsAsync(bookingId, cancellationToken);
 
         public Task MarkRefundObligationResolvedAsync(
-            Guid bookingId, DateTimeOffset resolvedAt, CancellationToken cancellationToken) =>
-            inner.MarkRefundObligationResolvedAsync(bookingId, resolvedAt, cancellationToken);
+            Guid bookingId, DateTimeOffset resolvedAt, RefundObligationOutcome outcome, CancellationToken cancellationToken) =>
+            inner.MarkRefundObligationResolvedAsync(bookingId, resolvedAt, outcome, cancellationToken);
     }
 
     [Fact]
