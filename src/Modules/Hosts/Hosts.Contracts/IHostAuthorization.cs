@@ -1,15 +1,10 @@
 namespace Hosts.Contracts;
 
 /// <summary>
-///     The actual mechanism behind "never trust HostId from the client".
-///     Two distinct operations, not one generic comparison, because the
-///     two real cases genuinely differ: CreateProperty has no existing
-///     resource to check against (the caller either is a host or isn't),
-///     while CreateUnit targets an existing Property whose HostId has to
-///     be resolved (a DB lookup) before there's anything to compare.
-///     Both funnel through here so future tenant-scoped handlers
-///     (UpdateProperty, host transaction views, etc.) reuse one
-///     enforcement point instead of each reimplementing the comparison.
+///     The mechanism behind "never trust HostId from the client". Two operations rather than one
+///     comparison because the cases differ: creating a property has no existing resource to check
+///     against, while creating a unit targets a property whose HostId must be resolved first. One
+///     enforcement point, so a later tenant-scoped handler does not reimplement the comparison.
 /// </summary>
 public interface IHostAuthorization
 {

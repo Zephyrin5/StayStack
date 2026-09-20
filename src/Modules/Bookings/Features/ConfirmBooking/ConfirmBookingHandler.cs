@@ -55,7 +55,7 @@ public class ConfirmBookingHandler(
             }
         }
 
-        // Chosen once, before the scope (docs/adr/0025). A retry after a lost
+        // Chosen once, before the transaction (docs/adr/0025). A retry after a lost
         // acknowledgement recognises its own committed booking by this id, and
         // returns this same management token, whose hash that attempt stored - a
         // token minted per attempt would hand the guest a credential with no row
@@ -236,7 +236,7 @@ public class ConfirmBookingHandler(
         return booking;
     }
 
-    // Both are answered after the scope has rolled back, from committed state.
+    // Both are answered after the transaction has rolled back, from committed state.
     private sealed class HoldUnavailableException : Exception;
 
     private sealed class IdempotencyKeyTakenException : Exception;

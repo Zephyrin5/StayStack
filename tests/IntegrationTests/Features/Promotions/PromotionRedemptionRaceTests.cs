@@ -24,7 +24,7 @@ namespace IntegrationTests.Features.Promotions;
 // the redemption cap, expiry and archival in one conditional UPDATE. A code can
 // lapse or be deleted between the read and the write; these drive that window
 // deterministically rather than racing threads for it. RedeemAsync runs only
-// inside a caller's atomic scope, so each test opens one.
+// inside a caller's transaction, so each test opens one.
 [Collection("Integration Tests")]
 public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory factory)
 {

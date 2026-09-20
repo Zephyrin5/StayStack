@@ -11,7 +11,7 @@ public interface IHostRegistrar
     ///     Registers a Host under a caller-supplied id, idempotently: calling
     ///     it again with the same id is a no-op rather than a second Host.
     ///     <para>
-    ///         Runs inside the caller's atomic scope (BecomeHostHandler), so the
+    ///         Runs inside the caller's transaction (BecomeHostHandler), so the
     ///         Host commits only with the caller's link to it.
     ///     </para>
     /// </summary>

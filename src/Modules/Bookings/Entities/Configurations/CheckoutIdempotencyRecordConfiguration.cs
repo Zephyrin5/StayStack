@@ -18,7 +18,7 @@ public class CheckoutIdempotencyRecordConfiguration : IEntityTypeConfiguration<C
         // the same key both miss the replay read - it happens before either has
         // written anything. For the same hold, the hold transition's row lock
         // separates them. For different holds, this insert fails for the loser,
-        // and its atomic scope rolls its hold transition back with it, so one
+        // and its transaction rolls its hold transition back with it, so one
         // key never commits two bookings.
         //
         // Plain, not partial: a record is only ever written with its booking,

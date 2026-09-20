@@ -125,7 +125,7 @@ public partial class ExpireUnpaidBookingsJob(
             },
             cancellationToken);
 
-        // After the scope returns, so a retried attempt counts once.
+        // After the transaction returns, so a retried attempt counts once.
         if (expired)
         {
             BookingsTelemetry.UnpaidBookingExpired.Add(1);

@@ -22,10 +22,8 @@ public interface IPromotionRedemption
     ///     the caller decides whether that includes or excludes any
     ///     length-of-stay discount (see ConfirmBookingHandler).
     ///     <para>
-    ///         Runs only inside the caller's atomic scope, with Promotions
-    ///         participating: the redemption commits with the booking it
-    ///         discounts or not at all. Throws InvalidOperationException
-    ///         outside one.
+    ///         Runs only inside the caller's transaction, so the redemption commits with the booking
+    ///         it discounts or not at all. Throws InvalidOperationException outside one.
     ///     </para>
     /// </summary>
     Task<PromotionRedemptionResult> RedeemAsync(
@@ -45,8 +43,7 @@ public interface IPromotionRedemption
     ///     never redeemed anything, or already had its redemption reversed -
     ///     same shape as Catalog.Contracts.IHoldConfirmation.ReleaseHoldAsync.
     ///     <para>
-    ///         Runs only inside the caller's atomic scope, with Promotions
-    ///         participating. Throws InvalidOperationException outside one.
+    ///         Runs only inside the caller's transaction. Throws InvalidOperationException outside one.
     ///     </para>
     /// </summary>
     Task ReverseRedemptionAsync(Guid bookingId, CancellationToken cancellationToken);

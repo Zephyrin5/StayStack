@@ -25,7 +25,7 @@ public class BecomeHostHandler(
         // null in practice - guarded anyway rather than trusting that.
         Guid userId = currentUserProvider.UserId ?? throw new InvalidCredentialsException();
 
-        // Minted before the scope (docs/adr/0025). A retry after a lost
+        // Minted before the transaction (docs/adr/0025). A retry after a lost
         // acknowledgement recognises its own committed link by this host id, and
         // answers with the refresh token whose hash that attempt stored.
         Guid hostId = Guid.CreateVersion7();
@@ -67,7 +67,7 @@ public class BecomeHostHandler(
                     {
                         // UserStore.UpdateAsync reports DbUpdateConcurrencyException as a
                         // failed IdentityResult: the user row changed under this request.
-                        // Answered after the scope has rolled back, from committed state.
+                        // Answered after the transaction has rolled back, from committed state.
                         if (updateResult.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.ConcurrencyFailure)))
                         {
                             throw new AccountChangedDuringRequestException();

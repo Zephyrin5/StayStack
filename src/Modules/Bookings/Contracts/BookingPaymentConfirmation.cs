@@ -16,7 +16,7 @@ internal class BookingPaymentConfirmation(
         DbTransaction transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction()
                                     ?? throw new InvalidOperationException(
                                         $"{nameof(BookingPaymentConfirmation)}.{nameof(ConfirmPaymentAsync)} must run inside the caller's " +
-                                        "atomic scope: a confirmation committed on its own survives the payment it records rolling back.");
+                                        "transaction: a confirmation committed on its own survives the payment it records rolling back.");
 
         Guid holdId = await dbContext.Bookings.AsNoTracking()
                           .Where(b => b.Id == bookingId)

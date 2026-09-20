@@ -11,7 +11,7 @@ namespace Bookings.Jobs;
 /// <summary>
 ///     Resolves refund obligations nobody has settled yet.
 ///     <para>
-///         A cancellation resolves its obligation in the scope that commits
+///         A cancellation resolves its obligation in the transaction that commits
 ///         it, and a payment succeeding afterwards resolves it in the payment's.
 ///         What reaches this sweep is an obligation with no payment yet, waiting
 ///         for a late one, or one those resolutions did not record

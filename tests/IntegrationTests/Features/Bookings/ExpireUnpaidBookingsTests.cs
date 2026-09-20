@@ -105,7 +105,7 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
             NullLogger<ExpireUnpaidBookingsJob>.Instance);
     }
 
-    // ConfirmPaymentAsync runs only inside an atomic scope; this is the smallest
+    // ConfirmPaymentAsync runs only inside one transaction; this is the smallest
     // one, with the payment side left out.
     private static Task<bool> ConfirmPaymentAsync(IServiceScope scope, Guid bookingId, CancellationToken cancellationToken) =>
         scope.ServiceProvider.GetRequiredService<ITransactionRunner>().ExecuteAsync(

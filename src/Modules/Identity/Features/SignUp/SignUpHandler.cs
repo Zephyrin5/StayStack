@@ -36,7 +36,7 @@ public class SignUpHandler(
         // One transaction. All three writes - the user, the role assignment, the
         // refresh token - land in IdentityDb on the connection this
         // transaction owns, so a failure anywhere rolls back all of them.
-        // BecomeHostHandler also writes Hosts, so it runs in an atomic scope
+        // BecomeHostHandler also writes Hosts, so it runs in a transaction
         // (docs/adr/0003); nothing here does.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 

@@ -65,36 +65,25 @@ internal class PromotionRedemption(
 
         Money discountAmount = ComputeDiscountAmount(promotion, subtotal);
 
-        // The caller's atomic scope owns the transaction: the cap increment and the
+        // The caller owns the transaction: the cap increment and the
         // insert below commit with the booking they discount, or not at all
         // (ConfirmBookingHandler). A rejected duplicate therefore never burns a
         // redemption slot, and nothing here commits, rolls back or retries.
         DbTransaction transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction()
                                     ?? throw new InvalidOperationException(
                                         $"{nameof(PromotionRedemption)}.{nameof(RedeemAsync)} must run inside the caller's " +
-                                        "atomic scope: a redemption committed on its own survives the checkout it discounts failing.");
+                                        "transaction: a redemption committed on its own survives the checkout it discounts failing.");
         IDbConnection connection = dbContext.Database.GetDbConnection();
 
-        // Every condition that decides whether this redemption is LEGAL
-        // lives in this one predicate, evaluated against the row this
-        // statement locks - not against the snapshot read above.
+        // Every condition that decides whether this redemption is LEGAL is in this one predicate,
+        // evaluated against the row the statement locks rather than the snapshot read above. The cap
+        // races obviously; expiry and archival race in the same shape, because expires_at is mutable
+        // and compared against a moving clock, and because the snapshot read goes through the
+        // soft-delete filter - so a promotion archived a moment later would still be redeemable.
+        // The predicate is Persistence.SoftDelete's, the one the partial unique index uses.
         //
-        // The cap was always here, because a count obviously races. Expiry
-        // and archival race in exactly the same shape for two different
-        // reasons: expires_at is mutable (Promotion.SetExpiresAt), and it is
-        // also compared against a clock that keeps moving, so a code can lapse
-        // between the read and this write with nobody editing anything.
-        // Archival is the sharper of the two - the snapshot read goes through
-        // the soft-delete query filter, so a promotion deleted a moment later
-        // would still be redeemable without this predicate.
-        //
-        // The soft-delete predicate restated, the same one PromotionConfiguration's partial unique
-        // index uses.
-        //
-        // Host ownership is deliberately NOT here, and that is not an
-        // omission: Promotion.HostId is set in the constructor and has no
-        // mutator, so the value the snapshot read saw is the value this
-        // row will always have. There is nothing to race.
+        // Host ownership is deliberately absent: Promotion.HostId is set in the constructor and has
+        // no mutator, so there is nothing to race.
         string capSql = $"""
                               UPDATE {PromotionsModel.Schema}.promotions
                               SET redemption_count = redemption_count + 1
@@ -166,12 +155,12 @@ internal class PromotionRedemption(
 
     public async Task ReverseRedemptionAsync(Guid bookingId, CancellationToken cancellationToken)
     {
-        // The caller's atomic scope owns the transaction, so the code goes back
+        // The caller owns the transaction, so the code goes back
         // only if the cancellation that frees it commits.
         DbTransaction transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction()
                                     ?? throw new InvalidOperationException(
                                         $"{nameof(PromotionRedemption)}.{nameof(ReverseRedemptionAsync)} must run inside the caller's " +
-                                        "atomic scope: a reversal committed on its own frees a code for a booking whose cancellation may roll back.");
+                                        "transaction: a reversal committed on its own frees a code for a booking whose cancellation may roll back.");
         IDbConnection connection = dbContext.Database.GetDbConnection();
 
         // UPDATE, not DELETE - the row survives as history (see

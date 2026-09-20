@@ -42,21 +42,15 @@ public class ListMyReviewableBookingsHandler(
             return b.CheckOut <= today && today <= b.CheckOut.AddDays(reviewWindowDays);
         }
 
-        // Reviews has no notion of Booking/CustomerId itself, so the confirmed
-        // bookings come cross-module - same reasoning GetHostBookingsHandler
-        // uses for UnitId->HostId.
+        // Reviews has no notion of Booking or CustomerId, so the confirmed bookings come
+        // cross-module, bounded by checkout date rather than fetched wholesale: the result can only
+        // span the review window, and loading a customer's whole history was work proportional to how
+        // long they had been a customer, on an endpoint with no pagination.
         //
-        // Bounded by checkout date rather than fetched wholesale. The result
-        // can only ever span the review window, so loading a customer's entire
-        // history to filter it in memory was work proportional to how long
-        // they have been a customer, on an endpoint with no pagination.
-        //
-        // Widened a day either side because the range is evaluated in UTC
-        // while the real test is property-local. A local date is within one
-        // day of the UTC date in every timezone, so this is a safe superset;
-        // IsReviewable below applies the exact per-zone bounds to it. Erring
-        // wide costs at most two extra days of rows and cannot drop a booking
-        // that belongs in the list.
+        // Widened a day either side because the range is evaluated in UTC while the real test is
+        // property-local, and a local date is within one day of the UTC date in every zone. IsReviewable
+        // applies the exact per-zone bounds; erring wide costs two days of rows and cannot drop a
+        // booking that belongs in the list.
         DateOnly utcToday = DateOnly.FromDateTime(now.UtcDateTime);
 
         IReadOnlyList<BookingAccessResult> confirmedBookings =

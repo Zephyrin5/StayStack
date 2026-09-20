@@ -53,7 +53,7 @@ public class TransactionReversal(
         if (dbContext.Database.CurrentTransaction is null)
         {
             throw new InvalidOperationException(
-                $"{nameof(TransactionReversal)} must run inside the caller's atomic scope: a refund committed apart " +
+                $"{nameof(TransactionReversal)} must run inside the caller's transaction: a refund committed apart " +
                 "from its obligation's marker, or from the cancellation it answers, can disagree with both.");
         }
 

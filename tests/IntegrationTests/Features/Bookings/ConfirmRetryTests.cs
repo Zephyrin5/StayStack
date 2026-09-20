@@ -25,7 +25,7 @@ namespace IntegrationTests.Features.Bookings;
 // acknowledgement.
 //
 // The booking id and the management token's plaintext are chosen before the
-// atomic scope, so a retry finds the committed booking by id and answers with
+// transaction, so a retry finds the committed booking by id and answers with
 // it. The assertion that matters is the
 // token: a recovery that returns a 200 and a real booking id with a token whose
 // hash row rolled back hands out a credential that fails at first use, and a

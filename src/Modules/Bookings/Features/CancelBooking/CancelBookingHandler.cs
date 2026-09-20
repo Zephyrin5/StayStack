@@ -98,7 +98,7 @@ public class CancelBookingHandler(
                     await dbContext.SaveChangesAsync(token);
                     await promotionRedemption.ReverseRedemptionAsync(locked.Id, token);
 
-                    // Records the refund decision locally; no provider call may run inside the scope (docs/adr/0027).
+                    // Records the refund decision locally; no provider call may run inside the transaction (docs/adr/0027).
                     await paymentReversal.ResolveRefundAsync(locked.Id, token);
 
                     return locked;

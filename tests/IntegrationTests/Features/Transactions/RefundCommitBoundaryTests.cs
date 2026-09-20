@@ -1,5 +1,5 @@
 ﻿// Proves refund resolution finishes from seeded states it does not produce itself, and from a
-// status flip between the resolver's read and write inside its atomic scope; TwoResolversRacing
+// status flip between the resolver's read and write inside its transaction; TwoResolversRacing
 // fails 6/6 with the concurrency catch disabled. APaymentStateRead_DescribesOneMomentRatherThanTwo
 // reads a static row and cannot tell one read from two.
 using Bookings;
@@ -21,7 +21,7 @@ namespace IntegrationTests.Features.Transactions;
 
 // The refund decision writes two modules' rows: the amount lands on the
 // Transaction, and the obligation's ResolvedAt marker lands in Bookings. They
-// commit in one atomic scope. The transaction status stays the authority on
+// commit in one transaction. The transaction status stays the authority on
 // whether a refund exists, so these pin the resolver against a marker and a
 // refund that disagree - states seeded directly, since the resolver does not
 // produce them - and against a concurrent resolver. RefundDeterminismTests
@@ -262,7 +262,7 @@ public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory fact
     [Fact]
     public async Task AResolverLosingTheRaceInsideItsScope_StillSettlesTheObligation()
     {
-        // The concurrency catch, inside the atomic scope it runs in. The loser's
+        // The concurrency catch, inside the transaction it runs in. The loser's
         // UPDATE carries a stale xmin after the other resolver committed, so it
         // matches no row - EF reports that as a concurrency failure, but no
         // statement failed and the scope's transaction stays usable. The

@@ -63,15 +63,11 @@ public class MarkTransactionSucceededHandler(
                 }
                 catch (DbUpdateConcurrencyException)
                 {
-                    // A concurrent finalization, not an infrastructure fault. The row's
-                    // xmin moved between this load and this save (see
-                    // TransactionConfiguration), so the UPDATE matched nothing - which
-                    // means another caller took this transaction out of Pending while
-                    // this one was deciding. That is precisely what
-                    // TransactionAlreadyFinalizedException already describes, and it is
-                    // the same 409 the in-memory guard raises when the conflict is
-                    // visible at load time instead of at save time. The booking's
-                    // confirmation rolls back with the scope.
+                    // A concurrent finalization, not an infrastructure fault: the row's xmin moved
+                    // between this load and this save, so the UPDATE matched nothing - another caller
+                    // took this transaction out of Pending while this one was deciding. The same 409
+                    // the in-memory guard raises when the conflict is visible at load time, and the
+                    // booking's confirmation rolls back with it.
                     throw new TransactionAlreadyFinalizedException(transaction.Id);
                 }
 

@@ -62,7 +62,7 @@ public class DeleteUnitHandler(
                 IsolationLevel.ReadCommitted,
             async token =>
         {
-            // Reloaded inside the delegate (docs/adr/0025); the scope clears the
+            // Reloaded inside the delegate (docs/adr/0025); the runner clears the
             // change tracker on every attempt. SaveChangesAsync accepts changes
             // when it returns (acceptAllChangesOnSuccess defaults to true), so an
             // instance loaded before the retry has Archived as its original value
