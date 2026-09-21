@@ -13,9 +13,10 @@ namespace Bookings.Jobs;
 ///     <para>
 ///         Cleanup, not enforcement - ReplayAsync rejects an expired record
 ///         on the request path, so a stopped or misconfigured job cannot
-///         extend the window. A record stores no credential (see
-///         <see cref="CheckoutIdempotencyRecord"/>), so what this bounds is
-///         the table's size.
+///         extend the window. The row holds no credential (see
+///         <see cref="CheckoutIdempotencyRecord"/>), but the key it answers
+///         mints one on demand for as long as it lives, so what this bounds
+///         is the window's reach as well as the table's size (docs/adr/0022).
 ///     </para>
 /// </summary>
 public class PurgeReplayedCheckoutsJob(

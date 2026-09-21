@@ -7,8 +7,10 @@ using BuildingBlocks.Identity;
 using BuildingBlocks.Persistence;
 using BuildingBlocks.Security;
 using Catalog.Contracts;
+using Dapper;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using System.Text;
 using System.Security.Cryptography;
 using Promotions.Contracts;
@@ -27,6 +29,34 @@ public class ConfirmBookingHandler(
     IOptions<BookingLifecyclePolicyOptions> bookingLifecycle,
     TimeProvider timeProvider) : IRequestHandler<ConfirmBookingRequest, ConfirmBookingResponse>
 {
+    /// <summary>
+    ///     Mints a replay's management token and drops whatever the cap no longer allows, in one
+    ///     statement (docs/adr/0022).
+    ///     <para>
+    ///         One statement rather than a read followed by a tracked delete: two replays of the
+    ///         same key can overlap, and EF would fail the second when its DELETE matched the row
+    ///         the first had already removed, rolling back the insert with it. Here the eviction
+    ///         simply matches fewer rows. Newest first, so the row a concurrent replay has just
+    ///         added is never the one evicted - which is what keeps the overshoot to the number of
+    ///         replays in flight, and self-correcting on the next one.
+    ///     </para>
+    /// </summary>
+    private const string MintManagementTokenSql = $"""
+                                                  WITH evicted AS (
+                                                      DELETE FROM {BookingsModel.Schema}.booking_management_tokens
+                                                      WHERE id IN (
+                                                          SELECT id
+                                                          FROM {BookingsModel.Schema}.booking_management_tokens
+                                                          WHERE booking_id = @BookingId
+                                                          ORDER BY created_at DESC, id DESC
+                                                          OFFSET @Keep
+                                                      )
+                                                  )
+                                                  INSERT INTO {BookingsModel.Schema}.booking_management_tokens
+                                                      (id, booking_id, token_hash, created_at)
+                                                  VALUES (@Id, @BookingId, @TokenHash, @CreatedAt);
+                                                  """;
+
     public async ValueTask<ConfirmBookingResponse> Handle(ConfirmBookingRequest request, CancellationToken cancellationToken)
     {
         // Checked here, not in the validator: the endpoint assigns the key after
@@ -293,11 +323,12 @@ public class ConfirmBookingHandler(
                 "The booking this Idempotency-Key refers to no longer exists. Please start over.");
         }
 
-        // A new token, minted now. Only hashes are stored, so the original
-        // plaintext cannot be returned, and a stored plaintext copy would turn one
-        // read of the table into working credentials for every guest checkout in
-        // the window. BookingAccessChecker matches on hash, so several valid tokens
-        // per booking work, and the original stays valid (docs/adr/0022).
+        // A new token, minted now. Only hashes are stored, so the original plaintext cannot be
+        // returned, and a stored plaintext copy would turn one read of the table into working
+        // credentials for every guest checkout in the window. BookingAccessChecker matches on
+        // hash, so several valid tokens per booking work and the original stays valid - up to
+        // MaxLivePerBooking of them, after which the oldest is evicted to bound what one key can
+        // leave live (docs/adr/0022).
         //
         // None for an authenticated customer: their account proves ownership.
         string? managementToken = null;
@@ -306,15 +337,18 @@ public class ConfirmBookingHandler(
         {
             managementToken = SecureToken.Generate();
 
-            dbContext.BookingManagementTokens.Add(new BookingManagementToken
-            {
-                Id = Guid.CreateVersion7(),
-                BookingId = booking.Id,
-                TokenHash = SecureToken.Hash(managementToken),
-                CreatedAt = timeProvider.GetUtcNow()
-            });
-
-            await dbContext.SaveChangesAsync(cancellationToken);
+            await dbContext.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
+                MintManagementTokenSql,
+                new
+                {
+                    Id = Guid.CreateVersion7(),
+                    BookingId = booking.Id,
+                    TokenHash = SecureToken.Hash(managementToken),
+                    CreatedAt = timeProvider.GetUtcNow(),
+                    Keep = BookingManagementTokenConfiguration.MaxLivePerBooking - 1
+                },
+                dbContext.Database.CurrentTransaction?.GetDbTransaction(),
+                cancellationToken: cancellationToken));
         }
 
         // The booking is re-read rather than replayed verbatim: a booking
