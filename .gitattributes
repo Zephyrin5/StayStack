@@ -1,0 +1,44 @@
+# Line endings are a property of this repository, not of whoever cloned it.
+#
+# Without this file, what lands in a working tree depends on each machine's core.autocrlf: the
+# checkout is CRLF on Windows and LF on CI, and anything that reads the tree as text can mean two
+# different things in the two places. That is not hypothetical here - a source-scanning test
+# anchored a pattern with $, which matches before the \n of a CRLF pair, and so ran a weaker check
+# on Windows than the one CI ran (SourceTree.Read now normalises, which is the other half).
+#
+# text=auto: git decides text from content and stores it LF-normalised. Every blob here is already
+# LF, so this pins what is true rather than changing anything.
+#
+# The working tree's own form is left to core.autocrlf, so a Windows checkout stays CRLF. Forcing
+# eol=lf here was tried and backed out: it makes git report every already-checked-out file as
+# needing an update on a machine with core.autocrlf=true, which is noise with nothing behind it.
+# Nothing should depend on the working-tree form anyway - SourceTree.Read normalises what the
+# architecture tests read, which is what made the difference matter once.
+* text=auto
+
+# Files a shell or a Windows host reads directly, where the ending is not cosmetic. None are tracked
+# today; they are named so the first one added does not have to rediscover this.
+*.sh text eol=lf
+*.bash text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Content git must never rewrite. Declared ahead of need for the same reason as above: a mangled
+# binary is discovered late and looks like corruption rather than a checkout rule.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.snk binary
+*.pfx binary
+*.dll binary
+*.exe binary
