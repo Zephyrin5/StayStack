@@ -29,8 +29,8 @@ namespace IntegrationTests.Features.Bookings;
 // Check-in is three days out in both tests, inside the default policy's 50%
 // tier, so a response computing guest policy is visibly wrong rather than
 // coincidentally right.
-[Collection("Integration Tests")]
-public class PendingRefundReportingTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class PendingRefundReportingTests(BookingsFixture factory)
 {
     private sealed record Checkout(Guid BookingId, string Session);
 

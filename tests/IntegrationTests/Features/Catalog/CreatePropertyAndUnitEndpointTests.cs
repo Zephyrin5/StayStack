@@ -29,8 +29,8 @@ namespace IntegrationTests.Features.Catalog;
 // right place to prove the combined source-generated JsonSerializerContext
 // (see Program.cs's UseFastEndpoints call) actually (de)serializes these
 // request/response DTOs correctly, not just that everything compiles.
-[Collection("Integration Tests")]
-public class CreatePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CatalogCollection.Name)]
+public class CreatePropertyAndUnitEndpointTests(CatalogFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

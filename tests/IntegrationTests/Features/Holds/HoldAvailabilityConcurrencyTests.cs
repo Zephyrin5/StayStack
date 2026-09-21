@@ -26,8 +26,8 @@ namespace IntegrationTests.Features.Holds;
 // TransactionsTests' equivalent for the transactions-in-progress index) at
 // the exact same unit/date range and asserts the database - not a
 // pre-check, not a lock - lets exactly one through.
-[Collection("Integration Tests")]
-public class HoldAvailabilityConcurrencyTests(IntegrationTestWebApplicationFactory factory)
+[Collection(HoldsCollection.Name)]
+public class HoldAvailabilityConcurrencyTests(HoldsFixture factory)
 {
     private static (Property Property, Unit Unit) CreateTestUnit(int maxCapacity = 10)
     {

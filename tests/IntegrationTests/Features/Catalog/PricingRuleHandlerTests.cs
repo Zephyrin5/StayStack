@@ -23,8 +23,8 @@ namespace IntegrationTests.Features.Catalog;
 // rather than the handlers directly - ownership enforcement is what these
 // mostly exist to prove, and that lives in the endpoint/auth pipeline as
 // much as the handler.
-[Collection("Integration Tests")]
-public class PricingRuleHandlerTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CatalogCollection.Name)]
+public class PricingRuleHandlerTests(CatalogFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

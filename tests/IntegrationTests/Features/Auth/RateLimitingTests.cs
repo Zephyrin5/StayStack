@@ -16,8 +16,8 @@ namespace IntegrationTests.Features.Auth;
 // container, just extra DI configuration layered on top) specifically to
 // prove RequireRateLimiting("auth") actually rejects with a 429 once the
 // limit is exceeded.
-[Collection("Integration Tests")]
-public class RateLimitingTests(IntegrationTestWebApplicationFactory factory)
+[Collection(AuthCollection.Name)]
+public class RateLimitingTests(AuthFixture factory)
 {
     [Fact]
     public async Task SignIn_ShouldReturn429_AfterExceedingConfiguredLimit()

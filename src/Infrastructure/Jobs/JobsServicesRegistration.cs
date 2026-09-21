@@ -1,3 +1,4 @@
+using BuildingBlocks.Configuration;
 using BuildingBlocks.Identity;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -25,6 +26,20 @@ public static class JobsServicesRegistration
     {
         services.AddTickerQ(options =>
         {
+            // A host that should not schedule says so, and keeps the operational store and the
+            // dashboard: a second web replica has no reason to run the crons a first one already
+            // runs (docs/scale-out-findings.md), and a test host has a stronger one - a job's own
+            // commit is indistinguishable from the request under test to an injected fault
+            // (docs/adr/0025). Read as a string rather than GetValue<bool>, whose binder is
+            // reflective (docs/adr/0001).
+            if (string.Equals(
+                    configuration[$"{AppConfiguration.RootSection}:Jobs:RunScheduler"],
+                    "false",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                options.DisableBackgroundServices();
+            }
+
             options.AddOperationalStore(efOptions =>
             {
                 efOptions.UseTickerQDbContext<TickerQDbContext>(dbOptions =>

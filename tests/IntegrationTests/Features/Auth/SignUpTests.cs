@@ -15,8 +15,8 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 namespace IntegrationTests.Features.Auth;
 
-[Collection("Integration Tests")]
-public class SignUpTests(IntegrationTestWebApplicationFactory factory)
+[Collection(AuthCollection.Name)]
+public class SignUpTests(AuthFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

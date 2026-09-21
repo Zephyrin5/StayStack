@@ -33,8 +33,8 @@ namespace IntegrationTests.Features.Catalog;
 // green correct one. Pausing the archive at a known point makes the interleaving
 // the test's to choose, and all three were confirmed to fail with the locks
 // removed.
-[Collection("Integration Tests")]
-public class ArchivalRaceTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CatalogCollection.Name)]
+public class ArchivalRaceTests(CatalogFixture factory)
 {
     private readonly List<Property> _pendingProperties = [];
 

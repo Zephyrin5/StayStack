@@ -34,8 +34,8 @@ namespace IntegrationTests.Features.Transactions;
 //
 // Check-in is three days out, inside the default policy's 50% tier, so the
 // policy figure (100) and the full amount (200) differ.
-[Collection("Integration Tests")]
-public class RefundDeterminismTests(IntegrationTestWebApplicationFactory factory)
+[Collection(TransactionsCollection.Name)]
+public class RefundDeterminismTests(TransactionsFixture factory)
 {
     private const int DaysUntilCheckIn = 3;
 

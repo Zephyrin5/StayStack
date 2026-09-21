@@ -32,8 +32,8 @@ namespace IntegrationTests.Features.Bookings;
 //
 // ConfirmBookingHandler already pre-generates its booking id and reads back on
 // conflict. These are the other two call sites.
-[Collection("Integration Tests")]
-public class CreationAmbiguityTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class CreationAmbiguityTests(BookingsFixture factory)
 {
     // After the commit that made a hold for this unit durable. Holds are
     // inserted through Dapper, so the commit is recognised by the row it left

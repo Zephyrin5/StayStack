@@ -26,8 +26,8 @@ namespace IntegrationTests.Features.Transactions;
 // refund that disagree - states seeded directly, since the resolver does not
 // produce them - and against a concurrent resolver. RefundDeterminismTests
 // covers the order of cancellation and payment.
-[Collection("Integration Tests")]
-public class RefundCommitBoundaryTests(IntegrationTestWebApplicationFactory factory)
+[Collection(TransactionsCollection.Name)]
+public class RefundCommitBoundaryTests(TransactionsFixture factory)
 {
     private readonly List<Property> _pendingProperties = [];
 

@@ -22,8 +22,8 @@ namespace IntegrationTests.Features.Auth;
 // stamp in the cache - so these also pin the eviction, not only the check. Both halves were broken
 // to watch them fail: unwiring OnTokenValidated fails all four, and removing the eviction from
 // RemoveRoleHandler fails ARoleTakenAway on its own, leaving the rest green.
-[Collection("Integration Tests")]
-public class SecurityStampTests(IntegrationTestWebApplicationFactory factory)
+[Collection(AuthCollection.Name)]
+public class SecurityStampTests(AuthFixture factory)
 {
     private const string AnyAuthenticatedEndpoint = "/api/bookings/mine";
 

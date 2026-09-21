@@ -50,8 +50,8 @@ namespace IntegrationTests.Features.Bookings;
 // Do not weaken an assertion here to match current behaviour. If one of
 // these has to change, the reason should be that the guarantee itself was
 // wrong, argued on its own terms.
-[Collection("Integration Tests")]
-public class CommitAmbiguitySpecTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class CommitAmbiguitySpecTests(BookingsFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
 

@@ -19,8 +19,8 @@ namespace IntegrationTests.Features.Auth;
 // enabled, so a single HttpClient instance reused across calls in one
 // test carries the cookie jar automatically, exactly like a browser tab
 // would.
-[Collection("Integration Tests")]
-public class CookieAuthTests(IntegrationTestWebApplicationFactory factory)
+[Collection(AuthCollection.Name)]
+public class CookieAuthTests(AuthFixture factory)
 {
     private const string CookieName = "staystack_refresh_token";
 

@@ -24,8 +24,8 @@ namespace IntegrationTests.Features.Bookings;
 // exactly-one-winner compare-and-set on the contended row. A loser that reaches
 // it while the winner's transaction is open waits on the row lock, then matches
 // nothing once the winner commits.
-[Collection("Integration Tests")]
-public class ConcurrentConfirmTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class ConcurrentConfirmTests(BookingsFixture factory)
 {
     private readonly List<Property> _pendingProperties = [];
 

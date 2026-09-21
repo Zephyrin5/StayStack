@@ -41,8 +41,8 @@ namespace IntegrationTests.Features.Reviews;
 // - going through the real Hold/Confirm HTTP flow can't produce a
 // checkout-already-passed booking, since HoldAvailabilityEndpoint requires a
 // future date range.
-[Collection("Integration Tests")]
-public class StayReviewTests(IntegrationTestWebApplicationFactory factory)
+[Collection(ReviewsCollection.Name)]
+public class StayReviewTests(ReviewsFixture factory)
 {
     // The management token buys a session, and the session is what every
     // management call carries, so tests make the same round trip a real client

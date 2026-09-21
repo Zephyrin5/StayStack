@@ -25,8 +25,8 @@ namespace IntegrationTests.Features.Bookings;
 // whole point is the cross-module HostId -> Property -> Unit resolution
 // (IUnitLookup.GetUnitIdsForHostAsync) - a directly-seeded Unit with no real
 // owning Property would trivially pass and prove nothing.
-[Collection("Integration Tests")]
-public class GetHostBookingsTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class GetHostBookingsTests(BookingsFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

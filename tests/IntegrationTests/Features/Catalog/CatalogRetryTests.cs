@@ -32,8 +32,8 @@ namespace IntegrationTests.Features.Catalog;
 // handler reports success over a row that was never changed.
 //
 // Both handlers here did that. Neither failed loudly; both returned 200.
-[Collection("Integration Tests")]
-public class CatalogRetryTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CatalogCollection.Name)]
+public class CatalogRetryTests(CatalogFixture factory)
 {
     // Whether a commit carries the entity under test - matched on the tracker,
     // because this host runs TickerQ and a stolen injection leaves the test

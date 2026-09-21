@@ -19,8 +19,8 @@ namespace IntegrationTests.Features.Holds;
 // own transaction, UnitAvailabilityLock in the mode the handler takes it
 // (UnitAvailabilityLock.AcquireForHoldSql - one definition, so the two cannot
 // drift), then the insert. What decides the race is the exclusion constraint.
-[Collection("Integration Tests")]
-public class HoldExclusionConstraintTests(IntegrationTestWebApplicationFactory factory)
+[Collection(HoldsCollection.Name)]
+public class HoldExclusionConstraintTests(HoldsFixture factory)
 {
     private const int Inserters = 8;
 

@@ -24,8 +24,8 @@ namespace IntegrationTests.Features.Promotions;
 // End-to-end over real HTTP, same reasoning as PricingRuleHandlerTests -
 // ownership enforcement (host vs admin vs platform-wide) is what these
 // mostly exist to prove.
-[Collection("Integration Tests")]
-public class PromotionHandlerTests(IntegrationTestWebApplicationFactory factory)
+[Collection(PromotionsCollection.Name)]
+public class PromotionHandlerTests(PromotionsFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

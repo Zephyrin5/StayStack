@@ -12,8 +12,8 @@ using SeedWork.Enums;
 using SeedWork.ValueObjects;
 namespace IntegrationTests.Features.Catalog;
 
-[Collection("Integration Tests")]
-public class GetPriceCalendarHandlerTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CatalogCollection.Name)]
+public class GetPriceCalendarHandlerTests(CatalogFixture factory)
 {
     // Properties for units built by CreateTestUnit below, flushed by the
     // seeder so a unit is never persisted without its owner - see

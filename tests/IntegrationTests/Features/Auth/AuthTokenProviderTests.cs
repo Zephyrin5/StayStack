@@ -9,8 +9,8 @@ using System.Security.Cryptography;
 using System.Text;
 namespace IntegrationTests.Features.Auth;
 
-[Collection("Integration Tests")]
-public class AuthTokenProviderTests(IntegrationTestWebApplicationFactory factory)
+[Collection(AuthCollection.Name)]
+public class AuthTokenProviderTests(AuthFixture factory)
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

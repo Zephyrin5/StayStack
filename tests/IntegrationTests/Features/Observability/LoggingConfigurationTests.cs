@@ -7,8 +7,8 @@ namespace IntegrationTests.Features.Observability;
 // test host is "Testing", and appsettings.Testing.json sets no Logging
 // section, so what these assert is the production value inherited from
 // appsettings.json.
-[Collection("Integration Tests")]
-public class LoggingConfigurationTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CommonCollection.Name)]
+public class LoggingConfigurationTests(CommonFixture factory)
 {
     [Fact]
     public void EntityFrameworkLogging_IsRaisedToWarning_SoProductionDoesNotLogEverySqlStatement()

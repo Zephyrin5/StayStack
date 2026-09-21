@@ -22,8 +22,8 @@ namespace IntegrationTests.Features.Catalog;
 // violation are the two outcomes these tests have to tell apart. ConstraintViolations is the
 // consumer of that fact, not a way to observe it.
 #pragma warning disable RS0030
-[Collection("Integration Tests")]
-public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CatalogCollection.Name)]
+public class PricingRuleConstraintTests(CatalogFixture factory)
 {
     private static readonly DateOnly Anchor = new DateOnly(2027, 3, 1);
 

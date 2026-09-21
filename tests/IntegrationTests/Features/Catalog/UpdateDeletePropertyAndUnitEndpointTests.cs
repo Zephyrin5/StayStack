@@ -27,8 +27,8 @@ namespace IntegrationTests.Features.Catalog;
 // UpdateProperty/DeleteProperty/UpdateUnit/DeleteUnit end-to-end over real
 // HTTP - same reasoning as CreatePropertyAndUnitEndpointTests for going
 // through the endpoint rather than the handler directly.
-[Collection("Integration Tests")]
-public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CatalogCollection.Name)]
+public class UpdateDeletePropertyAndUnitEndpointTests(CatalogFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

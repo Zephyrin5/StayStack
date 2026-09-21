@@ -33,8 +33,8 @@ namespace IntegrationTests.Features.Promotions;
 // PricingRuleHandlerTests, combined into one flow here since redemption is
 // inherently a cross-feature (holds + pricing rules + promotions +
 // bookings) concern.
-[Collection("Integration Tests")]
-public class PromotionRedemptionTests(IntegrationTestWebApplicationFactory factory)
+[Collection(PromotionsCollection.Name)]
+public class PromotionRedemptionTests(PromotionsFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

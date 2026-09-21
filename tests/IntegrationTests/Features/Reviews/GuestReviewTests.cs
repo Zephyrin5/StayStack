@@ -29,8 +29,8 @@ namespace IntegrationTests.Features.Reviews;
 // CheckOut directly into BookingsDb" reasoning StayReviewTests
 // uses, since the real Hold/Confirm HTTP flow can't produce a
 // checkout-already-passed booking.
-[Collection("Integration Tests")]
-public class GuestReviewTests(IntegrationTestWebApplicationFactory factory)
+[Collection(ReviewsCollection.Name)]
+public class GuestReviewTests(ReviewsFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

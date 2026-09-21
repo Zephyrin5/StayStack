@@ -25,8 +25,8 @@ namespace IntegrationTests.Features.Bookings;
 // 'pending_payment' and goes on blocking its range through the exclusion
 // constraint, which has no status predicate. These pin the deadline that makes
 // that claim finite and the job that enforces it (docs/adr/0020).
-[Collection("Integration Tests")]
-public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class ExpireUnpaidBookingsTests(BookingsFixture factory)
 {
     private readonly List<Property> _pendingProperties = [];
 

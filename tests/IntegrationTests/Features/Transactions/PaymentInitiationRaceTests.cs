@@ -44,8 +44,8 @@ namespace IntegrationTests.Features.Transactions;
 //   excludes cancellation. It fails with the lock removed.
 // - AnExpiryDuringInitiationsLockedSection_StepsOverTheBooking pauses inside the
 //   lock and proves expiry steps over it. It fails with the lock removed.
-[Collection("Integration Tests")]
-public class PaymentInitiationRaceTests(IntegrationTestWebApplicationFactory factory)
+[Collection(TransactionsCollection.Name)]
+public class PaymentInitiationRaceTests(TransactionsFixture factory)
 {
     private readonly List<Property> _pendingProperties = [];
 

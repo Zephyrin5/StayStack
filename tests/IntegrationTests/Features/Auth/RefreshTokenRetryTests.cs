@@ -21,8 +21,8 @@ namespace IntegrationTests.Features.Auth;
 // alone. What distinguishes them is the replacement's identity, which the
 // handler chooses once, outside the retry, and which an attacker replaying a
 // stolen token never has.
-[Collection("Integration Tests")]
-public class RefreshTokenRetryTests(IntegrationTestWebApplicationFactory factory)
+[Collection(AuthCollection.Name)]
+public class RefreshTokenRetryTests(AuthFixture factory)
 {
     // After the commit carrying a rotation for this user - a new token with a
     // parent, which a sign-in's token does not have.

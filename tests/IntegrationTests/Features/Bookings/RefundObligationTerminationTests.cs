@@ -26,8 +26,8 @@ namespace IntegrationTests.Features.Bookings;
 // An obligation used to have one ending: a refund. Everything else stayed unresolved and came back
 // every run of the sweep forever, because "no payment yet" and "no payment ever" read the same. These
 // pin the second ending - nothing owed - and where each writer reaches it (docs/adr/0027).
-[Collection("Integration Tests")]
-public class RefundObligationTerminationTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class RefundObligationTerminationTests(BookingsFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

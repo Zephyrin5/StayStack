@@ -21,8 +21,8 @@ using System.Net.Http.Json;
 // the first time this file was named IntegrationTests.Features.Identity.
 namespace IntegrationTests.Features.Users;
 
-[Collection("Integration Tests")]
-public class UserManagementTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CommonCollection.Name)]
+public class UserManagementTests(CommonFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

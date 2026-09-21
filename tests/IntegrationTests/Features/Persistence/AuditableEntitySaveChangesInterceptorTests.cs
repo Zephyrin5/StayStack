@@ -14,8 +14,8 @@ namespace IntegrationTests.Features.Persistence;
 
 // The interceptor on a context of its own, against the migrated schema, so each test
 // controls the user and the clock it sees.
-[Collection("Integration Tests")]
-public class AuditableEntitySaveChangesInterceptorTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CommonCollection.Name)]
+public class AuditableEntitySaveChangesInterceptorTests(CommonFixture factory)
 {
     private static readonly DateTimeOffset FixedTime = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
 

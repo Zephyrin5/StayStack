@@ -16,8 +16,8 @@ namespace IntegrationTests.Features.Persistence;
 // The runner's contract against real Postgres: one transaction over two modules' tables, with an EF
 // write and a Dapper write, retried as a unit. The Dapper obligation's id is derived from the EF one,
 // so both are checked by one id.
-[Collection("Integration Tests")]
-public class TransactionRunnerTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CommonCollection.Name)]
+public class TransactionRunnerTests(CommonFixture factory)
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

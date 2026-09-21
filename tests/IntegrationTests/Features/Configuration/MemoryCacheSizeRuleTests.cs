@@ -10,8 +10,8 @@ namespace IntegrationTests.Features.Configuration;
 // exception on the write path - and the constraint lives in one
 // AddMemoryCache line that nothing else in the codebase points at, so the only
 // way to learn it has been to hit it.
-[Collection("Integration Tests")]
-public class MemoryCacheSizeRuleTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CommonCollection.Name)]
+public class MemoryCacheSizeRuleTests(CommonFixture factory)
 {
     private IMemoryCache Cache => factory.Services.GetRequiredService<IMemoryCache>();
 

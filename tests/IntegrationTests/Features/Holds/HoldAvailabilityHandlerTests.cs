@@ -18,8 +18,8 @@ using SeedWork.Enums;
 using SeedWork.ValueObjects;
 namespace IntegrationTests.Features.Holds;
 
-[Collection("Integration Tests")]
-public class HoldAvailabilityHandlerTests(IntegrationTestWebApplicationFactory factory)
+[Collection(HoldsCollection.Name)]
+public class HoldAvailabilityHandlerTests(HoldsFixture factory)
 {
     // Properties for units built by CreateTestUnit below, flushed by the
     // seeder so a unit is never persisted without its owner - see

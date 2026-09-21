@@ -11,8 +11,8 @@ namespace IntegrationTests.Features.Holds;
 // curated ValidationProblemDetails shape, never an exception message. A guard's
 // BCL-formatted message - parameter name and actual value appended - must not
 // reach the client.
-[Collection("Integration Tests")]
-public class HoldAvailabilityValidationResponseTests(IntegrationTestWebApplicationFactory factory)
+[Collection(HoldsCollection.Name)]
+public class HoldAvailabilityValidationResponseTests(HoldsFixture factory)
 {
     private async Task<Unit> SeedUnitAsync(int maxOccupancy)
     {

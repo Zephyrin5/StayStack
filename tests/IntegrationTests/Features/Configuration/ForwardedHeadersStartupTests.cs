@@ -13,8 +13,8 @@ namespace IntegrationTests.Features.Configuration;
 // So startup refuses rather than warns. The check reads configuration:
 // ForwardedHeadersOptions seeds KnownProxies with ::1, so
 // `KnownProxies.Count == 0` is false even on a completely unconfigured app.
-[Collection("Integration Tests")]
-public class ForwardedHeadersStartupTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CommonCollection.Name)]
+public class ForwardedHeadersStartupTests(CommonFixture factory)
 {
     private WebApplicationFactory<Program> HostWith(params (string Key, string Value)[] settings) =>
         factory.WithWebHostBuilder(builder =>

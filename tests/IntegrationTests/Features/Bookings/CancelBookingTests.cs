@@ -27,8 +27,8 @@ namespace IntegrationTests.Features.Bookings;
 // Exercises CancelBookingEndpoint end-to-end - same "seed a Unit directly"
 // shortcut GetMyBookingsTests uses, since ownership here is CustomerId, not
 // anything Catalog-side.
-[Collection("Integration Tests")]
-public class CancelBookingTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class CancelBookingTests(BookingsFixture factory)
 {
     // The management token buys a session, and the session is what every
     // management call carries, so tests make the same round trip a real client

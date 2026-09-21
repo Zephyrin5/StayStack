@@ -12,8 +12,8 @@ namespace IntegrationTests.Features.Common;
 // with none. Using the shared IntegrationTestWebApplicationFactory instead
 // gives it the same "Testing" environment (and appsettings.Testing.json JWT
 // key) every other integration test already relies on.
-[Collection("Integration Tests")]
-public class ExceptionHandlingTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CommonCollection.Name)]
+public class ExceptionHandlingTests(CommonFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
 

@@ -29,8 +29,8 @@ namespace IntegrationTests.Features.Transactions;
 // Exercises the full hold -> confirm -> initiate transaction -> succeed
 // path end-to-end over real HTTP, following ConfirmBookingTests.cs's
 // seed/hold/confirm pattern.
-[Collection("Integration Tests")]
-public class TransactionsTests(IntegrationTestWebApplicationFactory factory)
+[Collection(TransactionsCollection.Name)]
+public class TransactionsTests(TransactionsFixture factory)
 {
     // The management token buys a session, and the session is what every
     // management call carries, so tests make the same round trip a real client

@@ -19,8 +19,8 @@ namespace IntegrationTests.Features.Holds;
 // catch: it asserts the constraint actually exists in the live schema, so
 // losing it fails CI immediately instead of quietly reopening the
 // double-booking bug the constraint exists to prevent.
-[Collection("Integration Tests")]
-public class SchemaInvariantsTests(IntegrationTestWebApplicationFactory factory)
+[Collection(HoldsCollection.Name)]
+public class SchemaInvariantsTests(HoldsFixture factory)
 {
     [Fact]
     public async Task UnitAvailabilityHolds_ShouldHaveOverlapExclusionConstraint()

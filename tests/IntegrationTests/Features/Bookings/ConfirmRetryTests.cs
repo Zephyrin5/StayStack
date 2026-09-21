@@ -31,8 +31,8 @@ namespace IntegrationTests.Features.Bookings;
 // hash row rolled back hands out a credential that fails at first use, and a
 // test asserting only the status and id passes over that. This one uses the
 // token.
-[Collection("Integration Tests")]
-public class ConfirmRetryTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class ConfirmRetryTests(BookingsFixture factory)
 {
     private async Task<Guid> HoldAUnitAsync(int daysUntilCheckIn)
     {

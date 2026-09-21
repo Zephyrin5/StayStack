@@ -24,8 +24,8 @@ namespace IntegrationTests.Features.Bookings;
 // stored, so the number of live credentials for one booking is chosen by whoever holds the key
 // (docs/adr/0022). These cover what bounds it: a cap at mint time, and a sweep once the booking is
 // far enough past checkout that BookingAccessChecker refuses the tokens anyway.
-[Collection("Integration Tests")]
-public class ManagementTokenCapTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class ManagementTokenCapTests(BookingsFixture factory)
 {
     private readonly List<Property> _pendingProperties = [];
     private readonly HttpClient _client = factory.CreateClient();

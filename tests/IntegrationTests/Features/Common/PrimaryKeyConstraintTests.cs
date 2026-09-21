@@ -29,8 +29,8 @@ namespace IntegrationTests.Features.Common;
 //    reported under that index's name, turning "our review is already there"
 //    into "already reviewed". A migration that ever recreates one of these
 //    primary keys would flip it.
-[Collection("Integration Tests")]
-public class PrimaryKeyConstraintTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CommonCollection.Name)]
+public class PrimaryKeyConstraintTests(CommonFixture factory)
 {
     private sealed record Row(string Name, bool IsFirstUniqueIndex);
 

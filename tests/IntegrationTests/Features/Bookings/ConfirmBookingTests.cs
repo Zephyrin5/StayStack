@@ -22,8 +22,8 @@ namespace IntegrationTests.Features.Bookings;
 // wired HoldAvailabilityEndpoint, then confirm it into a Booking via
 // ConfirmBookingEndpoint - both over real HTTP, matching
 // CreatePropertyAndUnitEndpointTests' approach.
-[Collection("Integration Tests")]
-public class ConfirmBookingTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class ConfirmBookingTests(BookingsFixture factory)
 {
     // Properties for units built by CreateTestUnit below, flushed by the
     // seeder so a unit is never persisted without its owner - see

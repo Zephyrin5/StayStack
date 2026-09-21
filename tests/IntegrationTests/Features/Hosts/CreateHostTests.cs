@@ -14,8 +14,8 @@ using System.Net.Http.Json;
 using Persistence;
 namespace IntegrationTests.Features.Hosts;
 
-[Collection("Integration Tests")]
-public class CreateHostTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CommonCollection.Name)]
+public class CreateHostTests(CommonFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

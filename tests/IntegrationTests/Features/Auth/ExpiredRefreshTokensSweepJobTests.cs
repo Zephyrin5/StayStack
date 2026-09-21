@@ -6,8 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 namespace IntegrationTests.Features.Auth;
 
-[Collection("Integration Tests")]
-public class ExpiredRefreshTokensSweepJobTests(IntegrationTestWebApplicationFactory factory)
+[Collection(AuthCollection.Name)]
+public class ExpiredRefreshTokensSweepJobTests(AuthFixture factory)
 {
     private async Task SeedDatabaseAsync(params object[] entities)
     {

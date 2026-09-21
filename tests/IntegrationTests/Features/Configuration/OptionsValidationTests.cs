@@ -19,8 +19,8 @@ namespace IntegrationTests.Features.Configuration;
 // The cross-field invariants already had bespoke startup checks. These cover
 // the per-field ones the bespoke checks were never going to catch, and assert
 // startup refuses rather than that the value merely round-trips.
-[Collection("Integration Tests")]
-public class OptionsValidationTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CommonCollection.Name)]
+public class OptionsValidationTests(CommonFixture factory)
 {
     private WebApplicationFactory<Program> HostWith(params (string Key, string Value)[] settings) =>
         factory.WithWebHostBuilder(builder =>

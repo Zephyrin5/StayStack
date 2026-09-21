@@ -30,8 +30,8 @@ namespace IntegrationTests.Features.Bookings;
 // retried delegate: SaveChangesAsync defaults to acceptAllChangesOnSuccess,
 // so by the time it returns, every mutation is already Unchanged. A retry then saves nothing at all - while the statements
 // that are not EF's, like the hold release, run again quite happily.
-[Collection("Integration Tests")]
-public class CancelRetryTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class CancelRetryTests(BookingsFixture factory)
 {
     private readonly List<Property> _pendingProperties = [];
 

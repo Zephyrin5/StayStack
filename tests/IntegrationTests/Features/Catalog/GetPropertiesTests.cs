@@ -35,8 +35,8 @@ namespace IntegrationTests.Features.Catalog;
 // Both are AllowAnonymous, but properties/units still need a real
 // authenticated host to create them first, same setup as
 // CreatePropertyAndUnitEndpointTests.
-[Collection("Integration Tests")]
-public class GetPropertiesTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CatalogCollection.Name)]
+public class GetPropertiesTests(CatalogFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

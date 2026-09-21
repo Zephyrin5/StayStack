@@ -18,8 +18,8 @@ namespace IntegrationTests.Features.Bookings;
 // months, exchanged once for a short-lived session (docs/adr/0023). These cover
 // the exchange, and the boundaries that keep a session from being worth more
 // than the token it came from.
-[Collection("Integration Tests")]
-public class BookingSessionTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class BookingSessionTests(BookingsFixture factory)
 {
     private readonly List<Property> _pendingProperties = [];
     private readonly HttpClient _client = factory.CreateClient();

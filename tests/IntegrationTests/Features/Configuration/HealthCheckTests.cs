@@ -11,8 +11,8 @@ namespace IntegrationTests.Features.Configuration;
 // so /health answered "yes" with the database unreachable - an orchestrator
 // would keep routing to a node that could not serve a single request, and a
 // deploy that could not reach its database would roll out green.
-[Collection("Integration Tests")]
-public class HealthCheckTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CommonCollection.Name)]
+public class HealthCheckTests(CommonFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
 

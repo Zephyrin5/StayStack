@@ -18,8 +18,8 @@ namespace IntegrationTests.Features.Bookings;
 
 // Exercises GetBookingsForHostEndpoint (GET /api/hosts/{hostId}/bookings) -
 // the admin-targeted counterpart to GetHostBookingsEndpoint, see docs/adr/0013.
-[Collection("Integration Tests")]
-public class GetBookingsForHostTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class GetBookingsForHostTests(BookingsFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

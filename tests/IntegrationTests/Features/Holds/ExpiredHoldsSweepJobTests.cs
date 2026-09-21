@@ -9,8 +9,8 @@ using SeedWork.Enums;
 using SeedWork.ValueObjects;
 namespace IntegrationTests.Features.Holds;
 
-[Collection("Integration Tests")]
-public class ExpiredHoldsSweepJobTests(IntegrationTestWebApplicationFactory factory)
+[Collection(HoldsCollection.Name)]
+public class ExpiredHoldsSweepJobTests(HoldsFixture factory)
 {
     private async Task SeedDatabaseAsync(params object[] entities)
     {

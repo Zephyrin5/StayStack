@@ -21,8 +21,8 @@ namespace IntegrationTests.Features.Catalog;
 // asking for one row past the page. These assert the two things that claim
 // rests on: that the extra round trip is genuinely gone, and that the probe
 // row never escapes into the results.
-[Collection("Integration Tests")]
-public class PagedSliceTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CatalogCollection.Name)]
+public class PagedSliceTests(CatalogFixture factory)
 {
     // Counts round trips rather than inspecting SQL text: the claim is about
     // how many times the database is asked, which is the thing that costs.

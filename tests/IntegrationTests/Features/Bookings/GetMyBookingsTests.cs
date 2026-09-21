@@ -21,8 +21,8 @@ namespace IntegrationTests.Features.Bookings;
 // through /api/bookings/mine. Same "seed a Unit directly, no real Property
 // needed" shortcut ConfirmBookingTests relies on, since Unit.PropertyId is a
 // plain Guid with no FK (see Unit.cs/Booking.cs's own notes on this).
-[Collection("Integration Tests")]
-public class GetMyBookingsTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class GetMyBookingsTests(BookingsFixture factory)
 {
     // Properties for units built by CreateTestUnit below, flushed by the
     // seeder so a unit is never persisted without its owner - see

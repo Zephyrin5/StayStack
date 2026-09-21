@@ -11,8 +11,8 @@ namespace IntegrationTests.Measurements;
 // It starts a second host against the same database, waits, and reads TickerQ's own occurrence rows -
 // which is the only place the answer is visible. This application's jobs are idempotent either way,
 // so their side effects cannot distinguish one execution from two.
-[Collection("Integration Tests")]
-public class TwoHostSchedulerProbe(IntegrationTestWebApplicationFactory factory)
+[Collection(MeasurementsCollection.Name)]
+public class TwoHostSchedulerProbe(MeasurementsFixture factory)
 {
     [Fact]
     public async Task OneOccurrencePerCronTick()

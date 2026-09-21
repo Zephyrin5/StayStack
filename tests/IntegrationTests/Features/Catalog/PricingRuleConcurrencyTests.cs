@@ -29,8 +29,8 @@ namespace IntegrationTests.Features.Catalog;
 //
 // What decides each race is the schema - one constraint per rule type (see
 // docs/adr/0012) - not the isolation level.
-[Collection("Integration Tests")]
-public class PricingRuleConcurrencyTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CatalogCollection.Name)]
+public class PricingRuleConcurrencyTests(CatalogFixture factory)
 {
     private readonly Faker _faker = new Faker();
 

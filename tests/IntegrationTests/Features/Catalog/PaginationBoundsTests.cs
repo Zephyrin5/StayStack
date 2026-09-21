@@ -9,8 +9,8 @@ namespace IntegrationTests.Features.Catalog;
 // GetProperties is the sharpest case: anonymous, filtered by a subquery over
 // candidate unit ids, and cached under a key that includes Page - so each
 // distinct page value is both expensive work and a fresh cache entry.
-[Collection("Integration Tests")]
-public class PaginationBoundsTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CatalogCollection.Name)]
+public class PaginationBoundsTests(CatalogFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
 

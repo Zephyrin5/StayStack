@@ -1,135 +1,77 @@
-﻿using Bookings;
-using Catalog;
-using Hosts;
-using Identity;
+﻿using Database;
 using IntegrationTests.Measurements;
-using Database;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Persistence;
 using Persistence.Interceptors;
-using Promotions;
-using Reviews;
-using Testcontainers.PostgreSql;
-using TickerQ.EntityFrameworkCore.DbContextFactory;
-using Transactions;
 namespace IntegrationTests;
 
-// ReSharper disable once ClassNeverInstantiated.Global
-public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
+/// <summary>
+///     A host on a database of this collection's own, copied from the assembly's migrated template
+///     (see <see cref="PostgresFixture" />). One per collection, so collections can run at the same
+///     time without reading each other's rows.
+/// </summary>
+public abstract class IntegrationTestWebApplicationFactory(PostgresFixture postgres, string collection)
+    : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    // Pass the image directly into PostgreSqlBuilder constructor to fix CS0618
-    private readonly PostgreSqlContainer _dbContainer = new PostgreSqlBuilder("postgres:16-alpine")
-        .WithDatabase("staystack_test_db")
-        .WithUsername("postgres")
-        .WithPassword("postgres")
-        .Build();
-
     private IdleInTransactionProbe? _idleInTransactionProbe;
 
-    public string ConnectionString => _dbContainer.GetConnectionString();
+    private string? _connectionString;
+
+    /// <summary>
+    ///     Whether this host schedules TickerQ's jobs. Off by default: a job commits on its own cron,
+    ///     and an injected commit fault cannot tell that commit from the request under test - the
+    ///     request then runs clean while the fault reports it fired (docs/adr/0025). A host that needs
+    ///     the scheduler says so.
+    /// </summary>
+    protected virtual bool RunsScheduledJobs => false;
+
+    public string ConnectionString =>
+        _connectionString ?? throw new InvalidOperationException("InitializeAsync has not run yet.");
 
     public async ValueTask InitializeAsync()
     {
-        await _dbContainer.StartAsync();
-        await MigrateAllModulesAsync();
+        _connectionString = await postgres.CreateDatabaseAsync($"staystack_{collection}");
 
         // Stage 0 measurement only; off unless an output file is named.
         if (Environment.GetEnvironmentVariable("STAYSTACK_IDLE_TX_PROBE") is { Length: > 0 } probeOutput)
         {
-            _idleInTransactionProbe = new IdleInTransactionProbe(_dbContainer.GetConnectionString(), probeOutput);
+            _idleInTransactionProbe = new IdleInTransactionProbe(_connectionString, probeOutput);
             _idleInTransactionProbe.Start();
         }
 
-        // The administrator these tests sign in as, created here so the
-        // credential lives for one run in one throwaway database. See
-        // IntegrationTestAdmin.
+        // The administrator these tests sign in as, created here so the credential lives for one run
+        // in one throwaway database. See IntegrationTestAdmin.
         await IntegrationTestAdmin.EnsureCreatedAsync(Services);
     }
 
     public override async ValueTask DisposeAsync()
     {
-        // base first: it disposes the host, which closes its Npgsql data
-        // sources and their pooled connections. Stopping the container out
-        // from under a live pool just makes the shutdown noisier.
+        // base first: it disposes the host, which closes its Npgsql data sources and their pooled
+        // connections. The container outlives every collection, so nothing here stops it.
         //
-        // An override, not `public new`: hiding WebApplicationFactory's own
-        // DisposeAsync would stop the container without ever disposing the
-        // host.
+        // An override, not `public new`: hiding WebApplicationFactory's own DisposeAsync would leave
+        // the host undisposed.
         await base.DisposeAsync();
+
         if (_idleInTransactionProbe is not null)
         {
             await _idleInTransactionProbe.DisposeAsync();
         }
 
-        await _dbContainer.StopAsync();
         GC.SuppressFinalize(this);
     }
 
-    /// <summary>
-    ///     Applies every module's real migrations, before the host is built.
-    ///     <para>
-    ///         Not through services.BuildServiceProvider() inside
-    ///         ConfigureServices (ASP0000): that stands up a second container
-    ///         with its own singletons, Npgsql data sources and pools included.
-    ///         Not through this factory's Services either: touching Services
-    ///         builds and starts the host, and TickerQ (Program.cs calls
-    ///         UseTickerQ()) would start against a database with no schema yet.
-    ///     </para>
-    ///     <para>
-    ///         So no container at all. Each context is constructed directly
-    ///         from the same ConfigureStayStackDefaults the app registers it
-    ///         with, migrated, and disposed. Nothing is left behind, and
-    ///         migrations complete before anything is hosted.
-    ///     </para>
-    /// </summary>
-    private async Task MigrateAllModulesAsync()
-    {
-        // "app" must match what AddAppDbContext passes: it selects the migrations-history table, so a
-        // mismatch would silently re-run every migration into the wrong bookkeeping.
-        DbContextOptionsBuilder<AppDbContext> builder = new DbContextOptionsBuilder<AppDbContext>();
-        builder.ConfigureStayStackDefaults(
-            _dbContainer.GetConnectionString(), "app", isDevelopment: false, migrationsAssembly: "Database");
-
-        await using (AppDbContext context = new AppDbContext(builder.Options, AppDbContextModels.All))
-        {
-            await context.Database.MigrateAsync();
-        }
-
-        // TickerQ's migrations live in the Jobs assembly, not alongside its
-        // context - same reason TickerQDbContextDesignTimeFactory spells this
-        // out for dotnet ef.
-        await MigrateAsync<TickerQDbContext>("jobs", migrationsAssembly: "Jobs");
-    }
-
-    // Activator rather than a Func<DbContextOptions<TContext>, TContext>
-    // parameter: passing the factory in would make every call site repeat its
-    // own type name twice. Every context here is a plain EF context with the
-    // standard (DbContextOptions<T>) constructor, and the whole suite fails
-    // loudly on the first test if one ever isn't.
-    private async Task MigrateAsync<TContext>(string moduleName, string? migrationsAssembly = null)
-        where TContext : DbContext
-    {
-        DbContextOptionsBuilder<TContext> builder = new DbContextOptionsBuilder<TContext>();
-        builder.ConfigureStayStackDefaults(
-            _dbContainer.GetConnectionString(), moduleName, isDevelopment: false, migrationsAssembly);
-
-        // All modules share one physical database, which Migrate() handles
-        // safely regardless of call order - each tracks its own applied
-        // migrations in its own history table, rather than checking whether
-        // the database itself already exists the way EnsureCreated() does.
-        await using TContext context = (TContext)Activator.CreateInstance(typeof(TContext), builder.Options)!;
-        await context.Database.MigrateAsync();
-    }
-
     // With a stated pool size, because AddAppDbContext refuses to start without one outside
-    // Development and these tests run the production registration path. 50 is far above what the
-    // suite uses; the pool-exhaustion measurements set their own.
-    private string TestConnectionString => $"{_dbContainer.GetConnectionString()};Maximum Pool Size=50";
+    // Development and these tests run the production registration path. Collections now run at the
+    // same time against one server, so this is per host rather than per suite; 25 is still far above
+    // what a collection uses, and the pool-exhaustion measurements set their own.
+    private string TestConnectionString => $"{ConnectionString};Maximum Pool Size=25";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -138,16 +80,15 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
         // UseSetting, not only ConfigureAppConfiguration: host configuration is what Program reads
         // when it registers services, and a layered configuration source arrives after that.
         builder.UseSetting("ConnectionStrings:AppConnection", TestConnectionString);
+        builder.UseSetting("App:Jobs:RunScheduler", RunsScheduledJobs ? "true" : "false");
 
-        // TickerQDbContext can't go through the RemoveAll<DbContextOptions<...>>
-        // + fresh AddDbContext override every other module's context uses
-        // below - AddOperationalStore registers it through its own internal
-        // wiring, so RemoveAll<DbContextOptions<TickerQDbContext>> has
-        // nothing to remove (confirmed: resolving it after that override
-        // still produced a context with no connection string). Feeding the
-        // container's connection string through configuration instead
-        // means JobsServicesRegistration's own GetConnectionString call -
-        // the same one that runs in production - picks it up naturally.
+        // TickerQDbContext can't go through the RemoveAll<DbContextOptions<...>> + fresh
+        // AddDbContext override below - AddOperationalStore registers it through its own internal
+        // wiring, so RemoveAll<DbContextOptions<TickerQDbContext>> has nothing to remove (confirmed:
+        // resolving it after that override still produced a context with no connection string).
+        // Feeding the connection string through configuration instead means
+        // JobsServicesRegistration's own GetConnectionString call - the same one that runs in
+        // production - picks it up naturally.
         builder.ConfigureAppConfiguration((_, configBuilder) =>
         {
             configBuilder.AddInMemoryCollection([
@@ -157,33 +98,22 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
 
         builder.ConfigureServices(services =>
         {
-            // Production registration always registers these DbContexts
-            // now, regardless of environment - it has no "am I under test"
-            // awareness to get wrong. Overriding them here is this test
-            // host's job, using the RemoveAll<DbContextOptions<...>> +
-            // fresh AddDbContext pattern ASP.NET Core's own docs recommend:
-            // RemoveAll first, since a second AddDbContext alone wouldn't
-            // replace the options the first one already registered.
+            // Production registration always registers these DbContexts now, regardless of
+            // environment - it has no "am I under test" awareness to get wrong. Overriding them here
+            // is this test host's job, using the RemoveAll<DbContextOptions<...>> + fresh
+            // AddDbContext pattern ASP.NET Core's own docs recommend: RemoveAll first, since a second
+            // AddDbContext alone wouldn't replace the options the first one already registered.
             //
-            // Reusing ConfigureStayStackDefaults, not a hand-rolled
-            // UseNpgsql/UseSnakeCaseNamingConvention, keeps this test
-            // config from drifting out of sync with production - a
-            // hand-rolled version once missed the snake_case convention
-            // the hand-written Dapper SQL and Postgres exclusion
-            // constraints depend on.
+            // Reusing ConfigureStayStackDefaults, not a hand-rolled UseNpgsql/
+            // UseSnakeCaseNamingConvention, keeps this test config from drifting out of sync with
+            // production - a hand-rolled version once missed the snake_case convention the
+            // hand-written Dapper SQL and Postgres exclusion constraints depend on.
             services.RemoveAll<DbContextOptions<AppDbContext>>();
             services.AddDbContext<AppDbContext>((serviceProvider, options) =>
             {
-                options.ConfigureStayStackDefaults(_dbContainer.GetConnectionString(), "app", false, migrationsAssembly: "Database");
+                options.ConfigureStayStackDefaults(ConnectionString, "app", false, migrationsAssembly: "Database");
                 options.AddInterceptors(serviceProvider.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
             });
-
-
-
-
-
-
-
         });
     }
 }

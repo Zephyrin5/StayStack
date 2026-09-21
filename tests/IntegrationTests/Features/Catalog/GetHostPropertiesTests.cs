@@ -17,8 +17,8 @@ namespace IntegrationTests.Features.Catalog;
 // Exercises GetHostPropertiesEndpoint (GET /api/hosts/{hostId}/properties) -
 // the admin-targeted read counterpart to GetMyPropertiesEndpoint, see
 // docs/adr/0013.
-[Collection("Integration Tests")]
-public class GetHostPropertiesTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CatalogCollection.Name)]
+public class GetHostPropertiesTests(CatalogFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

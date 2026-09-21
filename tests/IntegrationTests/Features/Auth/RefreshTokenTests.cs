@@ -8,8 +8,8 @@ using System.Net;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Auth;
 
-[Collection("Integration Tests")]
-public class RefreshTokenTests(IntegrationTestWebApplicationFactory factory)
+[Collection(AuthCollection.Name)]
+public class RefreshTokenTests(AuthFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

@@ -17,6 +17,11 @@
         <Using Include="Xunit"/>
     </ItemGroup>
 
+    <!-- The runner reads this from the output directory, not from the project. -->
+    <ItemGroup>
+        <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest"/>
+    </ItemGroup>
+
     <ItemGroup>
         <ProjectReference Include="..\..\src\Web\Api\Api.csproj"/>
     </ItemGroup>

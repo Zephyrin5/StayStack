@@ -7,8 +7,8 @@ using System.Net;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Auth;
 
-[Collection("Integration Tests")]
-public class SignInIntegrationTests(IntegrationTestWebApplicationFactory factory)
+[Collection(AuthCollection.Name)]
+public class SignInIntegrationTests(AuthFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();

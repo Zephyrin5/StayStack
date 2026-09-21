@@ -41,8 +41,8 @@ namespace IntegrationTests.Measurements;
 // Measurements for the transaction ownership refactor, not assertions about
 // correctness. Skipped unless STAYSTACK_MEASURE names an output directory, so
 // they never run in the ordinary suite. Each writes its numbers to a file there.
-[Collection("Integration Tests")]
-public class TransactionTopologyMeasurements(IntegrationTestWebApplicationFactory factory)
+[Collection(MeasurementsCollection.Name)]
+public class TransactionTopologyMeasurements(MeasurementsFixture factory)
 {
     private static readonly string? OutputDirectory = Environment.GetEnvironmentVariable("STAYSTACK_MEASURE");
     private readonly Faker _faker = new Faker();

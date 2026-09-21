@@ -19,8 +19,8 @@ namespace IntegrationTests.Features.Bookings;
 // theirs, and their retry fails on the hold they already consumed. These
 // cover the Idempotency-Key header that makes that retry work, and the two
 // guards that stop it becoming a way into somebody else's booking.
-[Collection("Integration Tests")]
-public class CheckoutIdempotencyTests(IntegrationTestWebApplicationFactory factory)
+[Collection(BookingsCollection.Name)]
+public class CheckoutIdempotencyTests(BookingsFixture factory)
 {
     private readonly List<Property> _pendingProperties = [];
     private readonly HttpClient _client = factory.CreateClient();

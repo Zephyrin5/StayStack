@@ -28,11 +28,13 @@ namespace IntegrationTests;
 ///         a transaction or command interceptor directly.
 ///     </para>
 ///     <para>
-///         Every fault is targeted. Test hosts run TickerQ, whose jobs commit on
-///         their own schedule, and an untargeted fault lets one of those take the
-///         injection: the request then runs clean, the fault reports that it
-///         fired, and the test passes having proved nothing. <c>when</c> must
-///         identify the commit under test.
+///         Every fault is targeted: <c>when</c> identifies the commit under test,
+///         rather than the fault taking whichever commit arrives next. A request
+///         makes several commits of its own, and an untargeted fault that lands on
+///         one of the others lets the request run clean while reporting that it
+///         fired - a test that then passes having proved nothing. Test hosts no
+///         longer schedule jobs (IntegrationTestWebApplicationFactory), which
+///         removes the other source of commits this used to compete with.
 ///     </para>
 /// </summary>
 // The one place allowed to hook a commit: BannedSymbols.txt keeps every other test out of the

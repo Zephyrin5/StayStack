@@ -25,8 +25,8 @@ namespace IntegrationTests.Features.Promotions;
 // lapse or be deleted between the read and the write; these drive that window
 // deterministically rather than racing threads for it. RedeemAsync runs only
 // inside a caller's transaction, so each test opens one.
-[Collection("Integration Tests")]
-public class PromotionRedemptionRaceTests(IntegrationTestWebApplicationFactory factory)
+[Collection(PromotionsCollection.Name)]
+public class PromotionRedemptionRaceTests(PromotionsFixture factory)
 {
     private static readonly DateTimeOffset Start = new DateTimeOffset(2026, 6, 1, 12, 0, 0, TimeSpan.Zero);
 

@@ -15,8 +15,8 @@ namespace IntegrationTests.Features.Localization;
 // invisible when the type's own defaults happen to match appsettings, which is
 // exactly the situation this pins - the values agreed, so nothing looked wrong,
 // and the configuration section was not actually being read.
-[Collection("Integration Tests")]
-public class LocalizationSettingsBindingTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CommonCollection.Name)]
+public class LocalizationSettingsBindingTests(CommonFixture factory)
 {
     [Fact]
     public void LocalizationSettings_ReflectsConfiguration_NotJustItsOwnDefaults()

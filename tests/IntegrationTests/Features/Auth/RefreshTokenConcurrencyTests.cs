@@ -15,8 +15,8 @@ namespace IntegrationTests.Features.Auth;
 // number of concurrent callers presenting one still-valid token only one can
 // rotate it. A SELECT, check, UPDATE sequence would let two callers both
 // observe IsRevoked == false.
-[Collection("Integration Tests")]
-public class RefreshTokenConcurrencyTests(IntegrationTestWebApplicationFactory factory)
+[Collection(AuthCollection.Name)]
+public class RefreshTokenConcurrencyTests(AuthFixture factory)
 {
     private readonly Faker _faker = new Faker();
 

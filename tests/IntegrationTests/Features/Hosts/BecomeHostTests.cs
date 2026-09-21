@@ -18,8 +18,8 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 namespace IntegrationTests.Features.Hosts;
 
-[Collection("Integration Tests")]
-public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
+[Collection(CommonCollection.Name)]
+public class BecomeHostTests(CommonFixture factory)
 {
     private readonly HttpClient _client = factory.CreateClient();
     private readonly Faker _faker = new Faker();
