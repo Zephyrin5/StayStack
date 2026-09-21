@@ -5,8 +5,8 @@ namespace Catalog.Entities.Configurations;
 
 public class PricingRuleConfiguration : IEntityTypeConfiguration<PricingRule>
 {
-    /// <summary>One active length-of-stay discount per unit.</summary>
-    public const string LengthOfStayIndex = "ix_pricing_rules_unit_length_of_stay_active";
+    /// <summary>One active length-of-stay discount per unit per threshold.</summary>
+    public const string LengthOfStayTierIndex = "ix_pricing_rules_unit_min_nights_active";
 
     /// <summary>
     ///     No overlapping active date-range overrides per unit. Created by raw SQL in
@@ -43,24 +43,22 @@ public class PricingRuleConfiguration : IEntityTypeConfiguration<PricingRule>
         builder.HasIndex(r => new { r.UnitId, r.RuleType }, "ix_pricing_rules_unit_type")
             .HasDatabaseName("ix_pricing_rules_unit_type");
 
-        // "At most one active length-of-stay rule per unit" - the invariant
-        // PricingRuleOverlapChecker.EnsureNoLengthOfStayConflict enforces in
-        // application code, now also held by the database.
+        // "At most one active length-of-stay rule per unit per threshold" - a unit may hold a tier
+        // at 3 nights and another at 30, but not two at 30. Two rules with the same MinNights are
+        // indistinguishable to PricingCalculator, which would take whichever the planner returned
+        // first; two with different ones are ordered, and it takes the deepest the stay qualifies
+        // for (docs/adr/0012).
         //
-        // PricingCalculator reads these with FirstOrDefault over an unordered
-        // ToListAsync result, so "at most one match" is not a nicety - it is
-        // what makes the read deterministic. A second active rule would not
-        // throw anywhere; it would silently make the price depend on row
-        // order. That is a data invariant, so it belongs in the schema rather
-        // than resting on every writer remembering to call the checker.
+        // A data invariant rather than a handler's rule: it holds however a row arrives, and both
+        // handlers run at the default isolation level because it does.
         //
         // Partial on the soft-delete predicate, same pattern as ix_promotions_code: an archived rule
         // must not block creating its replacement. rule_type is compared as text because it is stored
         // via HasConversion<string>(), unlike status.
-        builder.HasIndex(r => r.UnitId, LengthOfStayIndex)
+        builder.HasIndex(r => new { r.UnitId, r.MinNights }, LengthOfStayTierIndex)
             .IsUnique()
             .HasFilter($"rule_type = 'LengthOfStayDiscount' AND {SoftDelete.NotArchived}")
-            .HasDatabaseName(LengthOfStayIndex);
+            .HasDatabaseName(LengthOfStayTierIndex);
 
         // "At most one active day-of-week multiplier per unit per weekday". EnsureNoDayOfWeekConflict
         // is a read-then-insert: at ReadCommitted, six concurrent overlapping Saturday multipliers all

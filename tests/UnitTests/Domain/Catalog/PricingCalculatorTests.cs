@@ -126,6 +126,58 @@ public class PricingCalculatorTests
         Assert.Equal(Usd(630m), breakdown.Total); // 700 * 0.9
     }
 
+    // Three tiers on one unit, the shape the single-rule constraint used to forbid. The deepest
+    // threshold the stay reaches wins, and the rules are passed in an order that does not match the
+    // answer - the resolution is ordered in the calculator, not by however the rows arrive.
+    private static PricingRule[] Tiers() =>
+    [
+        PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), UnitId, minNights: 7, discountPercent: 10m),
+        PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), UnitId, minNights: 30, discountPercent: 25m),
+        PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), UnitId, minNights: 3, discountPercent: 5m)
+    ];
+
+    [Theory]
+    // Two nights: under every threshold, so no tier applies at all.
+    [InlineData(2, 200, null)]
+    // Exactly at each boundary, which is where an off-by-one lands: 3 nights takes the 3-night tier
+    // and not the 7-night one, 7 takes the 7, 30 takes the 30.
+    [InlineData(3, 300, 15)]
+    [InlineData(7, 700, 70)]
+    [InlineData(30, 3000, 750)]
+    // Between boundaries and past the last one: the tier below, never the one not yet reached.
+    [InlineData(6, 600, 30)]
+    [InlineData(29, 2900, 290)]
+    [InlineData(45, 4500, 1125)]
+    public void ResolveStayTotal_ShouldApplyTheDeepestTierTheStayReaches(int nights, int subtotal, int? discount)
+    {
+        DateOnly checkIn = new DateOnly(2026, 1, 1);
+
+        StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(
+            Usd(100m), checkIn, checkIn.AddDays(nights), Tiers());
+
+        Assert.Equal(Usd(subtotal), breakdown.Subtotal);
+        Assert.Equal(discount is null ? null : Usd(discount.Value), breakdown.LengthOfStayDiscountAmount);
+        Assert.Equal(Usd(subtotal - (discount ?? 0)), breakdown.Total);
+    }
+
+    [Fact]
+    public void ResolveStayTotal_ShouldTakeTheDeepestTier_NotTheLargestDiscount()
+    {
+        // Which tier applies is decided by the length, not by which rule is worth more. A host who
+        // discounts a week more deeply than a month gets exactly what they configured - the
+        // alternative would silently overrule them, and neither order is inherently wrong.
+        DateOnly checkIn = new DateOnly(2026, 1, 1);
+        PricingRule[] rules =
+        [
+            PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), UnitId, minNights: 7, discountPercent: 40m),
+            PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), UnitId, minNights: 30, discountPercent: 10m)
+        ];
+
+        StayPriceBreakdown breakdown = PricingCalculator.ResolveStayTotal(Usd(100m), checkIn, checkIn.AddDays(30), rules);
+
+        Assert.Equal(Usd(300m), breakdown.LengthOfStayDiscountAmount);
+    }
+
     [Fact]
     public void ResolveStayTotal_ShouldApplyDiscount_WhenNightsExceedThreshold()
     {

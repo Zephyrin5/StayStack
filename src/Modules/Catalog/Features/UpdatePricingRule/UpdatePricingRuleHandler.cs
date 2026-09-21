@@ -118,7 +118,7 @@ public class UpdatePricingRuleHandler(
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
-            catch (Exception exception) when (PricingRuleOverlapChecker.IsOverlapViolation(exception, out string conflict))
+            catch (Exception exception) when (PricingRuleOverlapChecker.IsOverlapViolation(exception, locked, out string conflict))
             {
                 throw new PricingRuleConflictException(conflict);
             }
@@ -150,9 +150,9 @@ public class UpdatePricingRuleHandler(
 
     private static void ApplyLengthOfStayDiscount(PricingRule rule, UpdatePricingRuleRequest request, IReadOnlyList<PricingRule> existing)
     {
-        PricingRuleOverlapChecker.EnsureNoLengthOfStayConflict(existing);
+        PricingRuleOverlapChecker.EnsureNoLengthOfStayConflict(request.MinNights!.Value, existing);
 
-        rule.SetMinNights(request.MinNights!.Value);
+        rule.SetMinNights(request.MinNights.Value);
         rule.SetDiscountPercent(request.DiscountPercent!.Value);
     }
 }

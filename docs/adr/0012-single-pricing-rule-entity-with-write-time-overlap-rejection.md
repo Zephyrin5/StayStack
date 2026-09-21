@@ -27,20 +27,36 @@ module uses.
 `GetPriceCalendarHandler` call, instead of a `Priority` field or duplicating the logic in each consumer
 (or in SQL, for the calendar's hot path): for a given night, an active date-range override is the
 absolute price; otherwise `BasePrice` times any active day-of-week multiplier matching that weekday, or
-just `BasePrice`. A length-of-stay discount, if the stay's total night count meets its threshold, is
+just `BasePrice`. A length-of-stay discount, if the stay's total night count meets a threshold, is
 applied to the summed subtotal - it's a whole-stay concept, so it's deliberately excluded from the
 single-day nightly resolution the calendar preview uses.
 
-**Overlapping active rules of the same type are rejected at write time**, rather than resolved with a
-priority or tie-break at read time. `PricingCalculator` takes the first matching rule per night (and the
-first matching length-of-stay rule per stay) from an unordered list, so "at most one active rule of a type
-matches" is a precondition of the price being deterministic. A second matching row would throw nowhere; it
-would make the price depend on row order.
+### Two kinds of ambiguity, and only one of them is a conflict
 
-- `DateRangeOverride`: no two active overrides for a unit may overlap.
-- `DayOfWeekMultiplier`: no weekday may belong to two active multipliers for a unit.
-- `LengthOfStayDiscount`: **at most one active rule per unit** - avoids threshold-overlap semantics (does a
-  7-night rule "overlap" a 14-night one?) for a product need that does not call for tiered discounts.
+**For the nightly rules, overlapping active rules of the same type are rejected at write time**, rather
+than resolved with a priority or tie-break at read time. `PricingCalculator` takes the first matching
+rule per night from an unordered list, so "at most one active rule of a type matches" is a precondition
+of the price being deterministic. A second matching row would throw nowhere; it would make the price
+depend on row order.
+
+- `DateRangeOverride`: no two active overrides for a unit may overlap. Two ranges covering one night are
+  genuinely ambiguous: neither is more specific, and picking one needs a tie-break concept the product
+  does not have.
+- `DayOfWeekMultiplier`: no weekday may belong to two active multipliers for a unit, for the same reason
+  per weekday.
+
+**Length-of-stay tiers are different, and write-time rejection is the wrong tool for them.** A threshold
+is a number, and numbers are totally ordered, so several qualifying rules are not ambiguous at all: the
+one that applies is the highest threshold the stay reaches. A unit may hold 3-, 7- and 30-night tiers at
+once, and a 10-night stay takes the 7-night rate. That resolution is one `MaxBy` in
+`PricingCalculator.ResolveStayTotal`, and it is written there rather than left implied by a constraint
+that allowed only one row to qualify - the ordering is a property of the calculation, and reading the
+calculator should be enough to know what a stay costs.
+
+What remains a conflict is two active tiers at the *same* threshold, because nothing orders those:
+`ix_pricing_rules_unit_min_nights_active` refuses them. Which tier applies is decided by length alone,
+not by which discount is larger - a host who discounts a week more deeply than a month gets what they
+configured, since neither ordering is inherently right and overruling them silently is worse.
 
 **The schema enforces all three invariants**, because they hold or fail regardless of how a row arrives - a
 handler, a data migration, an admin script, raw SQL:
@@ -48,7 +64,7 @@ handler, a data migration, an admin script, raw SQL:
 | Rule type | Enforced by |
 |---|---|
 | `DateRangeOverride` | `pricing_rules_date_range_overlap_excl`: `EXCLUDE USING gist (unit_id WITH =, date_range WITH &&)`, partial on `rule_type = 'DateRangeOverride' AND status <> 2`. Raw migration SQL; `btree_gist` is enabled. |
-| `LengthOfStayDiscount` | `ix_pricing_rules_unit_length_of_stay_active`: a partial unique index on `unit_id`. |
+| `LengthOfStayDiscount` | `ix_pricing_rules_unit_min_nights_active`: a partial unique index on `(unit_id, min_nights)` - one tier per threshold, any number of thresholds. |
 | `DayOfWeekMultiplier` | `ix_pricing_rules_unit_day_of_week_{0..6}_active`: seven partial unique indexes on `unit_id`, each filtered on `rule_type = 'DayOfWeekMultiplier' AND status <> 2 AND days_of_week @> ARRAY[d]`, plus `ck_pricing_rules_days_of_week_domain` keeping `days_of_week` non-empty and inside 0..6, since a day outside that range would escape every index. |
 
 `status <> 2` excludes archived rules, so an archived rule never blocks its replacement.
@@ -68,9 +84,14 @@ from both committing, and it would have to return.
 
 - **One table per rule type.** Rejected - three DbSets/configs, and every rule-loading call site (both
   handlers, the overlap check) would need three queries or a `UNION` instead of one.
-- **A `Priority` field to resolve overlapping rules at read time.** Rejected for v1 - adds a whole
-  tie-breaking UX and validation surface the product need ("simple, predictable host-set rules") does not
-  require. Can be introduced later as an additive change without migrating existing rows.
+- **A `Priority` field to resolve overlapping rules at read time.** Rejected - adds a whole tie-breaking
+  UX and validation surface the product need ("simple, predictable host-set rules") does not require, and
+  the case that looked like it needed one does not: length-of-stay tiers order themselves by threshold.
+  The nightly rules have no such natural order, which is exactly why they are rejected at write time
+  instead. Can still be introduced later as an additive change without migrating existing rows.
+- **Threshold ranges instead of tiers** (a rule from 7 to 29 nights, another from 30). Rejected: it makes
+  a host state each boundary twice and leaves gaps expressible, to describe the same thing "the highest
+  threshold reached" already says with one number per tier.
 - **Serializable isolation instead of constraints.** Rejected: it protects concurrent writers through these
   handlers only, not the read-path invariant against any other writer, and it costs a `40001` retry on
   ordinary contention.
@@ -93,14 +114,19 @@ from both committing, and it would have to return.
   it can rely on the default isolation level.
 - `GetPriceCalendarHandler` makes two Postgres round trips per uncached calendar request: the availability
   SQL, and an EF query for the unit's active rules.
-- Rule conflicts surface to hosts as a 409. A host wanting tiered length-of-stay discounts (one rate at 7
-  nights, a deeper one at 30) cannot express that without replacing the existing rule - a deliberate scope
-  cut.
+- Rule conflicts surface to hosts as a 409. For a length-of-stay tier the message names the threshold that
+  collided, because that is the part the host has to change; the in-memory check and the index produce the
+  same wording, so a race reads like an ordinary conflict.
+- A unit's tiers are unconstrained in number and in shape. Nothing requires a deeper tier to discount more,
+  or the set to be contiguous - a unit may hold 3- and 30-night tiers and nothing between. The calculator
+  answers for any set, so there is no configuration a host can reach that makes a stay's price undefined.
 - The date-range constraint lives in raw migration SQL, which a migration squash regenerated from the model
   would lose.
 - `PricingRuleConstraintTests` writes straight through the `DbContext`, bypassing the handlers, so it tests
-  the schema. `PricingRuleConcurrencyTests` races each rule type concurrently through the handlers; it passes
-  at Read Committed, and its day-of-week race fails if those indexes are not unique.
+  the schema: several thresholds for one unit are accepted, two at one threshold are not. `PricingRuleConcurrencyTests`
+  races each rule type concurrently through the handlers; it passes at Read Committed, and its day-of-week
+  and length-of-stay races each fail if those indexes are not unique. `PricingCalculatorTests` holds the tier
+  resolution at every boundary, including a stay below the lowest threshold.
 - Both handlers clear the change tracker at the top of their retried delegate, and `UpdatePricingRuleHandler`
   reads sibling rules with `AsNoTracking()`, so a retry never checks overlap against a tracked copy left by a
   rolled-back attempt.

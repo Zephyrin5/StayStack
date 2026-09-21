@@ -114,31 +114,42 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
     }
 
     [Fact]
-    public async Task LengthOfStayDiscount_SecondActiveRuleForTheSameUnit_IsRejectedByTheDatabase()
+    public async Task LengthOfStayDiscount_ASecondRuleAtTheSameThreshold_IsRejectedByTheDatabase()
     {
-        // The one type where the read is ambiguous even without an "overlap"
-        // in any geometric sense: PricingCalculator takes FirstOrDefault over
-        // rules whose MinNights <= nights, so two active rules with different
-        // MinNights would both match a long stay and the discount applied
-        // would depend on row order.
+        // Two tiers at one threshold are indistinguishable to PricingCalculator: it takes the
+        // deepest MinNights a stay reaches, and with a tie there is nothing left to order them by,
+        // so the discount would depend on row order. Different thresholds are ordered, and allowed.
         Guid unitId = await SeedUnitAsync();
 
-        await AddRuleAsync(PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unitId, minNights: 3, discountPercent: 10m));
+        await AddRuleAsync(PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unitId, minNights: 7, discountPercent: 10m));
 
         DbUpdateException exception = await Assert.ThrowsAsync<DbUpdateException>(() =>
             AddRuleAsync(PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unitId, minNights: 7, discountPercent: 20m)));
 
         PostgresException postgres = UnwrapPostgres(exception);
         Assert.Equal("23505", postgres.SqlState);
-        Assert.Equal("ix_pricing_rules_unit_length_of_stay_active", postgres.ConstraintName);
+        Assert.Equal("ix_pricing_rules_unit_min_nights_active", postgres.ConstraintName);
     }
 
     [Fact]
-    public async Task LengthOfStayDiscount_ReplacingAnArchivedRule_IsAccepted()
+    public async Task LengthOfStayDiscount_SeveralThresholdsForOneUnit_AreAccepted()
     {
+        // The point of the change: a host can price a long weekend, a week and a month differently.
         Guid unitId = await SeedUnitAsync();
 
-        PricingRule archived = PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unitId, minNights: 3, discountPercent: 10m);
+        await AddRuleAsync(PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unitId, minNights: 3, discountPercent: 5m));
+        await AddRuleAsync(PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unitId, minNights: 7, discountPercent: 10m));
+        await AddRuleAsync(PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unitId, minNights: 30, discountPercent: 25m));
+    }
+
+    [Fact]
+    public async Task LengthOfStayDiscount_ReplacingAnArchivedRuleAtTheSameThreshold_IsAccepted()
+    {
+        // The index is partial on the soft-delete predicate, so retiring a tier and recreating it at
+        // the same threshold works - the case a plain unique index would refuse forever.
+        Guid unitId = await SeedUnitAsync();
+
+        PricingRule archived = PricingRule.CreateLengthOfStayDiscount(Guid.CreateVersion7(), unitId, minNights: 7, discountPercent: 10m);
         archived.Archive(DateTimeOffset.UtcNow, null);
         await AddRuleAsync(archived);
 

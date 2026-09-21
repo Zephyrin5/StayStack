@@ -116,13 +116,12 @@ public class PricingRuleConcurrencyTests(IntegrationTestWebApplicationFactory fa
     }
 
     [Fact]
-    public async Task CreatePricingRule_ConcurrentRequestsForTheSameUnitAndLengthOfStayDiscountType_ExactlyOneSucceeds()
+    public async Task CreatePricingRule_ConcurrentRequestsForTheSameLengthOfStayThreshold_ExactlyOneSucceeds()
     {
-        // LengthOfStayDiscount is the simplest overlap rule to race - at
-        // most one is ever allowed per unit (PricingRuleOverlapChecker.
-        // EnsureNoLengthOfStayConflict), so N concurrent creates for the
-        // same unit are all racing to be the only one that ever gets to
-        // exist, not just to avoid a specific date/day overlap.
+        // All eight ask for the same threshold, which is the conflict now that a unit may hold
+        // several tiers. EnsureNoLengthOfStayConflict is a read-then-insert, so at Read Committed
+        // every one of them can pass it; ix_pricing_rules_unit_min_nights_active is what decides
+        // the race, and the losers come back as the same 409 the in-memory check gives.
         (string hostToken, Guid unitId) = await SeedHostWithUnitAsync();
 
         const int concurrentRequests = 8;
@@ -134,8 +133,8 @@ public class PricingRuleConcurrencyTests(IntegrationTestWebApplicationFactory fa
                     {
                         UnitId = unitId,
                         RuleType = PricingRuleType.LengthOfStayDiscount,
-                        MinNights = 3 + i,
-                        DiscountPercent = 10m
+                        MinNights = 7,
+                        DiscountPercent = 10m + i
                     }),
                     TestContext.Current.CancellationToken))
         ];

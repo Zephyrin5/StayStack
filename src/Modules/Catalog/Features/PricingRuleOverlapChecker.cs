@@ -16,8 +16,12 @@ internal static class PricingRuleOverlapChecker
     ///     PricingRuleConflictException the in-memory checks throw. Concurrent
     ///     writers both pass the in-memory check, so the constraint decides the
     ///     race and the loser reaches this.
+    ///     <para>
+    ///         Takes the rule being written because a constraint name says which invariant broke
+    ///         and not against what: the tier that collided is on the row, not in the violation.
+    ///     </para>
     /// </summary>
-    public static bool IsOverlapViolation(Exception exception, out string message)
+    public static bool IsOverlapViolation(Exception exception, PricingRule rule, out string message)
     {
         message = string.Empty;
 
@@ -27,9 +31,9 @@ internal static class PricingRuleOverlapChecker
             return true;
         }
 
-        if (exception.IsViolationOf(PricingRuleConfiguration.LengthOfStayIndex))
+        if (exception.IsViolationOf(PricingRuleConfiguration.LengthOfStayTierIndex))
         {
-            message = "This unit already has an active length-of-stay discount rule - only one is allowed at a time.";
+            message = TierTaken(rule.MinNights);
             return true;
         }
 
@@ -67,12 +71,22 @@ internal static class PricingRuleOverlapChecker
         }
     }
 
-    public static void EnsureNoLengthOfStayConflict(IReadOnlyList<PricingRule> existingLengthOfStayRules)
+    /// <summary>
+    ///     Tiers do not overlap the way date ranges do: a rule at 7 nights and one at 30 are both
+    ///     meaningful, and PricingCalculator takes the deepest a stay reaches. Two at the same
+    ///     threshold are the conflict, because nothing orders them (docs/adr/0012).
+    /// </summary>
+    public static void EnsureNoLengthOfStayConflict(int minNights, IReadOnlyList<PricingRule> existingLengthOfStayRules)
     {
-        if (existingLengthOfStayRules.Count > 0)
+        if (existingLengthOfStayRules.Any(r => r.MinNights == minNights))
         {
-            throw new PricingRuleConflictException(
-                "This unit already has an active length-of-stay discount rule - only one is allowed at a time.");
+            throw new PricingRuleConflictException(TierTaken(minNights));
         }
     }
+
+    // One wording for both paths, so a race decided by the index reads exactly like one caught in
+    // memory - and both name the threshold, which is the part the host has to change.
+    private static string TierTaken(int? minNights) =>
+        $"This unit already has an active length-of-stay discount starting at {minNights} nights. " +
+        "Edit that rule, or choose a different minimum.";
 }

@@ -248,31 +248,45 @@ public class PricingRuleHandlerTests(IntegrationTestWebApplicationFactory factor
     }
 
     [Fact]
-    public async Task Create_ShouldReturn409_WhenSecondLengthOfStayDiscountRuleAdded()
+    public async Task Create_ShouldReturn200_WhenASecondLengthOfStayTierUsesADifferentThreshold()
     {
+        // A week and a month are separate tiers, and a stay takes the deepest it reaches
+        // (docs/adr/0012). This used to be a 409.
         (string hostToken, Guid unitId) = await SeedHostWithUnitAsync();
-        await _client.SendAsync(
-            Authorized(HttpMethod.Post, $"/api/catalog/units/{unitId}/pricing-rules", hostToken, new CreatePricingRuleRequest
-            {
-                UnitId = unitId,
-                RuleType = PricingRuleType.LengthOfStayDiscount,
-                MinNights = 7,
-                DiscountPercent = 10m
-            }),
-            TestContext.Current.CancellationToken);
+        await CreateLengthOfStayTierAsync(hostToken, unitId, minNights: 7, discountPercent: 10m);
 
-        HttpResponseMessage response = await _client.SendAsync(
-            Authorized(HttpMethod.Post, $"/api/catalog/units/{unitId}/pricing-rules", hostToken, new CreatePricingRuleRequest
-            {
-                UnitId = unitId,
-                RuleType = PricingRuleType.LengthOfStayDiscount,
-                MinNights = 30,
-                DiscountPercent = 20m
-            }),
-            TestContext.Current.CancellationToken);
+        HttpResponseMessage response =
+            await CreateLengthOfStayTierAsync(hostToken, unitId, minNights: 30, discountPercent: 20m);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Create_ShouldReturn409_WhenASecondLengthOfStayTierRepeatsAThreshold()
+    {
+        // Nothing orders two rules at one threshold, so this is the conflict that remains - and the
+        // message names the threshold, which is what the host has to change.
+        (string hostToken, Guid unitId) = await SeedHostWithUnitAsync();
+        await CreateLengthOfStayTierAsync(hostToken, unitId, minNights: 7, discountPercent: 10m);
+
+        HttpResponseMessage response =
+            await CreateLengthOfStayTierAsync(hostToken, unitId, minNights: 7, discountPercent: 20m);
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Contains("7 nights", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
     }
+
+    private Task<HttpResponseMessage> CreateLengthOfStayTierAsync(
+        string hostToken, Guid unitId, int minNights, decimal discountPercent) =>
+        _client.SendAsync(
+            Authorized(HttpMethod.Post, $"/api/catalog/units/{unitId}/pricing-rules", hostToken, new CreatePricingRuleRequest
+            {
+                UnitId = unitId,
+                RuleType = PricingRuleType.LengthOfStayDiscount,
+                MinNights = minNights,
+                DiscountPercent = discountPercent
+            }),
+            TestContext.Current.CancellationToken);
 
     [Fact]
     public async Task Update_ShouldReturn200_AndPersistChanges_ForOwningHost()
