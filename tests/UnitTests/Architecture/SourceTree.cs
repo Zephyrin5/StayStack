@@ -49,6 +49,20 @@ internal static partial class SourceTree
     }
 
     /// <summary>
+    ///     A file's text with its line endings normalised to \n - the one way these scans read the
+    ///     tree.
+    ///     <para>
+    ///         A Windows checkout is CRLF and the repository stores LF, so a pattern anchored with
+    ///         $ matches a different set of lines in each. A scan that reads the same tree two ways
+    ///         is not one check, and the weaker reading is the one that passes.
+    ///     </para>
+    /// </summary>
+    public static string Read(string path) => File.ReadAllText(path).ReplaceLineEndings("\n");
+
+    /// <summary>The lines of <see cref="Read" />, so a line number means the same on either.</summary>
+    public static string[] ReadLines(string path) => Read(path).Split('\n');
+
+    /// <summary>
     ///     Comments removed, strings kept - for assertions about SQL a file
     ///     issues, which lives in strings. This codebase explains its locks at
     ///     length, and prose must not satisfy an assertion about code.

@@ -34,7 +34,12 @@ public partial class DocumentationReferenceTests
 
     // A using directive or a namespace declaration names things the compiler resolves elsewhere, and
     // a folder-deep namespace segment is not evidence that a module by that name exists.
-    [GeneratedRegex(@"^[ \t]*(?:global[ \t]+)?using[ \t]+(?:static[ \t]+)?[A-Za-z_][\w.]*[ \t]*;[ \t]*$|^[ \t]*namespace[ \t]+[\w.]+[ \t]*[;{]?[ \t]*$",
+    //
+    // [ \t\r]* before each anchor rather than [ \t]*: in multiline mode $ matches before the \n of a
+    // CRLF pair, leaving the \r unmatched. Without the \r this stripped nothing on a CRLF checkout,
+    // so every using directive fed its segments in as resolvable names - the scan passed on Windows
+    // and failed on CI, which is the wrong way round for a guard.
+    [GeneratedRegex(@"^[ \t]*(?:global[ \t]+)?using[ \t]+(?:static[ \t]+)?[A-Za-z_][\w.]*[ \t]*;[ \t\r]*$|^[ \t]*namespace[ \t]+[\w.]+[ \t]*[;{]?[ \t\r]*$",
         RegexOptions.Multiline)]
     private static partial Regex NamespaceOrUsingLine();
 
@@ -61,7 +66,7 @@ public partial class DocumentationReferenceTests
         [.. SourceTree.SourceFiles(), .. SourceTree.TestFiles()];
 
     private static readonly IReadOnlyDictionary<string, string> Code =
-        CodeFiles.ToDictionary(path => path, path => SourceTree.WithoutCommentsOrStrings(File.ReadAllText(path)));
+        CodeFiles.ToDictionary(path => path, path => SourceTree.WithoutCommentsOrStrings(SourceTree.Read(path)));
 
     private static readonly HashSet<string> DeclaredNames = BuildDeclaredNames();
 
@@ -148,7 +153,7 @@ public partial class DocumentationReferenceTests
     {
         Dictionary<string, string> entries = new(StringComparer.Ordinal);
 
-        foreach (string line in File.ReadAllLines(Path.Combine(RepositoryRoot, "tests", "UnitTests", "Architecture", fileName)))
+        foreach (string line in SourceTree.ReadLines(Path.Combine(RepositoryRoot, "tests", "UnitTests", "Architecture", fileName)))
         {
             string entry = line.Trim();
 
@@ -173,7 +178,7 @@ public partial class DocumentationReferenceTests
         foreach (string path in SourceTree.AdrFiles())
         {
             string where = Relative(path);
-            string[] lines = File.ReadAllLines(path);
+            string[] lines = SourceTree.ReadLines(path);
 
             for (int index = 0; index < lines.Length; index++)
             {
@@ -188,7 +193,7 @@ public partial class DocumentationReferenceTests
         {
             string where = Relative(path);
 
-            foreach ((int line, string text) in SourceTree.CommentLines(File.ReadAllText(path)))
+            foreach ((int line, string text) in SourceTree.CommentLines(SourceTree.Read(path)))
             {
                 yield return (where, line, text);
             }
@@ -321,7 +326,7 @@ public partial class DocumentationReferenceTests
     {
         Dictionary<string, string> indexed = new(StringComparer.Ordinal);
 
-        foreach (string line in File.ReadAllLines(Path.Combine(AdrDirectory, "README.md")))
+        foreach (string line in SourceTree.ReadLines(Path.Combine(AdrDirectory, "README.md")))
         {
             Match row = IndexRow().Match(line);
 

@@ -33,7 +33,7 @@ public partial class ModuleBoundaryTests
         Path.Combine(SourceTree.FindSourceRoot(), "Modules", module);
 
     private static IReadOnlyList<string> ReferencesOf(string csproj) =>
-        ProjectReference().Matches(File.ReadAllText(csproj))
+        ProjectReference().Matches(SourceTree.Read(csproj))
             .Select(match => Path.GetFileNameWithoutExtension(match.Groups[1].Value.Replace('\\', '/')))
             .ToList();
 
@@ -142,7 +142,7 @@ public partial class ModuleBoundaryTests
         {
             string relative = Path.GetRelativePath(SourceTree.FindSourceRoot(), path).Replace('\\', '/');
 
-            if (!SourceTree.WithoutCommentsOrStrings(File.ReadAllText(path)).Contains("AppDbContext", StringComparison.Ordinal))
+            if (!SourceTree.WithoutCommentsOrStrings(SourceTree.Read(path)).Contains("AppDbContext", StringComparison.Ordinal))
             {
                 continue;
             }
@@ -187,7 +187,7 @@ public partial class ModuleBoundaryTests
                     continue;
                 }
 
-                string code = SourceTree.WithoutComments(File.ReadAllText(path));
+                string code = SourceTree.WithoutComments(SourceTree.Read(path));
 
                 foreach (Match match in SchemaConstant().Matches(code))
                 {

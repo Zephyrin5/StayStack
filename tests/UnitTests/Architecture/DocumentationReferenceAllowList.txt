@@ -19,3 +19,5 @@ Config.Serializer.Options; FastEndpoints' static configuration root, named as th
 CascadeMode.Continue; FluentValidation's enum, named in a comment about a rule this codebase sets.
 ClassNeverInstantiated.Global; a ReSharper directive, not a type.
 HttpContent.ReadFromJsonAsync; the BCL extension the comment explains the behaviour of.
+TickerQ.EntityFrameworkCore; the NuGet package that owns TickerQDbContext, named where the comment explains which assembly its migrations live in.
+Http.Json.JsonOptions; Microsoft.AspNetCore.Http.Json.JsonOptions, written the short way the registration reads.
