@@ -112,6 +112,14 @@ public static class IdentityServicesRegistration
                     ValidAudience = authTokenSettings.Audience,
                     IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(authTokenSettings.Key))
                 };
+
+                // Signature and lifetime say the token was ours and is not expired. They say nothing
+                // about whether the roles and host link inside it are still the account's, which is
+                // what this adds - and why it runs here rather than in any endpoint (docs/adr/0030).
+                options.Events = new JwtBearerEvents
+                {
+                    OnTokenValidated = SecurityStamps.ValidateAsync
+                };
             });
 
         // A second bearer scheme for booking-management sessions, differing

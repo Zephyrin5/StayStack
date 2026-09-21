@@ -8,6 +8,7 @@ using Identity.Features.Common;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Hybrid;
 using System.Data;
 namespace Identity.Features.BecomeHost;
 
@@ -17,7 +18,8 @@ public class BecomeHostHandler(
     ICurrentUserProvider currentUserProvider,
     IHostRegistrar hostRegistrar,
     IAuthTokenProvider authTokenProvider,
-    ITransactionRunner transactionRunner) : IRequestHandler<BecomeHostRequest, BecomeHostResponse>
+    ITransactionRunner transactionRunner,
+    HybridCache cache) : IRequestHandler<BecomeHostRequest, BecomeHostResponse>
 {
     public async ValueTask<BecomeHostResponse> Handle(BecomeHostRequest request, CancellationToken cancellationToken)
     {
@@ -35,7 +37,7 @@ public class BecomeHostHandler(
         {
             // The Host, the link, the role and the refresh token commit together (docs/adr/0003), so no
             // failure leaves a Host without its user, or a linked user without the Host role.
-            return await transactionRunner.ExecuteAsync(
+            BecomeHostResponse response = await transactionRunner.ExecuteAsync(
                 IsolationLevel.ReadCommitted,
                 async token =>
                 {
@@ -98,6 +100,12 @@ public class BecomeHostHandler(
                             string.Join(" ", roleResult.Errors.Select(e => e.Description)));
                     }
 
+                    // The token the caller arrived with says they are not a host, and it stays
+                    // valid for its whole lifetime unless the stamp moves (docs/adr/0030). Not an
+                    // identity a retry must recognise, despite being minted here: the replay path
+                    // above returns before this and reuses the stamp its committed attempt wrote.
+                    await userManager.UpdateSecurityStampAsync(user);
+
                     // Not a rotation of any specific presented refresh token (this
                     // endpoint doesn't take one) - starts a new family, same as
                     // SignIn/SignUp.
@@ -107,6 +115,13 @@ public class BecomeHostHandler(
                     return await BuildResponseAsync(user, hostId, refreshToken);
                 },
                 cancellationToken);
+
+            // After the commit, not inside it: an eviction while the new stamp is still uncommitted
+            // is undone by the next reader, which would cache the old row for another window
+            // (docs/adr/0030).
+            await SecurityStamps.InvalidateAsync(cache, userId, cancellationToken);
+
+            return response;
         }
         catch (AccountChangedDuringRequestException)
         {

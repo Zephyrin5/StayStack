@@ -1,11 +1,14 @@
 using BuildingBlocks.Exceptions;
 using BuildingBlocks.Identity;
 using Identity.Entities;
+using Identity.Features.Common;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Caching.Hybrid;
 namespace Identity.Features.RemoveRole;
 
-public class RemoveRoleHandler(UserManager<ApplicationUser> userManager) : IRequestHandler<RemoveRoleRequest, RemoveRoleResponse>
+public class RemoveRoleHandler(UserManager<ApplicationUser> userManager, HybridCache cache)
+    : IRequestHandler<RemoveRoleRequest, RemoveRoleResponse>
 {
     public async ValueTask<RemoveRoleResponse> Handle(RemoveRoleRequest request, CancellationToken cancellationToken)
     {
@@ -33,6 +36,11 @@ public class RemoveRoleHandler(UserManager<ApplicationUser> userManager) : IRequ
         {
             throw new ValidationException(nameof(request.Role), string.Join(" ", result.Errors.Select(e => e.Description)));
         }
+
+        // A removed role stays in every token the user already holds until the stamp moves, which
+        // is the case this endpoint exists for (docs/adr/0030).
+        await userManager.UpdateSecurityStampAsync(user);
+        await SecurityStamps.InvalidateAsync(cache, user.Id, cancellationToken);
 
         IList<string> roles = await userManager.GetRolesAsync(user);
         return new RemoveRoleResponse { UserId = user.Id, Roles = [.. roles] };

@@ -55,3 +55,4 @@ Numbers are never reused. A gap means a decision was withdrawn or folded into an
 | [0027](0027-refunds-are-decided-once-from-a-durable-obligation.md) | Refunds are decided once, from a durable obligation | Accepted |
 | [0028](0028-advisory-locks-and-lock-order.md) | Advisory locks and lock order | Accepted |
 | [0029](0029-one-context-and-the-transaction-runner.md) | One DbContext, and the transaction runner | Accepted |
+| [0030](0030-access-tokens-are-checked-against-the-account.md) | Access tokens are checked against the account on every request | Accepted |

@@ -335,9 +335,15 @@ public class BecomeHostTests(IntegrationTestWebApplicationFactory factory)
             CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
 
+        // The token this account now holds, not the one it arrived with: linking the host retired
+        // that one (docs/adr/0030), and a 401 would answer a different question than this test asks.
+        BecomeHostResponse? linked = await firstResponse.Content.ReadFromJsonAsync<BecomeHostResponse>(
+            TestJsonOptions.Default, TestContext.Current.CancellationToken);
+        Assert.NotNull(linked?.AccessToken);
+
         // Act: same account tries again
         HttpResponseMessage response = await _client.SendAsync(
-            CreateBecomeHostRequest(accessToken), TestContext.Current.CancellationToken);
+            CreateBecomeHostRequest(linked.AccessToken), TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
