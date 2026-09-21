@@ -36,6 +36,24 @@ public class AuthTokenConfiguration
     public double RefreshTokenLifespanInDays { get; set; }
 
     /// <summary>
+    ///     How long after a rotation the token it consumed is still read as that rotation's
+    ///     duplicate rather than as reuse.
+    ///     <para>
+    ///         Two tabs sharing a refresh cookie, or one client answering two parallel 401s, present
+    ///         the same token twice. Exactly one rotates it; the other arrives at a token that is
+    ///         revoked and replaced, which is also what a replayed stolen token looks like. Inside
+    ///         this window the benign reading wins and the request is refused without revoking the
+    ///         family, so the rotation that just succeeded survives (docs/adr/0009).
+    ///     </para>
+    ///     <para>
+    ///         Seconds, not minutes: it is sized for requests already in flight together, and every
+    ///         second of it is a second in which a stolen token is refused without being detected.
+    ///     </para>
+    /// </summary>
+    [Range(1, 120)]
+    public int RotationReuseGraceSeconds { get; set; } = 30;
+
+    /// <summary>
     ///     How long a booking-management session lasts once a guest exchanges
     ///     their management token for one.
     ///     <para>

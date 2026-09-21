@@ -183,6 +183,24 @@ public class AuthTokenProvider(
             throw new RefreshTokenExpiredException();
         }
 
+        // Consumed by a rotation moments ago, so this is the other half of a concurrent pair rather
+        // than a replay: two tabs on one cookie, or one client answering two parallel 401s. Revoking
+        // the family here would revoke the replacement the winner has just committed and sign the
+        // user out of the session that worked.
+        //
+        // Refused, not answered with the winner's child token: a duplicate presenter is not
+        // distinguishable from a thief, and handing a live credential to one is worse than a 401 the
+        // real client recovers from by reading its cookie again (docs/adr/0009).
+        //
+        // ReplacedByTokenId separates the two revocations that reach here: rotation sets it,
+        // sign-out does not, so a signed-out token still reaches reuse detection below.
+        if (existing.ReplacedByTokenId is not null
+            && existing.RevokedAt is { } rotatedAt
+            && rotatedAt > now.AddSeconds(-_authTokenSettings.RotationReuseGraceSeconds))
+        {
+            throw new InvalidRefreshTokenException();
+        }
+
         await RevokeFamilyAsync(existing.FamilyId, cancellationToken);
         throw new RefreshTokenReuseDetectedException();
     }

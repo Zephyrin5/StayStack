@@ -1,3 +1,4 @@
+using BuildingBlocks.Security;
 using Identity;
 using Identity.Entities;
 using Identity.Features.RefreshToken;
@@ -113,11 +114,30 @@ public class RefreshTokenRetryTests(AuthFixture factory)
         Assert.True(lostAck.HasFired);
         Assert.Equal(HttpStatusCode.OK, recovered.StatusCode);
 
+        // Past the rotation grace, so this is a replay rather than the other half of a pair still in
+        // flight - which is the only thing reuse detection can tell apart (docs/adr/0009).
+        // RefreshTokenGraceTests owns the boundary itself; what is under test here is that the
+        // recovery path does not swallow a replay that reaches it.
+        await BackdateRevocationAsync(original, TimeSpan.FromMinutes(5));
+
         // Act - the original token, presented again.
         HttpResponseMessage replay = await RefreshAsync(factory.CreateClient(), original);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, replay.StatusCode);
         Assert.All(await TokensForAsync(userId), t => Assert.True(t.IsRevoked));
+    }
+
+    private async Task BackdateRevocationAsync(string plaintext, TimeSpan by)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        IdentityDb dbContext = scope.ServiceProvider.GetRequiredService<IdentityDb>();
+        string hash = SecureToken.Hash(plaintext);
+
+        Assert.Equal(1, await dbContext.RefreshTokens
+            .Where(t => t.TokenHash == hash)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(t => t.RevokedAt, DateTime.UtcNow - by),
+                TestContext.Current.CancellationToken));
     }
 }
