@@ -1,0 +1,5 @@
+﻿# Names this repository no longer has. A comment that still uses one describes a system that is gone.
+# Format: name; what replaced it. ADRs are exempt: naming a rejected or retired thing is their job.
+
+Availability; holds are part of Bookings (ADR-0021). The module never shipped; the sweep job, the endpoints and the lock are Bookings'.
+StayStackDbContext; renamed AppDbContext when the per-module contexts became one (ADR-0029).

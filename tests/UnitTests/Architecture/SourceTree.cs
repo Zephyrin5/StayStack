@@ -1,9 +1,10 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 namespace UnitTests.Architecture;
 
 /// <summary>
-///     Reads src for ModuleBoundaryTests, the one check left that a compiler cannot make: which
-///     schema a module's SQL names, which lives in strings.
+///     Reads the repository for the architecture tests - the checks a compiler cannot make: which
+///     schema a module's SQL names, which lives in strings, and whether a name written in prose
+///     still resolves to code.
 /// </summary>
 internal static partial class SourceTree
 {
@@ -71,4 +72,54 @@ internal static partial class SourceTree
         CommentOrStringPattern().Matches(code)
             .Select(match => match.Value)
             .Where(value => !value.StartsWith('/'));
+
+    /// <summary>Every hand-written .cs file under tests, build output excluded.</summary>
+    public static IEnumerable<string> TestFiles()
+    {
+        string root = Path.Combine(FindRepositoryRoot(), "tests");
+
+        return Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
+            .Where(path =>
+            {
+                string relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+                return !relative.Contains("/bin/", StringComparison.Ordinal)
+                       && !relative.Contains("/obj/", StringComparison.Ordinal);
+            });
+    }
+
+    /// <summary>
+    ///     The migrations SourceFiles() leaves out. Generated, but named by hand and cited by that
+    ///     name in documentation, so a scan of references has to know they exist.
+    /// </summary>
+    public static IEnumerable<string> MigrationFiles() =>
+        Directory.EnumerateFiles(FindSourceRoot(), "*.cs", SearchOption.AllDirectories)
+            .Where(path => path.Replace('\\', '/').Contains("/Migrations/", StringComparison.Ordinal));
+
+    /// <summary>The architecture decision records, README excluded.</summary>
+    public static IEnumerable<string> AdrFiles() =>
+        Directory.EnumerateFiles(Path.Combine(FindRepositoryRoot(), "docs", "adr"), "*.md")
+            .Where(path => Path.GetFileName(path) != "README.md");
+
+    /// <summary>
+    ///     Each comment line with its 1-based line number - for scans of prose rather than code.
+    ///     A "//" inside a string stays out: whichever token starts first consumes the other.
+    /// </summary>
+    public static IEnumerable<(int Line, string Text)> CommentLines(string code)
+    {
+        foreach (Match match in CommentOrStringPattern().Matches(code))
+        {
+            if (!match.Value.StartsWith('/'))
+            {
+                continue;
+            }
+
+            int first = code.AsSpan(0, match.Index).Count('\n') + 1;
+            string[] lines = match.Value.Split('\n');
+
+            for (int offset = 0; offset < lines.Length; offset++)
+            {
+                yield return (first + offset, lines[offset].TrimEnd('\r'));
+            }
+        }
+    }
 }

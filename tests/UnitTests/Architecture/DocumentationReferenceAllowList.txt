@@ -1,0 +1,21 @@
+﻿# Names these scans would otherwise flag, and why each one is prose rather than a stale reference.
+# Format: name; why. An entry without a reason fails EveryAllowListEntryCarriesItsReason.
+# Loosening a pattern is never the repair - a name that should resolve belongs in the tree, not here.
+
+IJob; Quartz.NET's job interface, named in the alternative ADR-0002 rejected.
+BackgroundJob.Enqueue; Hangfire's API, named in the alternative ADR-0002 rejected.
+Quartz.NET; a product name; the dot is part of it.
+EFCore.NamingConventions; the NuGet package, not a namespace this repository declares.
+MethodInfo.Invoke; System.Reflection, named in ADR-0001 as the AOT hazard to avoid.
+CurrentTransaction.GetDbTransaction; EF Core's DatabaseFacade member, written as the call site spells it.
+X.Contracts; the csproj glob quoted verbatim in ADR-0004, where X stands for any module.
+DbContext; EF Core's base type.
+IdentityDbContext; ASP.NET Core Identity's base type.
+JsonSerializerContext; System.Text.Json's source-generated base type.
+TickerQDbContext; TickerQ's own context, owned by the library.
+ASP.NET; the platform's name, which has a dot in it.
+Dapper.AOT; the source-generator package, considered and not adopted in ADR-0001.
+Config.Serializer.Options; FastEndpoints' static configuration root, named as the call site spells it.
+CascadeMode.Continue; FluentValidation's enum, named in a comment about a rule this codebase sets.
+ClassNeverInstantiated.Global; a ReSharper directive, not a type.
+HttpContent.ReadFromJsonAsync; the BCL extension the comment explains the behaviour of.
