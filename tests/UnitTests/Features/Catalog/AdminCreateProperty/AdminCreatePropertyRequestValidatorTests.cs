@@ -1,3 +1,5 @@
+using BuildingBlocks.Localization;
+using Microsoft.Extensions.Options;
 using Catalog.Enums;
 using Catalog.Features.AdminCreateProperty;
 using FluentValidation.TestHelper;
@@ -5,7 +7,7 @@ namespace UnitTests.Features.Catalog.AdminCreateProperty;
 
 public class AdminCreatePropertyRequestValidatorTests
 {
-    private readonly AdminCreatePropertyRequestValidator _sut = new AdminCreatePropertyRequestValidator();
+    private readonly AdminCreatePropertyRequestValidator _sut = new AdminCreatePropertyRequestValidator(Options.Create(new LocalizationSettings { DefaultCulture = "en", SupportedCultures = ["en", "ar"] }));
 
     private static AdminCreatePropertyRequest CreateValidRequest()
     {

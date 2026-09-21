@@ -77,6 +77,20 @@ public sealed class CommonCollection : ICollectionFixture<CommonFixture>
 public sealed class CommonFixture(PostgresFixture postgres) : IntegrationTestWebApplicationFactory(postgres, "common");
 
 /// <summary>
+///     The localized-input rule, applied across Catalog's and Hosts's endpoints. Its own collection
+///     because every case stands up a host, a property and a unit of its own, which made it the
+///     longest-running thing in Common and so the length of the whole run.
+/// </summary>
+[CollectionDefinition(Name)]
+public sealed class LocalizationCollection : ICollectionFixture<LocalizationFixture>
+{
+    public const string Name = "Localization";
+}
+
+public sealed class LocalizationFixture(PostgresFixture postgres)
+    : IntegrationTestWebApplicationFactory(postgres, "localization");
+
+/// <summary>
 ///     The measurements, alone. They count connections and transactions against one server, so a
 ///     peer collection's pool would be part of every number they report.
 /// </summary>

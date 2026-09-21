@@ -1,15 +1,23 @@
 using BuildingBlocks.Time;
+using BuildingBlocks.Localization;
 using FastEndpoints;
 using FluentValidation;
+using Microsoft.Extensions.Options;
 namespace Catalog.Features.AdminCreateProperty;
 
 public sealed class AdminCreatePropertyRequestValidator : Validator<AdminCreatePropertyRequest>
 {
-    public AdminCreatePropertyRequestValidator()
+    // Injected rather than resolved from FastEndpoints' static service locator: DI builds
+    // these, and so can a test - the rule needs to know which cultures this deployment serves, and
+    // a validator that can only be constructed inside a host cannot be unit tested.
+    public AdminCreatePropertyRequestValidator(IOptions<LocalizationSettings> localizationSettings)
     {
+        LocalizationSettings localization = localizationSettings.Value;
+
+        RuleFor(x => x.Name)
+            .LocalizedText(localization, LocalizedTextRules.MaxNameLength);
         RuleFor(x => x.HostId).NotEmpty();
         RuleFor(x => x.PropertyType).IsInEnum();
-        RuleFor(x => x.Name).NotEmpty().WithMessage("At least one localized name value is required.");
         RuleFor(x => x.City).MaximumLength(100);
 
         // Rejected here rather than at the domain guard so the caller gets a

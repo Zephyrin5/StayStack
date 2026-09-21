@@ -1,10 +1,12 @@
+using BuildingBlocks.Localization;
+using Microsoft.Extensions.Options;
 using FluentValidation.TestHelper;
 using Hosts.Features.CreateHost;
 namespace UnitTests.Features.Hosts.CreateHost;
 
 public class CreateHostRequestValidatorTests
 {
-    private readonly CreateHostRequestValidator _sut = new CreateHostRequestValidator();
+    private readonly CreateHostRequestValidator _sut = new CreateHostRequestValidator(Options.Create(new LocalizationSettings { DefaultCulture = "en", SupportedCultures = ["en", "ar"] }));
 
     private static CreateHostRequest CreateValidRequest()
     {

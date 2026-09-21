@@ -1,3 +1,5 @@
+using BuildingBlocks.Localization;
+using Microsoft.Extensions.Options;
 using Catalog.Features.CreateUnit;
 using FluentValidation.TestHelper;
 using SeedWork.Enums;
@@ -5,7 +7,7 @@ namespace UnitTests.Features.Catalog.CreateUnit;
 
 public class CreateUnitRequestValidatorTests
 {
-    private readonly CreateUnitRequestValidator _sut = new CreateUnitRequestValidator();
+    private readonly CreateUnitRequestValidator _sut = new CreateUnitRequestValidator(Options.Create(new LocalizationSettings { DefaultCulture = "en", SupportedCultures = ["en", "ar"] }));
 
     private static CreateUnitRequest CreateValidRequest()
     {

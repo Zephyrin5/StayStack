@@ -4,6 +4,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="FluentValidation"/>
         <PackageReference Include="JetBrains.Annotations"/>
         <PackageReference Include="Mediator.Abstractions"/>
         <!-- For AppConfiguration's IConfiguration extensions - configuration
