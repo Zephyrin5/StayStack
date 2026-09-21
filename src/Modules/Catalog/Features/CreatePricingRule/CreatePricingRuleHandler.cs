@@ -54,10 +54,9 @@ public class CreatePricingRuleHandler(
         // retried delegate would otherwise re-add a second entity on top of the
         // first attempt's still-tracked, rolled-back one.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
-        // Once, outside the retry (docs/adr/0025). A fresh id per attempt would
-        // make a retry after a lost acknowledgement meet the first attempt's
-        // committed rule in the overlap check and report the host's own new rule
-        // as a conflict.
+        // A fresh id per attempt would make a retry after a lost acknowledgement meet the
+        // first attempt's committed rule in the overlap check and report the host's own new
+        // rule as a conflict.
         Guid pricingRuleId = Guid.CreateVersion7();
 
         await strategy.ExecuteAsync(async () =>

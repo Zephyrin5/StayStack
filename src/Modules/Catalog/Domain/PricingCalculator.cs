@@ -62,14 +62,9 @@ public static class PricingCalculator
 
         int nights = checkOut.DayNumber - checkIn.DayNumber;
 
-        // Tiers: a unit may hold several thresholds, and the one that applies is the highest the
-        // stay reaches - a 10-night stay under rules at 3, 7 and 30 nights gets the 7-night rate.
-        //
-        // The ordering is stated here rather than left to a constraint that lets only one row
-        // qualify. Thresholds are totally ordered, so "the deepest one met" is the whole rule, and
-        // a list arriving in any order resolves the same way (docs/adr/0012). MaxBy over the
-        // qualifying rules, not over the discount: which tier a stay falls in is the length, and
-        // whether a deeper tier discounts more is the host's to decide.
+        // MaxBy over the qualifying rules, not over the discount: which tier a stay falls in is
+        // the length, and whether a deeper tier discounts more is the host's to decide
+        // (docs/adr/0012).
         PricingRule? lengthOfStayRule = rules
             .Where(r => r.RuleType == PricingRuleType.LengthOfStayDiscount && r.MinNights!.Value <= nights)
             .MaxBy(r => r.MinNights!.Value);

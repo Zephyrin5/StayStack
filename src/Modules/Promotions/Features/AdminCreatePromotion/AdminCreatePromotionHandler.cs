@@ -15,7 +15,6 @@ public class AdminCreatePromotionHandler(
     public async ValueTask<CreatePromotionResponse> Handle(
         AdminCreatePromotionRequest request, CancellationToken cancellationToken)
     {
-        // Chosen first, before anything that could retry - see docs/adr/0025.
         Guid promotionId = Guid.CreateVersion7();
 
         // Unlike CreatePromotionHandler, HostId here IS trusted client

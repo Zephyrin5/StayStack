@@ -98,12 +98,11 @@ public class HoldAvailabilityHandler(
         // concurrent holds from one client on N units all count before any
         // commits (docs/adr/0016; HoldAvailabilityConcurrencyTests).
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
-        // Outside the retried delegate (docs/adr/0025). A fresh id per attempt
-        // would make a retry after a committed-but-unacknowledged insert collide
-        // with its own hold on the exclusion constraint: the caller is told the
-        // unit is unavailable while that hold stays live, unreachable, and
-        // counted against their cap. With one id, the catch below can ask
-        // whether the conflicting row is this request's own.
+        // A fresh id per attempt would make a retry after a committed-but-unacknowledged
+        // insert collide with its own hold on the exclusion constraint: the caller is told
+        // the unit is unavailable while that hold stays live, unreachable, and counted
+        // against their cap. With one id, the catch below can ask whether the conflicting
+        // row is this request's own.
         Guid holdId = Guid.CreateVersion7();
 
         (Guid HoldId, DateTimeOffset HoldExpiresAt) result = await strategy.ExecuteAsync(async () =>

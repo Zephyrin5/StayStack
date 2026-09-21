@@ -43,14 +43,10 @@ public class PricingRuleConfiguration : IEntityTypeConfiguration<PricingRule>
         builder.HasIndex(r => new { r.UnitId, r.RuleType }, "ix_pricing_rules_unit_type")
             .HasDatabaseName("ix_pricing_rules_unit_type");
 
-        // "At most one active length-of-stay rule per unit per threshold" - a unit may hold a tier
-        // at 3 nights and another at 30, but not two at 30. Two rules with the same MinNights are
-        // indistinguishable to PricingCalculator, which would take whichever the planner returned
-        // first; two with different ones are ordered, and it takes the deepest the stay qualifies
-        // for (docs/adr/0012).
-        //
-        // A data invariant rather than a handler's rule: it holds however a row arrives, and both
-        // handlers run at the default isolation level because it does.
+        // Two rules with the same MinNights are indistinguishable to PricingCalculator, which
+        // would take whichever the planner returned first. A data invariant rather than a
+        // handler's rule: it holds however a row arrives, and both handlers run at the default
+        // isolation level because it does (docs/adr/0012).
         //
         // Partial on the soft-delete predicate, same pattern as ix_promotions_code: an archived rule
         // must not block creating its replacement. rule_type is compared as text because it is stored

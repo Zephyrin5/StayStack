@@ -51,7 +51,6 @@ public sealed class Transaction : Entity
 
     public Money? RefundAmount => _refundAmount is { } amount ? Money.Of(amount, Amount.Currency) : null;
 
-    // The id is the caller's: a retry must be able to find the row it already wrote (docs/adr/0025).
     public static Transaction Create(Guid id, Guid bookingId, Money amount)
     {
         Guard.Against.Default(id);

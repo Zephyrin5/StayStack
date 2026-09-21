@@ -40,9 +40,8 @@ public class SignUpHandler(
         // (docs/adr/0003); nothing here does.
         IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
 
-        // Chosen once, outside the retry, like the account's own id above
-        // (docs/adr/0025). Minted inside RegisterAsync, a retry after a lost
-        // acknowledgement would hand back a refresh token no row matches.
+        // Minted inside RegisterAsync, a retry after a lost acknowledgement would hand back a
+        // refresh token no row matches.
         IssuedRefreshToken firstRefreshToken = IssuedRefreshToken.New();
 
         SignUpResponse response = await strategy.ExecuteAsync(async () =>

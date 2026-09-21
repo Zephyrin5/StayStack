@@ -17,7 +17,6 @@ public class CreatePropertyHandler(
         CreatePropertyRequest request,
         CancellationToken cancellationToken)
     {
-        // Chosen first, before anything that could retry - see docs/adr/0025.
         Guid propertyId = Guid.CreateVersion7();
 
         // Throws NotAHostException if the caller has no host_id claim. No

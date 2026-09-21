@@ -20,7 +20,6 @@ public class AdminCreatePropertyHandler(
         AdminCreatePropertyRequest request,
         CancellationToken cancellationToken)
     {
-        // Chosen first, before anything that could retry - see docs/adr/0025.
         Guid propertyId = Guid.CreateVersion7();
 
         // Unlike CreatePropertyHandler, HostId here IS trusted client

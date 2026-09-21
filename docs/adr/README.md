@@ -22,6 +22,19 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 - **Alternatives considered** - what else was on the table, and why it lost.
 - **Consequences** - what this commits us to, including the costs, not just the benefits.
 
+## A Consequences bullet names what enforces the decision
+
+A bullet claiming a decision is enforced names the thing that enforces it - a test, an analyzer
+diagnostic, a constraint, a banned symbol - by a name that resolves.
+`DocumentationReferenceTests` fails the build when one stops resolving, which is how a decision
+that quietly lost its guard is found rather than assumed.
+
+The other half is the one that gets forgotten: **when an invariant becomes executable, the prose
+that explained it goes.** A comment restating a rule the compiler now refuses to break is a second
+copy of the rule, free to drift from the first, and it reads as though the rule still rests on
+whoever is editing. Keep only what the enforcement cannot say - why this particular site would
+fail, or why code that looks wrong is correct - and delete the rest.
+
 ## Index
 
 Numbers are never reused. A gap means a decision was withdrawn or folded into another one, and its number stays retired so a link written against it cannot come to mean something else.

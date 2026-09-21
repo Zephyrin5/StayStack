@@ -85,11 +85,10 @@ public class ConfirmBookingHandler(
             }
         }
 
-        // Chosen once, before the transaction (docs/adr/0025). A retry after a lost
-        // acknowledgement recognises its own committed booking by this id, and
-        // returns this same management token, whose hash that attempt stored - a
-        // token minted per attempt would hand the guest a credential with no row
-        // behind it. Guest checkouts only: an account already proves ownership.
+        // A retry after a lost acknowledgement recognises its own committed booking by this
+        // id, and returns this same management token, whose hash that attempt stored - a token
+        // minted per attempt would hand the guest a credential with no row behind it. Guest
+        // checkouts only: an account already proves ownership.
         Guid bookingId = Guid.CreateVersion7();
         string? managementToken = currentUserProvider.UserId is null ? SecureToken.Generate() : null;
         Guid managementTokenId = Guid.CreateVersion7();

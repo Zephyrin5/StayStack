@@ -33,7 +33,6 @@ public class InitiateTransactionHandler(
             throw new BookingNotPayableException(request.BookingId);
         }
 
-        // Minted before the retry so a lost acknowledgement finds its own row (docs/adr/0025).
         Guid transactionId = Guid.CreateVersion7();
 
         return await transactionRunner.ExecuteAsync(

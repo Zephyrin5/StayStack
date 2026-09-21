@@ -100,8 +100,7 @@ public sealed class Booking : Entity
     // ADR-0018 exists to remove.
     public string TimeZoneId { get; private set; }
 
-    // The id is the caller's: a redeemed promo code needs it before the booking is saved, and a retry
-    // must be able to find the row it already wrote (docs/adr/0025).
+    // The id is the caller's because a redeemed promo code needs it before the booking is saved.
     public static Booking Create(
         Guid id,
         Guid unitId,

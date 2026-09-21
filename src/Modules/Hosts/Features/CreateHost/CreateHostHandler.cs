@@ -12,7 +12,6 @@ public class CreateHostHandler(HostsDb dbContext, IOptions<LocalizationSettings>
 {
     public async ValueTask<CreateHostResponse> Handle(CreateHostRequest request, CancellationToken cancellationToken)
     {
-        // Chosen first, before anything that could retry - see docs/adr/0025.
         Guid hostId = Guid.CreateVersion7();
 
         LocalizedText? displayName = request.DisplayName is { Count: > 0 }

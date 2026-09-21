@@ -22,7 +22,6 @@ public class CreateGuestReviewHandler(
 {
     public async ValueTask<CreateGuestReviewResponse> Handle(CreateGuestReviewRequest request, CancellationToken cancellationToken)
     {
-        // Chosen first, before anything that could retry - see docs/adr/0025.
         Guid reviewId = Guid.CreateVersion7();
 
         Guid hostId = hostAuthorization.RequireHostId();

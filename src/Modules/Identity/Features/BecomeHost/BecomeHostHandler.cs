@@ -27,9 +27,8 @@ public class BecomeHostHandler(
         // null in practice - guarded anyway rather than trusting that.
         Guid userId = currentUserProvider.UserId ?? throw new InvalidCredentialsException();
 
-        // Minted before the transaction (docs/adr/0025). A retry after a lost
-        // acknowledgement recognises its own committed link by this host id, and
-        // answers with the refresh token whose hash that attempt stored.
+        // A retry after a lost acknowledgement recognises its own committed link by this host
+        // id, and answers with the refresh token whose hash that attempt stored.
         Guid hostId = Guid.CreateVersion7();
         IssuedRefreshToken issuedRefreshToken = IssuedRefreshToken.New();
 

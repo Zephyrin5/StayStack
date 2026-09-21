@@ -23,7 +23,6 @@ public class CreateUnitHandler(
 {
     public async ValueTask<CreateUnitResponse> Handle(CreateUnitRequest request, CancellationToken cancellationToken)
     {
-        // Minted before anything that could retry (docs/adr/0025).
         Guid unitId = Guid.CreateVersion7();
 
         Property? property = await dbContext.Properties
