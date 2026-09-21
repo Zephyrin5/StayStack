@@ -1,11 +1,13 @@
 <Project>
+    <!-- The banned-API wiring every project shares. MSBuild imports only the nearest
+         Directory.Build.props on its own, so the root one is named here. -->
+    <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))"/>
+
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
-        <!-- A banned API is a build break, not a warning: it replaces a test that failed the suite. -->
-        <WarningsAsErrors>$(WarningsAsErrors);RS0030</WarningsAsErrors>
         <ArtifactsPivots>$(MSBuildProjectName)</ArtifactsPivots>
         <BaseOutputPath>$(MSBuildThisFileDirectory)artifacts\bin\$(MSBuildProjectName)\</BaseOutputPath>
         <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)artifacts\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>

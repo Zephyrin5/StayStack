@@ -16,7 +16,7 @@ public class HostConfiguration : IEntityTypeConfiguration<Host>
         builder.Property(o => o.ContactEmail).HasMaxLength(200).IsRequired();
         builder.Property(o => o.ContactPhone).HasMaxLength(50);
 
-        // DisplayName needs no HasConversion of its own - StayStackDbContext's
+        // DisplayName needs no HasConversion of its own - AppDbContext's
         // ConfigureConventions already applies LocalizedTextConverter to
         // every LocalizedText-typed property model-wide, same as
         // Property.Name/Unit.Name. Don't hand-roll a custom converter here

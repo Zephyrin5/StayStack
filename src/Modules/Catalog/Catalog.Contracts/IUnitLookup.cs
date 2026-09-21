@@ -53,7 +53,7 @@ public interface IUnitLookup
 
     /// <summary>
     ///     Resolves what a stay would cost right now, plus the unit's max
-    ///     occupancy for the same guard HoldAvailabilityHandler (Availability)
+    ///     occupancy for the same guard HoldAvailabilityHandler (Bookings)
     ///     needs before ever touching a hold - one call instead of two,
     ///     avoiding a duplicate Unit read the way GetUnitAsync alone would
     ///     require alongside this. Runs through the same PricingCalculator

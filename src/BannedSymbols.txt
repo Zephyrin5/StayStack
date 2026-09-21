@@ -1,2 +1,0 @@
-P:Npgsql.PostgresException.ConstraintName; Match a constraint by name through Persistence.ConstraintViolations (IsViolationOf, IsViolationOfAny, IsPrimaryKeyViolationOf), taking the name from the EF model or a shared constant.
-P:Npgsql.PostgresException.SqlState; A SQLSTATE alone gives the same answer to constraints that mean different things - use Persistence.ConstraintViolations, which matches by name (docs/adr/0025).

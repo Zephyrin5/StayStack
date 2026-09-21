@@ -161,8 +161,8 @@ public class ExpireUnpaidBookingsTests(IntegrationTestWebApplicationFactory fact
         // Act
         await job.ExpireAsync(null!, TestContext.Current.CancellationToken);
 
-        // Assert - both halves, which is the whole reason this job lives in
-        // Bookings rather than Availability. Releasing the hold alone would
+        // Assert - both halves, which is the whole reason one job owns the
+        // booking and its hold (docs/adr/0021). Releasing the hold alone would
         // leave the guest holding a booking with no inventory behind it;
         // cancelling alone would leave the range blocked forever.
         Assert.Equal(BookingStatus.Cancelled, await GetBookingStatusAsync(bookingId));

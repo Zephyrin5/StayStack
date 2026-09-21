@@ -17,7 +17,7 @@ public interface ICurrentUserProvider
 
     // Present only once BecomeHost has completed - see the "host_id"
     // claim in AuthTokenProvider. Null means "this caller isn't linked to
-    // a host", not "unknown" - IHostAuthorizationService.RequireHostId()
+    // a host", not "unknown" - IHostAuthorization.RequireHostId()
     // is what turns that into a real 403 where it matters.
     Guid? HostId { get; }
 

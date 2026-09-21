@@ -1,0 +1,14 @@
+<Project>
+    <PropertyGroup>
+        <!-- A banned API is a build break, not a warning: it replaces a test that failed the suite. -->
+        <WarningsAsErrors>$(WarningsAsErrors);RS0030</WarningsAsErrors>
+    </PropertyGroup>
+
+    <!-- BannedSymbols.txt states which APIs are unavailable and why. It is wired here, at the root,
+         so every project in the repository inherits it - including one added later, which is the
+         case a per-project reference would silently miss. -->
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all"/>
+        <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt"/>
+    </ItemGroup>
+</Project>

@@ -1,11 +1,13 @@
 // Proves concurrent inserts aligned by a Barrier are decided by the exclusion constraint, through
 // the handler's lock protocol and through none. With holds in shared lock mode the protocol test
 // fails on its first race: every loser is a deadlock victim rather than a clean rejection.
+using Bookings.Entities.Configurations;
 using BuildingBlocks.Persistence;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using NpgsqlTypes;
+using Persistence;
 using System.Diagnostics;
 namespace IntegrationTests.Features.Holds;
 
@@ -74,11 +76,15 @@ public class HoldExclusionConstraintTests(IntegrationTestWebApplicationFactory f
             await transaction.CommitAsync(TestContext.Current.CancellationToken);
             return Outcome.Inserted;
         }
-        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.ExclusionViolation)
+        catch (PostgresException ex) when (ex.IsViolationOf(UnitAvailabilityHoldConfiguration.OverlapExclusionConstraint))
         {
             return Outcome.RejectedByTheConstraint;
         }
+        // A deadlock has no constraint to name, so this is the one classification left that a
+        // SQLSTATE answers; BannedSymbols.txt refuses the read everywhere it would decide instead.
+#pragma warning disable RS0030
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.DeadlockDetected)
+#pragma warning restore RS0030
         {
             return Outcome.Deadlocked;
         }

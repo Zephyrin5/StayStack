@@ -17,13 +17,6 @@
         <Using Include="Xunit"/>
     </ItemGroup>
 
-    <!-- CommitFaults owns the commit hooks; BannedSymbols.txt is what keeps every other test out of
-         them, and says so at the point of use rather than in a scan. -->
-    <ItemGroup>
-        <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all"/>
-        <AdditionalFiles Include="BannedSymbols.txt"/>
-    </ItemGroup>
-
     <ItemGroup>
         <ProjectReference Include="..\..\src\Web\Api\Api.csproj"/>
     </ItemGroup>

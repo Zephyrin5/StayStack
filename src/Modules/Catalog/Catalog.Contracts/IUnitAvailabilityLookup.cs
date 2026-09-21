@@ -1,12 +1,12 @@
 ﻿namespace Catalog.Contracts;
 
 /// <summary>
-///     Lets Catalog ask Availability which units/dates currently have a
+///     Lets Catalog ask Bookings which units/dates currently have a
 ///     blocking hold or booking, without ever referencing
 ///     UnitAvailabilityHold, BookingsDb, or
 ///     unit_availability_holds directly. Declared here (Catalog is upstream
-///     of Availability in the module order - see docs/adr/0004) and
-///     implemented by Availability, which already depends on
+///     of Bookings in the module order - see docs/adr/0004) and
+///     implemented by Bookings, which already depends on
 ///     Catalog.Contracts for the reverse relationship
 ///     (IUnitLookup.ResolveStayPricingAsync), so implementing this costs it
 ///     nothing new.

@@ -16,6 +16,12 @@ namespace IntegrationTests.Features.Catalog;
 // a writer that never calls it: a bulk import, a data migration, a future
 // handler, raw SQL. These tests go around the checker deliberately - writing
 // straight through the DbContext - so what they exercise is the schema.
+//
+// Reads SqlState and ConstraintName directly, which BannedSymbols.txt refuses elsewhere: the
+// subject here is which constraint Postgres raised, and an exclusion violation and a unique-index
+// violation are the two outcomes these tests have to tell apart. ConstraintViolations is the
+// consumer of that fact, not a way to observe it.
+#pragma warning disable RS0030
 [Collection("Integration Tests")]
 public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory factory)
 {
@@ -232,3 +238,4 @@ public class PricingRuleConstraintTests(IntegrationTestWebApplicationFactory fac
     }
 
 }
+#pragma warning restore RS0030

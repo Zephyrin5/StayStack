@@ -16,9 +16,12 @@
 - One `AppDbContext`. A module reaches its own tables through its accessor
   (`BookingsDb`, `CatalogDb`, ...), and its raw SQL names its own schema.
   `ModuleBoundaryTests` enforces both.
-- Protocol tests in `tests/UnitTests/Persistence/` enforce invariants by
-  scanning source. If one fails, fix the code. Adding an allow-list entry
-  requires a justification written in the entry itself.
+- Invariants are enforced by the compiler wherever they can be: SS0001 and
+  SS0002 for identity minting, and `BannedSymbols.txt` at the repository root
+  (RS0030 as an error) for constraint matching and fault injection. The
+  architecture tests in `tests/UnitTests/Architecture/` scan source for what is
+  left, documentation references among them. If one fails, fix the code. A
+  suppression or an allow-list entry requires a justification in the entry itself.
 
 ## Design decisions
 

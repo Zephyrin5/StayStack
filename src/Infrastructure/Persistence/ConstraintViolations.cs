@@ -13,8 +13,9 @@ namespace Persistence;
 ///         the entity configuration and migration use for indexes and constraints.
 ///     </para>
 /// </summary>
-// The one file allowed to read a PostgresException's ConstraintName and SqlState: src/BannedSymbols.txt
-// bans both everywhere else, so a catch on SQLSTATE alone cannot be written outside this file.
+// The one file that decides from a PostgresException's ConstraintName and SqlState: BannedSymbols.txt
+// bans both for every project in the repository, so a catch on SQLSTATE alone cannot be written
+// outside this file without a suppression saying why.
 #pragma warning disable RS0030
 public static class ConstraintViolations
 {

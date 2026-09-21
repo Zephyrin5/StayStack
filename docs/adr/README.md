@@ -24,6 +24,8 @@ Each ADR is a numbered markdown file: `NNNN-short-title.md`. Keep the shape simp
 
 ## Index
 
+Numbers are never reused. A gap means a decision was withdrawn or folded into another one, and its number stays retired so a link written against it cannot come to mean something else.
+
 | # | Title | Status |
 |---|---|---|
 | [0001](0001-native-aot-compatibility.md) | Native AOT compatibility as a design constraint | Accepted |

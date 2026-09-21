@@ -4,7 +4,7 @@
 
 ## Context
 
-Localized text fields (property names, unit names) are modeled as `LocalizedText`, a value object backed by a `Dictionary<string, string>` and persisted as a single `jsonb` column via an EF Core value converter (`LocalizedTextConverter`, applied globally in `StayStackDbContext.ConfigureConventions`). Several read paths only need a subset of a `LocalizedText`'s data (e.g. `.Values` to flatten it into a plain dictionary for a response DTO) and would ideally project that directly in SQL rather than loading the whole entity.
+Localized text fields (property names, unit names) are modeled as `LocalizedText`, a value object backed by a `Dictionary<string, string>` and persisted as a single `jsonb` column via an EF Core value converter (`LocalizedTextConverter`, applied globally in `AppDbContext.ConfigureConventions`). Several read paths only need a subset of a `LocalizedText`'s data (e.g. `.Values` to flatten it into a plain dictionary for a response DTO) and would ideally project that directly in SQL rather than loading the whole entity.
 
 EF Core can translate simple property access through a value converter, but it cannot translate arbitrary member access (`.Values`, or any other method/property) on the *converted CLR type* into SQL inside a server-side `.Select()` - the conversion only runs when materializing a full entity, not as part of building the query.
 

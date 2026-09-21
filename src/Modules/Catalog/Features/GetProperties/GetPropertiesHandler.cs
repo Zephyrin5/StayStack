@@ -91,7 +91,7 @@ public class GetPropertiesHandler(
         }
         else if (request.Guests is not null)
         {
-            // No dates, so no Availability round trip needed at all - this
+            // No dates, so no availability round trip needed at all - this
             // is a plain SQL predicate the planner can index, not a
             // client-side id list round-tripped back as a Contains.
             query = query.Where(p => dbContext.Units.Any(u =>

@@ -35,7 +35,7 @@ public class DeletePromotionHandler(
 
         // Soft delete - existing PromotionRedemption rows and their audit
         // trail stay intact. The global soft-delete query filter (see
-        // StayStackDbContext) means an archived code also naturally stops
+        // AppDbContext) means an archived code also naturally stops
         // resolving via PromotionRedemption.RedeemAsync's own Code lookup,
         // with no extra Status check needed there.
         promotion.Archive(timeProvider.GetUtcNow(), currentUserProvider.UserId);

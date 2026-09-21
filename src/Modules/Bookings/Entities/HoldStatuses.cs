@@ -27,8 +27,8 @@ internal static class HoldStatuses
 
     /// <summary>
     ///     Checkout was submitted and a Booking exists, but nothing has been
-    ///     paid. Released by Bookings' own expiry job when the booking's
-    ///     PaymentDueAt passes - deliberately not by Availability's sweep,
+    ///     paid. Released by ExpireUnpaidBookingsJob when the booking's
+    ///     PaymentDueAt passes - deliberately not by ExpiredHoldsSweepJob,
     ///     which would free the range while leaving the guest holding a
     ///     booking with no inventory behind it.
     /// </summary>

@@ -1,0 +1,6 @@
+P:Npgsql.PostgresException.ConstraintName; Match a constraint by name through Persistence.ConstraintViolations (IsViolationOf, IsViolationOfAny, IsPrimaryKeyViolationOf), taking the name from the EF model or a shared constant.
+P:Npgsql.PostgresException.SqlState; A SQLSTATE alone gives the same answer to constraints that mean different things - use Persistence.ConstraintViolations, which matches by name (docs/adr/0025).
+T:Microsoft.EntityFrameworkCore.Diagnostics.DbTransactionInterceptor; A commit hook is a fault seam. CommitFaults owns the ones this repository has, and its entry points say which side of the commit a fault lands on (FailBeforeCommit, FailAfterCommit, FailAfterAutocommit).
+T:Microsoft.EntityFrameworkCore.Diagnostics.IDbTransactionInterceptor; A commit hook is a fault seam. CommitFaults owns the ones this repository has, and its entry points say which side of the commit a fault lands on.
+T:Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor; A command hook is a fault seam as well as a way to count round trips - inject failures through CommitFaults, and suppress this where the hook only observes.
+T:Microsoft.EntityFrameworkCore.Diagnostics.IDbCommandInterceptor; A command hook is a fault seam as well as a way to count round trips - inject failures through CommitFaults, and suppress this where the hook only observes.

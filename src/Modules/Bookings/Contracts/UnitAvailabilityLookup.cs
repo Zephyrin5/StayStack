@@ -6,11 +6,10 @@ namespace Bookings.Contracts;
 
 // internal, same reasoning as HoldConfirmation - Catalog should only ever reach
 // this through Catalog.Contracts.IUnitAvailabilityLookup, resolved via DI.
-// Implements a Catalog-defined interface rather than exposing this through
-// Availability's own Contracts project - Availability already legitimately
-// depends on Catalog.Contracts (for IUnitLookup.ResolveStayPricingAsync),
-// but Catalog must never depend back on Availability.Contracts. See
-// docs/adr/0004.
+// Implements a Catalog-defined interface rather than exposing it through
+// Bookings.Contracts: Bookings already depends on Catalog.Contracts (for
+// IUnitLookup.ResolveStayPricingAsync), and Catalog is upstream, so it must
+// never depend back. See docs/adr/0004.
 internal class UnitAvailabilityLookup(BookingsDb dbContext) : IUnitAvailabilityLookup
 {
     public async Task<IReadOnlyList<ActiveHoldRange>> GetActiveHoldRangesAsync(

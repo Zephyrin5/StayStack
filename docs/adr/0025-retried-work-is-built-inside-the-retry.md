@@ -34,7 +34,7 @@ A handler correct for only the first reports failure, or a false conflict, for w
 
 ### 3. Constraint violations are matched by name
 
-Constraints on one table raise the same SQLSTATE with different meanings: a primary key colliding with this operation's own committed row, a unique index held by another row, an index whose collision is transient. `Persistence.ConstraintViolations` is the only code that inspects a violation (`IsViolationOf`, `IsViolationOfAny`, `IsPrimaryKeyViolationOf`); a violation of any constraint a catch does not name propagates. Names come from the EF model for primary keys, and from constants the entity configuration or migration also uses for indexes and raw-SQL constraints.
+Constraints on one table raise the same SQLSTATE with different meanings: a primary key colliding with this operation's own committed row, a unique index held by another row, an index whose collision is transient. `Persistence.ConstraintViolations` is the only code that decides from a violation (`IsViolationOf`, `IsViolationOfAny`, `IsPrimaryKeyViolationOf`); a violation of any constraint a catch does not name propagates. A test asserting which constraint the database raised is the exception, and says so where it suppresses the ban. Names come from the EF model for primary keys, and from constants the entity configuration or migration also uses for indexes and raw-SQL constraints.
 
 Primary-key recovery depends on two database facts: the key carries the model's name, and it is the table's oldest unique index. A re-inserted row violates the primary key and every other unique index at once, and Postgres reports the first index it checks, in creation order; a unique index older than the key would be reported instead, and recovery would answer a domain error for the operation's own row.
 
@@ -47,11 +47,12 @@ Primary-key recovery depends on two database facts: the key carries the model's 
 
 ## Consequences
 
-- **Enforced structurally** by source-scanning tests in `tests/UnitTests/Persistence/`, which prove coverage, not correctness:
-  - `RetryIdentityProtocolTests` - no retried delegate mints an identity, directly or through calls it can resolve.
-  - `EntityIdentityProtocolTests` - no entity mints its own identity.
-  - `ConstraintViolationProtocolTests` - only `ConstraintViolations` inspects a violation.
+- **Enforced by the compiler**, which proves coverage, not correctness:
+  - `EntityMintingAnalyzer` (SS0001) - a type deriving from `Entity` that calls `Guid.NewGuid`, `Guid.CreateVersion7` or a `SecureToken` generator is a build error.
+  - `RetryMintingAnalyzer` (SS0002) - the same calls inside a lambda passed to `ITransactionRunner.ExecuteAsync` or an execution strategy's `ExecuteAsync`, and inside the methods that lambda calls whose bodies are in the same file. `[AllowsMintingInRetry("reason")]` exempts a method a retry may produce a different value for.
+  - `MintingAnalyzerTests` holds both analyzers to that boundary, accepting and rejecting cases alike.
+  - `BannedSymbols.txt`, wired at the repository root so every project inherits it, makes `RS0030` an error on `PostgresException.SqlState` and `.ConstraintName` outside `ConstraintViolations`, and on EF's transaction and command interceptors outside `CommitFaults`. A file that needs one suppresses `RS0030` and states why in the suppression.
 - **Enforced behaviourally** by lost-acknowledgement tests for each recovering path (`CreationAmbiguityTests`, `CatalogRetryTests`, `CancelRetryTests`, `ConfirmRetryTests`, `BecomeHostTests`, `RefreshTokenRetryTests`, `CommitAmbiguitySpecTests`' payment test, the create-handler tests) and by `PrimaryKeyConstraintTests`, which pins the primary-key name and ordering facts against the live schema.
-- **Failure injection goes through `CommitFaults`**, whose entry points name the case: `FailBeforeCommit` (the commit fails), `FailAfterCommit` (an explicit transaction's commit lands, its acknowledgement is lost), `FailAfterAutocommit` (the same for a statement EF sent without a transaction, which never reaches a commit hook). A hook on the wrong side of a commit proves the other case; `FaultInjectionProtocolTests` fails any integration test that names a transaction or command interceptor directly.
+- **Failure injection goes through `CommitFaults`**, whose entry points name the case: `FailBeforeCommit` (the commit fails), `FailAfterCommit` (an explicit transaction's commit lands, its acknowledgement is lost), `FailAfterAutocommit` (the same for a statement EF sent without a transaction, which never reaches a commit hook). A hook on the wrong side of a commit proves the other case, so naming EF's interceptors anywhere else is a build error rather than a review note.
 - **Faults are targeted at the commit under test.** Test hosts run TickerQ, whose jobs commit on their own schedule and would otherwise take the injection while the test still passes.
 - **Committed state is asserted through a fresh context.** A context that accepted its changes and failed to commit reads exactly like success.

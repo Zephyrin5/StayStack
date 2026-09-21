@@ -44,7 +44,7 @@ public class StaySearchPolicyOptions
     ///         The upper end of the Range is deliberately far tighter than
     ///         MaxLeadTimeDays'. <c>GetPropertiesHandler</c> depends on this
     ///         for more than product policy: on its own, it is what keeps the
-    ///         blocked-unit set Availability returns proportional to real
+    ///         blocked-unit set IUnitAvailabilityLookup returns proportional to real
     ///         occupancy in a bounded window rather than to every unit ever
     ///         booked. That set is the units booked across the requested
     ///         window, so it scales with the window's width - which is this

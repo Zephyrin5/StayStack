@@ -29,7 +29,7 @@ Identity's schema is written out in `IdentityModel` rather than inherited from `
 
 The runner takes the context's execution strategy and runs the work inside it. Each attempt clears the change tracker, begins the transaction at the given isolation level, runs the work, and commits; when it does not commit, the tracker is cleared on the way out. Entities saved and rolled back would otherwise read as `Unchanged` while describing rows that do not exist.
 
-Operations inside the work do not retry on their own - EF suspends execution strategies inside a running one - so an identity a retry must recognise is minted before `ExecuteAsync` ([ADR-0025](0025-retried-work-is-built-inside-the-retry.md)). `RetryIdentityProtocolTests` scans runner delegates as retry delegates.
+Operations inside the work do not retry on their own - EF suspends execution strategies inside a running one - so an identity a retry must recognise is minted before `ExecuteAsync` ([ADR-0025](0025-retried-work-is-built-inside-the-retry.md)). `RetryMintingAnalyzer` (SS0002) makes minting inside the work a build error. It keys on the call: the lambda has to be written at the `ExecuteAsync` argument, and a mint it reaches through a helper is seen only while that helper's body is in the same file. A delegate built elsewhere, or a helper in another file, is outside what the compiler can say - which is why the lost-acknowledgement tests, not the analyzer, are the evidence.
 
 ### Contracts save their own changes, and own no transaction
 

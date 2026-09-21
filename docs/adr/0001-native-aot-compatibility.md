@@ -32,7 +32,7 @@ Warnings are left visible rather than suppressed, so the list below is what the 
 
 | Diagnostic | Where | Status |
 |---|---|---|
-| `IL2026`/`IL3050` on `DbContext(DbContextOptions)` | `StayStackDbContext` | EF Core; waits on EF's NativeAOT support |
+| `IL2026`/`IL3050` on `DbContext(DbContextOptions)` | `AppDbContext` | EF Core; waits on EF's NativeAOT support |
 | `IL2026`/`IL3050` on `Expression.Property`/`Expression.Lambda` | `ModelBuilderExtensions.ApplySoftDeleteQueryFilter` | Model building; revisit with EF compiled models |
 
 Generic helpers that pass a type parameter to EF (`CommittedInsertRecovery`, `ConstraintViolations`) carry the `DynamicallyAccessedMembers` annotation EF's `Set<TEntity>` and `FindEntityType` require.

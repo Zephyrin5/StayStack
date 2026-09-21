@@ -465,7 +465,7 @@ public class UpdateDeletePropertyAndUnitEndpointTests(IntegrationTestWebApplicat
         //
         // Whether a past booking still blocks archival is IUnitArchivalGuard's
         // question, and it answers it correctly from the booking's own dates.
-        // Availability was re-deciding it from a row that has none.
+        // The hold lookup was re-deciding it from a row that has none.
         string hostAccessToken = await SeedHostUserAsync();
         Guid propertyId = await CreatePropertyAsync(hostAccessToken);
         Guid unitId = await CreateUnitAsync(hostAccessToken, propertyId);
